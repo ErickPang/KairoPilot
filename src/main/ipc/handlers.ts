@@ -1,15 +1,14 @@
-import { ipcMain, dialog, app } from 'electron';
+import { ipcMain, dialog } from 'electron';
 import { AgentRuntime } from '../core/agent/runtime';
 import { OpenAIProvider } from '../core/llm/provider';
 import { PermissionGuard } from '../core/security/permissions';
 import { ReadFileTool, WriteFileTool, ListDirectoryTool } from '../core/tools/filesystem';
-import { ExecuteCommandTool, createExecuteCommandTool } from '../core/tools/shell';
+import { createExecuteCommandTool } from '../core/tools/shell';
 import { SystemInfoTool } from '../core/tools/system';
 import path from 'path';
 import { 
   getAgentConfig, 
   saveAgentConfig, 
-  LegacyAgentConfig,
   getKairoPilotConfig,
   getModels,
   saveModel,

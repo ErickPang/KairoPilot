@@ -411,7 +411,15 @@ function App() {
           handleSend={handleSend} 
           handleClear={handleClear} 
           systemStats={systemStats} 
-          messagesEndRef={messagesEndRef} 
+          messagesEndRef={messagesEndRef}
+          models={models}
+          activeModelId={agents.find(a => a.id === activeAgentId)?.modelConfigId || null}
+          onModelChange={(modelId: string) => {
+            const activeAgent = agents.find(a => a.id === activeAgentId);
+            if (activeAgent) {
+              handleSaveAgent({ ...activeAgent, modelConfigId: modelId });
+            }
+          }}
         />
       )}
       

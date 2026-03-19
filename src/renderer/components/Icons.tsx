@@ -15,7 +15,8 @@ import {
   Cpu,
   ArrowLeft,
   Check,
-  Terminal
+  Terminal,
+  ChevronDown
 } from 'lucide-react';
 import { CSSProperties } from 'react';
 
@@ -32,6 +33,10 @@ export const IconArrowLeft = ({ size = 24, className = '', ...props }: IconProps
 
 export const IconCheck = ({ size = 24, className = '', ...props }: IconProps) => (
   <Check size={size} className={className} strokeWidth={1.5} {...props} />
+);
+
+export const IconChevronDown = ({ size = 24, className = '', ...props }: IconProps) => (
+  <ChevronDown size={size} className={className} strokeWidth={1.5} {...props} />
 );
 
 export const IconTerminal = ({ size = 24, className = '', ...props }: IconProps) => (

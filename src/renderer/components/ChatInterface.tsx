@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Message, SystemStats } from '../types';
-import { IconUser, IconBot, IconTool, IconSend, IconTrash } from './Icons';
+import { Message, SystemStats, ModelConfig } from '../types';
+import { IconUser, IconBot, IconTool, IconSend, IconTrash, IconCpu, IconChevronDown, IconCheck } from './Icons';
 
 interface ChatInterfaceProps {
   messages: Message[];
@@ -13,6 +13,9 @@ interface ChatInterfaceProps {
   handleClear: () => void;
   systemStats: SystemStats | null;
   messagesEndRef: React.RefObject<HTMLDivElement>;
+  models: ModelConfig[];
+  activeModelId: string | null;
+  onModelChange: (modelId: string) => void;
 }
 
 export function ChatInterface({ 
@@ -23,11 +26,28 @@ export function ChatInterface({
   handleSend, 
   handleClear, 
   systemStats,
-  messagesEndRef 
+  messagesEndRef,
+  models,
+  activeModelId,
+  onModelChange
 }: ChatInterfaceProps) {
   
   const [isDragging, setIsDragging] = useState(false);
+  const [isModelDropdownOpen, setIsModelDropdownOpen] = useState(false);
   const dragCounter = React.useRef(0);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsModelDropdownOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [dropdownRef]);
 
   const handleDragEnter = (e: React.DragEvent) => {
     e.preventDefault();
@@ -164,10 +184,108 @@ export function ChatInterface({
             }}
           />
           <div className="input-actions">
-            <div className="input-tools">
-              <span style={{ fontSize: '0.75rem', color: 'var(--muted-fg)' }}>
-                Markdown supported
-              </span>
+            <div className="input-tools" style={{ display: 'flex', alignItems: 'center' }}>
+              <div 
+                className="model-selector" 
+                ref={dropdownRef}
+                style={{ 
+                  position: 'relative',
+                  display: 'flex', 
+                  alignItems: 'center'
+                }}
+              >
+                <div 
+                  onClick={() => !loading && setIsModelDropdownOpen(!isModelDropdownOpen)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    background: 'var(--input-bg)',
+                    border: '1px solid var(--border)',
+                    borderRadius: 'var(--radius-md)',
+                    padding: '4px 10px',
+                    fontSize: '0.8rem',
+                    color: 'var(--foreground)',
+                    cursor: loading ? 'not-allowed' : 'pointer',
+                    userSelect: 'none',
+                    opacity: loading ? 0.7 : 1,
+                    transition: 'all 0.2s ease'
+                  }}
+                >
+                  <IconCpu size={14} style={{ marginRight: '6px', color: 'var(--muted-fg)' }} />
+                  <span style={{ marginRight: '8px' }}>
+                    {activeModelId 
+                      ? models.find(m => m.id === activeModelId)?.name || 'Select a model...'
+                      : 'Select a model...'}
+                  </span>
+                  <IconChevronDown size={12} style={{ color: 'var(--muted-fg)' }} />
+                </div>
+
+                {isModelDropdownOpen && (
+                  <div style={{
+                    position: 'absolute',
+                    bottom: '100%',
+                    left: 0,
+                    marginBottom: '8px',
+                    width: 'max-content',
+                    minWidth: '200px',
+                    background: 'var(--sidebar-bg)',
+                    border: '1px solid var(--border)',
+                    borderRadius: 'var(--radius-md)',
+                    boxShadow: 'var(--shadow-lg)',
+                    zIndex: 50,
+                    overflow: 'hidden',
+                    display: 'flex',
+                    flexDirection: 'column'
+                  }}>
+                    <div style={{ 
+                      padding: '8px 12px', 
+                      fontSize: '0.75rem', 
+                      fontWeight: 600, 
+                      color: 'var(--muted-fg)',
+                      borderBottom: '1px solid var(--border)',
+                      backgroundColor: 'var(--background)'
+                    }}>
+                      Select a model
+                    </div>
+                    <div style={{ maxHeight: '200px', overflowY: 'auto', padding: '4px' }}>
+                      {models.map(m => (
+                        <div 
+                          key={m.id}
+                          onClick={() => {
+                            onModelChange(m.id);
+                            setIsModelDropdownOpen(false);
+                          }}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            padding: '8px',
+                            borderRadius: 'var(--radius-sm)',
+                            cursor: 'pointer',
+                            fontSize: '0.8rem',
+                            color: 'var(--foreground)',
+                            transition: 'background-color 0.2s ease',
+                          }}
+                          onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'var(--sidebar-accent)'}
+                          onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                        >
+                          <div style={{ width: '20px', display: 'flex', justifyContent: 'center' }}>
+                            {m.id === activeModelId && <IconCheck size={14} style={{ color: 'var(--primary)' }} />}
+                          </div>
+                          <div style={{ display: 'flex', flexDirection: 'column' }}>
+                            <span style={{ fontWeight: 500 }}>{m.name}</span>
+                            <span style={{ fontSize: '0.7rem', color: 'var(--muted-fg)' }}>{m.model}</span>
+                          </div>
+                        </div>
+                      ))}
+                      {models.length === 0 && (
+                        <div style={{ padding: '8px', fontSize: '0.8rem', color: 'var(--muted-fg)', textAlign: 'center' }}>
+                          No models available
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
             <button 
               className="send-btn" 
