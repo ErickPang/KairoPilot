@@ -4,8 +4,10 @@ import { LLMProvider, ChatMessage, ToolDefinition, LLMConfig } from './types';
 export class OpenAIProvider implements LLMProvider {
   private client: OpenAI;
   private model: string;
+  private providerName: string;
 
   constructor(config: LLMConfig) {
+    this.providerName = config.provider;
     let baseURL = config.baseUrl;
     if (!baseURL) {
       switch (config.provider) {
@@ -13,7 +15,7 @@ export class OpenAIProvider implements LLMProvider {
           baseURL = 'http://localhost:11434/v1'; 
           break;
         case 'deepseek': 
-          baseURL = 'https://api.deepseek.com'; 
+          baseURL = 'https://api.deepseek.com/v1'; 
           break;
         case 'zhipu': 
           baseURL = 'https://open.bigmodel.cn/api/paas/v4'; 
@@ -98,10 +100,14 @@ export class OpenAIProvider implements LLMProvider {
 
   async listModels(): Promise<string[]> {
     try {
-      const response = await this.client.models.list();
+      // Add a short timeout for listing models to prevent UI hanging
+      const response = await this.client.models.list({
+        timeout: 5000
+      });
       return response.data.map(model => model.id);
-    } catch (error) {
-      console.error('Failed to list models:', error);
+    } catch (error: any) {
+      // Log a simplified warning instead of full stack trace
+      console.warn(`[${this.providerName.toUpperCase()} Provider] Failed to list models: ${error.message}`);
       return [];
     }
   }

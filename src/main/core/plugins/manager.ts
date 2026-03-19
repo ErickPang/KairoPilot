@@ -223,12 +223,22 @@ export class PluginManager {
     return true;
   }
 
-  async loadAllTools(): Promise<ToolDefinition[]> {
+  async loadAllTools(agentId?: string): Promise<ToolDefinition[]> {
     await this.init();
     const installed = await this.getInstalledPlugins();
+    
+    // Filter plugins based on scope
+    const pluginsToLoad = installed.filter(p => {
+      if (p.scope === 'public') return true;
+      if (agentId && p.scope === `agent:${agentId}`) return true;
+      // Fallback for legacy 'workspace' scope if we still want to support it
+      if (!agentId && p.scope === 'workspace') return true;
+      return false;
+    });
+
     let allTools: ToolDefinition[] = [];
 
-    for (const plugin of installed) {
+    for (const plugin of pluginsToLoad) {
       try {
         const code = await fs.readFile(plugin.filePath, 'utf-8');
         

@@ -125,7 +125,7 @@ async function initializeAgent(config: ResolvedAgentConfig, sender?: WebContents
 
   // Load and register dynamic plugins
   try {
-    const dynamicTools = await pluginManager.loadAllTools();
+    const dynamicTools = await pluginManager.loadAllTools(agent.id);
     for (const tool of dynamicTools) {
       currentAgent.registerTool(tool as any);
       console.log(`[Agent] Registered dynamic tool: ${tool.name}`);
@@ -307,7 +307,7 @@ export function setupHandlers() {
       });
       return await llm.listModels();
     } catch (error: any) {
-      console.error('Failed to list models:', error);
+      console.warn(`[Handlers] Failed to list models: ${error.message}`);
       return [];
     }
   });
