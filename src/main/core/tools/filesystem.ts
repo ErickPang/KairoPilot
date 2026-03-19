@@ -50,3 +50,19 @@ export const ListDirectoryTool: ToolDefinition = {
     }
   },
 };
+
+export const DeleteFileTool: ToolDefinition = {
+  name: 'delete_file',
+  description: 'Delete a file or directory at the specified path.',
+  parameters: z.object({
+    path: z.string().describe('The absolute path to the file or directory to delete.'),
+  }),
+  execute: async ({ path }: { path: string }) => {
+    try {
+      await fs.remove(path); // fs-extra remove handles both files and directories
+      return { success: true };
+    } catch (error: any) {
+      throw new Error(`Failed to delete path: ${error.message}`);
+    }
+  },
+};

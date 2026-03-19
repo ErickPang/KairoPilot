@@ -1,0 +1,121 @@
+.plugin-tabs {
+  display: flex;
+  gap: 1rem;
+  margin-top: 1rem;
+  border-bottom: 1px solid var(--border);
+  width: 100%;
+}
+
+.plugin-tab {
+  background: none;
+  border: none;
+  padding: 0.5rem 1rem;
+  font-size: 0.95rem;
+  color: var(--muted-fg);
+  cursor: pointer;
+  position: relative;
+  transition: color 0.2s ease;
+}
+
+.plugin-tab:hover {
+  color: var(--foreground);
+}
+
+.plugin-tab.active {
+  color: var(--primary);
+  font-weight: 500;
+}
+
+.plugin-tab.active::after {
+  content: '';
+  position: absolute;
+  bottom: -1px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background-color: var(--primary);
+}
+
+.skill-category-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--foreground);
+  margin-bottom: 1rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--sidebar-border);
+}
+
+.skill-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.skill-list-item {
+  background-color: var(--background);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 1rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.skill-list-item:hover {
+  border-color: var(--primary-muted);
+  box-shadow: var(--shadow-sm);
+}
+
+.skill-item-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.skill-item-details {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.9rem;
+  color: var(--foreground);
+}
+
+.skill-meta {
+  margin-top: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.8rem;
+  color: var(--muted-fg);
+}
+
+.empty-state {
+  text-align: center;
+  padding: 2rem;
+  color: var(--muted-fg);
+  background-color: var(--sidebar-bg);
+  border-radius: var(--radius-md);
+  font-size: 0.9rem;
+}
+
+.modal-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal-content {
+  background-color: var(--sidebar-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 1.5rem;
+  width: 90%;
+  max-width: 400px;
+  box-shadow: var(--shadow-lg);
+}

@@ -35,6 +35,8 @@
   --muted-fg: #71717a;
   --destructive: #ef4444;
   --destructive-fg: #ffffff;
+  --success: #10b981;
+  --danger: #ef4444;
 
   /* Dimensions */
   --radius-sm: 0.375rem;

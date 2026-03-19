@@ -7,7 +7,8 @@ import { SettingsSidebar } from './components/SettingsSidebar';
 import { ChatInterface } from './components/ChatInterface';
 import { ConfirmationModal } from './components/ConfirmationModal';
 import AuditLogViewer from './components/AuditLogViewer';
-import { IconChat, IconShield, IconSettings } from './components/Icons';
+import { PluginStorePanel } from './components/PluginStorePanel';
+import { IconChat, IconShield, IconSettings, IconPlugin } from './components/Icons';
 
 function App() {
   const [models, setModels] = useState<ModelConfig[]>([]);
@@ -22,7 +23,7 @@ function App() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [confirmationRequest, setConfirmationRequest] = useState<{ id: string; tool: string; args: any } | null>(null);
-  const [activeTab, setActiveTab] = useState<'chat' | 'settings' | 'audit'>('chat');
+  const [activeTab, setActiveTab] = useState<'chat' | 'plugins' | 'settings' | 'audit'>('chat');
   const [activeConfigSection, setActiveConfigSection] = useState<string>('model');
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -365,6 +366,14 @@ function App() {
         >
           <IconChat size={24} />
         </div>
+
+        <div 
+          className={`nav-icon ${activeTab === 'plugins' ? 'active' : ''}`}
+          onClick={() => setActiveTab('plugins')}
+          title="Skills"
+        >
+          <IconPlugin size={24} />
+        </div>
         
         <div className="nav-spacer" />
         
@@ -421,6 +430,12 @@ function App() {
             }
           }}
         />
+      )}
+
+      {activeTab === 'plugins' && (
+        <div className="main-content" style={{ padding: 0, height: '100%', overflow: 'hidden' }}>
+          <PluginStorePanel />
+        </div>
       )}
       
       {activeTab === 'settings' && (

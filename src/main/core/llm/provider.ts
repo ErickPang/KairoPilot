@@ -45,18 +45,44 @@ export class OpenAIProvider implements LLMProvider {
       function: {
         name: tool.name,
         description: tool.description,
-        // Zod schema needs to be converted to JSON Schema for OpenAI
-        // For simplicity, we assume tools handle their own schema conversion or we use a library like zod-to-json-schema
-        // But OpenAI SDK helper `zodFunction` is deprecated in favor of manual definition or other helpers.
-        // Let's use a simplified approach for now: passing parameters as any, assuming it's JSON Schema compatible
-        // In a real implementation, we should use `zod-to-json-schema`
         parameters: (tool.parameters as any) 
       }
     }));
 
+    // Keep track of the last assistant message's tool calls to repair broken history
+    let lastToolCalls: any[] = [];
+
+    const formattedMessages = messages.map(msg => {
+      if (msg.role === 'assistant' && msg.tool_calls) {
+        lastToolCalls = msg.tool_calls;
+        return msg;
+      }
+      if (msg.role === 'tool') {
+        // Try to recover missing tool_call_id from the last assistant message
+        let callId = msg.tool_call_id;
+        if (!callId && lastToolCalls.length > 0) {
+          const matchedCall = lastToolCalls.find((call: any) => call.function?.name === msg.name);
+          if (matchedCall) {
+            callId = matchedCall.id;
+          } else {
+            callId = lastToolCalls[0].id;
+          }
+        }
+        
+        return {
+          role: msg.role,
+          content: msg.content,
+          name: msg.name,
+          // Fallback to a generated ID to prevent API serialization errors
+          tool_call_id: callId || `call_${Math.random().toString(36).substring(2)}`
+        };
+      }
+      return msg;
+    });
+
     const response = await this.client.chat.completions.create({
       model: this.model,
-      messages: messages as any,
+      messages: formattedMessages as any,
       tools: openaiTools && openaiTools.length > 0 ? openaiTools : undefined,
     });
 

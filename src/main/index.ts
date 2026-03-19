@@ -6,12 +6,18 @@ import fs from 'node:fs'
 import { setupHandlers } from './ipc/handlers'
 import fixPath from 'fix-path'
 
-// Set userData path to ~/.KairoPilot
-const userDataPath = path.join(os.homedir(), '.KairoPilot')
+// Set userData path to ~/.kairopilot
+const userDataPath = path.join(os.homedir(), '.kairopilot')
 if (!fs.existsSync(userDataPath)) {
   fs.mkdirSync(userDataPath, { recursive: true })
 }
 app.setPath('userData', userDataPath)
+
+// Ensure default workspace directory exists
+const defaultWorkspacePath = path.join(userDataPath, 'workspace')
+if (!fs.existsSync(defaultWorkspacePath)) {
+  fs.mkdirSync(defaultWorkspacePath, { recursive: true })
+}
 
 fixPath()
 const __filename = fileURLToPath(import.meta.url)

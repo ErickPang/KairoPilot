@@ -16,7 +16,8 @@ import {
   ArrowLeft,
   Check,
   Terminal,
-  ChevronDown
+  ChevronDown,
+  Puzzle
 } from 'lucide-react';
 import { CSSProperties } from 'react';
 
@@ -97,4 +98,8 @@ export const IconRefresh = ({ size = 24, className = '', ...props }: IconProps) 
 
 export const IconFolder = ({ size = 24, className = '', ...props }: IconProps) => (
   <Folder size={size} className={className} strokeWidth={1.5} {...props} />
+);
+
+export const IconPlugin = ({ size = 24, className = '', ...props }: IconProps) => (
+  <Puzzle size={size} className={className} strokeWidth={1.5} {...props} />
 );

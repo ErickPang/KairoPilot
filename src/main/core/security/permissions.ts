@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import path from 'path';
+import fs from 'fs';
 
 // Define the permission schema
 export const PermissionSchema = z.object({
@@ -20,6 +21,19 @@ export const PermissionSchema = z.object({
 
 export type PermissionConfig = z.infer<typeof PermissionSchema>;
 
+// Hardcoded blacklist of sensitive directories that AI should never access
+const SENSITIVE_DIRS_BLACKLIST = new Set([
+  '.ssh',
+  '.gnupg',
+  '.aws',
+  '.kube',
+  'System32',
+  'AppData',
+  'Library/Application Support', // macOS app data
+  'node_modules', // Often too large, can cause issues, though arguably not a security risk like .ssh
+  '.git'
+]);
+
 export class PermissionGuard {
   private config: PermissionConfig;
 
@@ -28,8 +42,20 @@ export class PermissionGuard {
   }
 
   /**
+   * Check if a path is safe and strictly contained within the base path.
+   * This prevents directory traversal attacks (e.g. ../../etc/passwd)
+   */
+  private isPathSafe(basePath: string, targetPath: string): boolean {
+    const resolvedBase = path.resolve(basePath);
+    const resolvedTarget = path.resolve(targetPath);
+    // It must start with the base path + separator (to avoid matching /project-evil with /project),
+    // or it must be exactly the base path.
+    return resolvedTarget.startsWith(resolvedBase + path.sep) || resolvedTarget === resolvedBase;
+  }
+
+  /**
    * Check if a file path is allowed for reading or writing.
-   * Enforces strict path containment within allowed directories.
+   * Enforces strict path containment within allowed directories and blocks sensitive paths.
    */
   checkFileSystem(targetPath: string, mode: 'read' | 'write'): boolean {
     const isRead = mode === 'read';
@@ -38,14 +64,35 @@ export class PermissionGuard {
     if (isRead && !this.config.fileSystem.read) return false;
     if (isWrite && !this.config.fileSystem.write) return false;
 
-    const absoluteTarget = path.resolve(targetPath);
-    
-    // Check if target is within any allowed path
+    let absoluteTarget = path.resolve(targetPath);
+
+    // Resolve realpath to prevent symlink escape attacks (if the file/dir exists)
+    try {
+      if (fs.existsSync(absoluteTarget)) {
+        absoluteTarget = fs.realpathSync(absoluteTarget);
+      }
+    } catch {
+      // Ignore if we can't resolve realpath (e.g. permission issues during resolution)
+    }
+
+    // 1. Check against hardcoded sensitive directories
+    const pathSegments = absoluteTarget.split(path.sep);
+    for (const segment of pathSegments) {
+      if (SENSITIVE_DIRS_BLACKLIST.has(segment)) {
+        console.warn(`[Security] Blocked access to sensitive directory: ${segment} in path ${absoluteTarget}`);
+        return false;
+      }
+    }
+
+    // 2. Prevent accessing root directories directly (e.g. /, C:\)
+    if (absoluteTarget === path.parse(absoluteTarget).root) {
+      console.warn(`[Security] Blocked access to filesystem root: ${absoluteTarget}`);
+      return false;
+    }
+
+    // 3. Check if target is safely contained within any allowed workspace path
     return this.config.fileSystem.allowedPaths.some(allowedPath => {
-      const absoluteAllowed = path.resolve(allowedPath);
-      // Ensure we don't accidentally allow parent traversal
-      const relative = path.relative(absoluteAllowed, absoluteTarget);
-      return !relative.startsWith('..') && !path.isAbsolute(relative);
+      return this.isPathSafe(allowedPath, absoluteTarget);
     });
   }
 

@@ -111,7 +111,7 @@ export class AgentRuntime {
             role: 'tool',
             content: result,
             name: toolName,
-            tool_call_id: call.id
+            tool_call_id: call.id // OpenAI requires this ID to match the tool call
           };
 
           this.history.push(toolMessage);
@@ -131,8 +131,8 @@ export class AgentRuntime {
   private async checkPermission(toolName: string, args: any) {
     // This maps specific tools to permission checks
     // For MVP, we hardcode some known tools
-    if (toolName === 'read_file' || toolName === 'write_file' || toolName === 'list_directory') {
-      const mode = toolName === 'write_file' ? 'write' : 'read';
+    if (toolName === 'read_file' || toolName === 'write_file' || toolName === 'list_directory' || toolName === 'delete_file') {
+      const mode = (toolName === 'write_file' || toolName === 'delete_file') ? 'write' : 'read';
       // For list_directory, we check read permission on the path
       if (!this.permissionGuard.checkFileSystem(args.path, mode)) {
         throw new Error(`Permission Denied: File System access to ${args.path} is not allowed.`);
@@ -147,7 +147,7 @@ export class AgentRuntime {
 
     // --- HUMAN-IN-THE-LOOP CHECK ---
     // High-risk tools require explicit user confirmation
-    const highRiskTools = ['execute_command', 'write_file'];
+    const highRiskTools = ['execute_command', 'write_file', 'delete_file'];
     if (highRiskTools.includes(toolName) && this.confirmAction) {
       console.log(`[Agent] Requesting confirmation for ${toolName}`);
       const approved = await this.confirmAction(toolName, args);

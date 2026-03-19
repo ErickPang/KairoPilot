@@ -2,7 +2,7 @@ import { ipcMain, dialog } from 'electron';
 import { AgentRuntime } from '../core/agent/runtime';
 import { OpenAIProvider } from '../core/llm/provider';
 import { PermissionGuard } from '../core/security/permissions';
-import { ReadFileTool, WriteFileTool, ListDirectoryTool } from '../core/tools/filesystem';
+import { ReadFileTool, WriteFileTool, ListDirectoryTool, DeleteFileTool } from '../core/tools/filesystem';
 import { createExecuteCommandTool } from '../core/tools/shell';
 import { SystemInfoTool } from '../core/tools/system';
 import path from 'path';
@@ -115,12 +115,24 @@ async function initializeAgent(config: ResolvedAgentConfig, sender?: WebContents
       });
    });
    
-   // Register Tools
+  // Register Tools
   currentAgent.registerTool(ReadFileTool as any);
   currentAgent.registerTool(WriteFileTool as any);
   currentAgent.registerTool(ListDirectoryTool as any);
+  currentAgent.registerTool(DeleteFileTool as any);
   currentAgent.registerTool(createExecuteCommandTool(workspace) as any);
   currentAgent.registerTool(SystemInfoTool as any);
+
+  // Load and register dynamic plugins
+  try {
+    const dynamicTools = await pluginManager.loadAllTools();
+    for (const tool of dynamicTools) {
+      currentAgent.registerTool(tool as any);
+      console.log(`[Agent] Registered dynamic tool: ${tool.name}`);
+    }
+  } catch (error) {
+    console.error('Failed to load dynamic plugins:', error);
+  }
   
   return true;
 }
@@ -157,7 +169,40 @@ let previousCpus = os.cpus();
     throw new Error("Invalid configuration provided to resolveAgentConfig");
   }
 
+import { pluginManager } from '../core/plugins/manager';
+
 export function setupHandlers() {
+  // --- Plugin Store Handlers ---
+  ipcMain.handle('plugins:getStore', async () => {
+    return pluginManager.getStorePlugins();
+  });
+
+  ipcMain.handle('plugins:getInstalled', async () => {
+    return pluginManager.getInstalledPlugins();
+  });
+
+  ipcMain.handle('plugins:install', async (_, args) => {
+    try {
+      const id = typeof args === 'string' ? args : args.id;
+      const scope = typeof args === 'string' ? 'public' : (args.scope || 'public');
+      await pluginManager.installPlugin(id, scope);
+      return { success: true };
+    } catch (e: any) {
+      return { success: false, error: e.message };
+    }
+  });
+
+  ipcMain.handle('plugins:uninstall', async (_, args) => {
+    try {
+      const id = typeof args === 'string' ? args : args.id;
+      const scope = typeof args === 'string' ? 'public' : (args.scope || 'public');
+      await pluginManager.uninstallPlugin(id, scope);
+      return { success: true };
+    } catch (e: any) {
+      return { success: false, error: e.message };
+    }
+  });
+
   ipcMain.handle('system:stats', async () => {
     const currentCpus = os.cpus();
     const totalMem = os.totalmem();
@@ -267,6 +312,86 @@ export function setupHandlers() {
     }
   });
 
+  // --- Ollama Specific Handlers ---
+  ipcMain.handle('ollama:check', async (_, baseUrl: string) => {
+    try {
+      const url = baseUrl || 'http://localhost:11434';
+      const response = await fetch(url);
+      if (response.ok) {
+        return { running: true, message: await response.text() };
+      }
+      return { running: false, error: `HTTP Status: ${response.status}` };
+    } catch (error: any) {
+      return { running: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('ollama:start', async () => {
+    return new Promise((resolve) => {
+      const { spawn } = require('child_process');
+      // Spawn ollama serve in detached mode
+      const child = spawn('ollama', ['serve'], {
+        detached: true,
+        stdio: 'ignore',
+        windowsHide: true
+      });
+      
+      child.on('error', (err: any) => {
+        resolve({ success: false, error: err.message });
+      });
+
+      child.unref(); // Let it run independently
+      
+      // Wait a moment for it to start
+      setTimeout(() => {
+        resolve({ success: true });
+      }, 2000);
+    });
+  });
+
+  ipcMain.handle('ollama:pull', async (event, { baseUrl, modelName }) => {
+    try {
+      const url = `${baseUrl || 'http://localhost:11434'}/api/pull`;
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: modelName })
+      });
+
+      if (!response.ok) {
+        return { success: false, error: `Failed to pull: ${response.statusText}` };
+      }
+
+      if (!response.body) {
+        return { success: false, error: 'No response body' };
+      }
+
+      // Stream the response to the renderer
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        
+        const chunk = decoder.decode(value, { stream: true });
+        const lines = chunk.split('\n').filter(line => line.trim() !== '');
+        
+        for (const line of lines) {
+          try {
+            const data = JSON.parse(line);
+            event.sender.send('ollama:pull-progress', data);
+          } catch (e) {
+            // Ignore parse errors for partial chunks
+          }
+        }
+      }
+
+      return { success: true };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  });
 
   // --- New Config Management Handlers ---
 

@@ -1,0 +1,58 @@
+.settings-sidebar {
+  width: 250px;
+  background-color: var(--sidebar-bg);
+  border-right: 1px solid var(--sidebar-border);
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.settings-sidebar-header {
+  padding: 1rem;
+  padding-top: 2.5rem;
+  -webkit-app-region: drag;
+}
+
+.settings-sidebar-header h2 {
+  margin: 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--muted-fg);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding-left: 0.5rem;
+}
+
+.settings-sidebar-menu {
+  padding: 0 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.settings-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border: none;
+  background: transparent;
+  color: var(--muted-fg);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  font-size: 0.875rem;
+  transition: all 0.2s ease;
+  text-align: left;
+  width: 100%;
+}
+
+.settings-menu-item:hover {
+  background-color: var(--sidebar-accent);
+  color: var(--foreground);
+}
+
+.settings-menu-item.active {
+  background-color: var(--sidebar-accent);
+  color: var(--foreground);
+  font-weight: 500;
+}

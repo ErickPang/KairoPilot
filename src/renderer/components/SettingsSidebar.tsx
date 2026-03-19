@@ -1,8 +1,9 @@
 import { IconCpu, IconBot } from './Icons';
+import './SettingsSidebar.css';
 
 interface SettingsSidebarProps {
   activeSection: string;
-  onSelectSection: (section: string) => void;
+  onSelectSection: (sectionId: string) => void;
 }
 
 export function SettingsSidebar({ activeSection, onSelectSection }: SettingsSidebarProps) {
@@ -12,22 +13,27 @@ export function SettingsSidebar({ activeSection, onSelectSection }: SettingsSide
   ];
 
   return (
-    <div className="sidebar">
-      <div className="sidebar-header" style={{ paddingLeft: '1rem', fontWeight: 600 }}>
-        Settings
+    <div className="settings-sidebar">
+      <div className="settings-sidebar-header">
+        <h2>Settings</h2>
       </div>
-      <div className="session-list">
-        {sections.map(section => (
-          <div 
-            key={section.id} 
-            className={`session-item ${section.id === activeSection ? 'active' : ''}`}
-            onClick={() => onSelectSection(section.id)}
-            style={{ padding: '0.75rem 1rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}
-          >
-            <section.icon size={18} />
-            <span className="session-title">{section.label}</span>
-          </div>
-        ))}
+      
+      <div className="settings-sidebar-menu">
+        {sections.map(section => {
+          const Icon = section.icon;
+          const isActive = activeSection === section.id;
+          
+          return (
+            <button
+              key={section.id}
+              className={`settings-menu-item ${isActive ? 'active' : ''}`}
+              onClick={() => onSelectSection(section.id)}
+            >
+              <Icon size={20} />
+              <span>{section.label}</span>
+            </button>
+          );
+        })}
       </div>
     </div>
   );

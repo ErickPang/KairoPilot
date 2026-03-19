@@ -6,12 +6,22 @@ import './index.css'
 // Mock ipcRenderer for browser preview
 if (!window.ipcRenderer) {
   window.ipcRenderer = {
-    invoke: async (channel, ...args) => {
+    invoke: (async (channel: string, ...args: any[]) => {
       console.log(`[Mock] invoke ${channel}`, args);
       if (channel === 'config:get') return {};
       if (channel === 'chat:getActiveSession') return null;
       if (channel === 'chat:clearAllSessions') return { success: true };
       if (channel === 'system:selectDirectory') return '/mock/directory/path';
+      if (channel === 'ollama:check') return { running: true, message: 'Mock Ollama' };
+      if (channel === 'ollama:start') return { success: true };
+      if (channel === 'ollama:pull') return { success: true };
+      if (channel === 'plugins:getStore') return [
+        { id: 'kairo-weather-plugin', name: 'Weather Forecaster', description: 'Mock Weather', version: '1.0', author: 'Kairo', icon: '🌤️' },
+        { id: 'kairo-crypto-plugin', name: 'Crypto Tracker', description: 'Mock Crypto', version: '1.0', author: 'Kairo', icon: '₿' }
+      ];
+      if (channel === 'plugins:getInstalled') return [];
+      if (channel === 'plugins:install') return { success: true };
+      if (channel === 'plugins:uninstall') return { success: true };
       if (channel === 'system:stats') return {
         platform: 'web',
         arch: 'mock',
@@ -21,7 +31,7 @@ if (!window.ipcRenderer) {
         uptime: 123
       };
       return null;
-    },
+    }) as any,
     on: (channel, _listener) => {
       console.log(`[Mock] on ${channel}`);
       return () => {};

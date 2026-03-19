@@ -3,6 +3,8 @@ import fs from 'fs';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 
+import os from 'os';
+
 // --- New Configuration Structure ---
 
 export interface ModelConfig {
@@ -44,12 +46,12 @@ const DEFAULT_MODEL: ModelConfig = {
 };
 
 const DEFAULT_AGENT: AgentConfig = {
-  id: 'default-agent',
+  id: 'mainAgent',
   name: 'Main Agent',
-  workspace: '', // Defaults to cwd/home
+  workspace: path.join(os.homedir(), '.kairopilot', 'workspace'), // Default workspace
   systemPrompt: 'You are a helpful AI assistant capable of reading and writing files.',
   modelConfigId: 'default-model',
-  allowedPaths: [],
+  allowedPaths: [path.join(os.homedir(), '.kairopilot', 'workspace')],
   allowedCommands: ['ls', 'cd', 'pwd', 'mkdir', 'rm', 'touch', 'cat', 'grep', 'echo', 'npm', 'node', 'git', 'python', 'python3', 'open', 'curl'],
   enableShell: false
 };
@@ -58,7 +60,7 @@ const DEFAULT_CONFIG: KairoPilotConfig = {
   version: '2.0.0',
   models: [DEFAULT_MODEL],
   agents: [DEFAULT_AGENT],
-  activeAgentId: 'default-agent'
+  activeAgentId: 'mainAgent'
 };
 
 // --- Legacy Types for Migration ---
@@ -117,7 +119,6 @@ export function getKairoPilotConfig(): KairoPilotConfig {
 
 function migrateLegacyConfig(legacy: LegacyConfig): KairoPilotConfig {
   const modelId = uuidv4();
-  const agentId = uuidv4();
 
   const newModel: ModelConfig = {
     id: modelId,
@@ -129,12 +130,12 @@ function migrateLegacyConfig(legacy: LegacyConfig): KairoPilotConfig {
   };
 
   const newAgent: AgentConfig = {
-    id: agentId,
+    id: 'mainAgent',
     name: 'Main Agent',
-    workspace: legacy.agent?.workspace || '',
+    workspace: legacy.agent?.workspace || path.join(os.homedir(), '.kairopilot', 'workspace'),
     systemPrompt: legacy.agent?.systemPrompt || DEFAULT_AGENT.systemPrompt,
     modelConfigId: modelId,
-    allowedPaths: legacy.agent?.allowedPaths || [],
+    allowedPaths: legacy.agent?.allowedPaths || [path.join(os.homedir(), '.kairopilot', 'workspace')],
     allowedCommands: legacy.agent?.allowedCommands || DEFAULT_AGENT.allowedCommands,
     enableShell: legacy.agent?.enableShell || false
   };
@@ -143,7 +144,7 @@ function migrateLegacyConfig(legacy: LegacyConfig): KairoPilotConfig {
     version: '2.0.0',
     models: [newModel],
     agents: [newAgent],
-    activeAgentId: agentId
+    activeAgentId: 'mainAgent'
   };
 
   saveKairoPilotConfig(newConfig);
