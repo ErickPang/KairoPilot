@@ -145,6 +145,16 @@ export class AgentRuntime {
       }
     }
 
+    if (toolName === 'web_search' || toolName === 'fetch_webpage') {
+      // By default, let's allow search if network is not strictly blocked, 
+      // or we can use checkNetwork if it's strictly enforced.
+      // We pass the URL or a dummy domain to check if network is enabled.
+      const urlToCheck = args.url || 'https://duckduckgo.com';
+      if (!this.permissionGuard.checkNetwork(urlToCheck)) {
+        throw new Error(`Permission Denied: Network access to ${urlToCheck} is not allowed.`);
+      }
+    }
+
     // --- HUMAN-IN-THE-LOOP CHECK ---
     // High-risk tools require explicit user confirmation
     const highRiskTools = ['execute_command', 'write_file', 'delete_file'];

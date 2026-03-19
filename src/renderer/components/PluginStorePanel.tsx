@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { IconPlugin, IconTrash, IconRefresh } from './Icons';
 import './PluginStorePanel.css';
+import { useTranslation } from '../hooks/useTranslation';
 
 interface PluginManifest {
   id: string;
@@ -18,6 +19,7 @@ interface InstalledPlugin extends PluginManifest {
 }
 
 export function PluginStorePanel() {
+  const { t } = useTranslation();
   const [storePlugins, setStorePlugins] = useState<PluginManifest[]>([]);
   const [installedPlugins, setInstalledPlugins] = useState<InstalledPlugin[]>([]);
   const [loading, setLoading] = useState(true);
@@ -121,12 +123,12 @@ export function PluginStorePanel() {
               }}>
                 <IconPlugin size={20} />
               </div>
-              Skills Management
+              {t('nav.skills')}
             </div>
-            <div className="config-subtitle">Manage and install community skills for your agents</div>
+            <div className="config-subtitle">{t('skills.marketplace')}</div>
           </div>
           <button onClick={loadPlugins} className="btn btn-secondary" disabled={loading}>
-            <IconRefresh size={16} /> Refresh
+            <IconRefresh size={16} className={loading ? 'spinning' : ''} />
           </button>
         </div>
 
@@ -135,13 +137,13 @@ export function PluginStorePanel() {
             className={`plugin-tab ${activeTab === 'installed' ? 'active' : ''}`}
             onClick={() => setActiveTab('installed')}
           >
-            已安装插 (Installed)
+            {t('skills.installed')}
           </button>
           <button 
             className={`plugin-tab ${activeTab === 'store' ? 'active' : ''}`}
             onClick={() => setActiveTab('store')}
           >
-            插件商店 (Store)
+            {t('skills.marketplace')}
           </button>
         </div>
       </div>
@@ -236,7 +238,7 @@ export function PluginStorePanel() {
                         onClick={() => handleInstallClick(plugin.id)}
                         disabled={actionInProgress === plugin.id}
                       >
-                        {actionInProgress === plugin.id ? 'Installing...' : 'Install'}
+                        {actionInProgress === plugin.id ? <IconRefresh size={14} className="spinning" /> : t('skills.install')}
                       </button>
                     </div>
                   </div>
@@ -286,6 +288,7 @@ export function PluginStorePanel() {
 
 function InstalledSkillItem({ plugin, onUninstall, isWorking }: { plugin: InstalledPlugin, onUninstall: () => void, isWorking: boolean }) {
   const [expanded, setExpanded] = useState(false);
+  const { t } = useTranslation();
   
   return (
     <div className="skill-list-item" onClick={() => setExpanded(!expanded)}>
@@ -298,12 +301,17 @@ function InstalledSkillItem({ plugin, onUninstall, isWorking }: { plugin: Instal
           </div>
         </div>
         <button 
-          className="btn btn-secondary" 
-          onClick={(e) => { e.stopPropagation(); onUninstall(); }}
+          className="btn btn-secondary btn-sm btn-danger"
+          onClick={(e) => {
+            e.stopPropagation();
+            if(confirm(t('common.confirm') + ' ' + t('skills.uninstall') + '?')) {
+              onUninstall();
+            }
+          }}
           disabled={isWorking}
-          style={{ color: 'var(--danger, #dc2626)', borderColor: 'var(--danger, #dc2626)', padding: '4px 8px', fontSize: '0.8rem' }}
         >
-          {isWorking ? 'Uninstalling...' : <><IconTrash size={14} /> Uninstall</>}
+          {isWorking ? <IconRefresh size={14} className="spinning" /> : <IconTrash size={14} />}
+          <span style={{ marginLeft: '4px' }}>{t('skills.uninstall')}</span>
         </button>
       </div>
       {expanded && (

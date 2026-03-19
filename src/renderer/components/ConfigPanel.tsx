@@ -5,6 +5,8 @@ import {
   IconPlus, IconArrowLeft, IconCheck, IconRefresh, IconFolder,
   IconTerminal
 } from './Icons';
+import { useTranslation } from '../hooks/useTranslation';
+import { Select } from './Select';
 
 interface ConfigPanelProps {
   models: ModelConfig[];
@@ -60,6 +62,8 @@ export function ConfigPanel({
   const [pullProgress, setPullProgress] = useState<{status: string, completed?: number, total?: number} | null>(null);
   const [isPulling, setIsPulling] = useState(false);
   const [isStartingOllama, setIsStartingOllama] = useState(false);
+
+  const { t, locale, setLocale } = useTranslation();
 
   // Reset view when switching sections
   useEffect(() => {
@@ -207,7 +211,7 @@ export function ConfigPanel({
         newConfig.baseUrl = 'http://localhost:11434/v1';
         break;
       case 'deepseek':
-        newConfig.baseUrl = 'https://api.deepseek.com';
+        newConfig.baseUrl = 'https://api.deepseek.com/v1';
         break;
       case 'zhipu':
         newConfig.baseUrl = 'https://open.bigmodel.cn/api/paas/v4';
@@ -383,18 +387,18 @@ export function ConfigPanel({
 
             <div className="form-group" style={{ flex: 1 }}>
               <label>Provider</label>
-              <select 
-                className="form-control"
+              <Select 
                 value={editingModel.provider} 
-                onChange={handleProviderChange}
-              >
-                <option value="openai">OpenAI</option>
-                <option value="deepseek">DeepSeek</option>
-                <option value="zhipu">智谱 (Zhipu)</option>
-                <option value="kimi">Kimi (Moonshot)</option>
-                <option value="qianwen">通义千问 (Qianwen)</option>
-                <option value="ollama">Ollama (Local)</option>
-              </select>
+                onChange={(val) => handleProviderChange({ target: { value: val } } as any)}
+                options={[
+                  { value: 'openai', label: 'OpenAI' },
+                  { value: 'deepseek', label: 'DeepSeek' },
+                  { value: 'zhipu', label: '智谱 (Zhipu)' },
+                  { value: 'kimi', label: 'Kimi (Moonshot)' },
+                  { value: 'qianwen', label: '通义千问 (Qianwen)' },
+                  { value: 'ollama', label: 'Ollama (Local)' },
+                ]}
+              />
             </div>
           </div>
 
@@ -557,16 +561,12 @@ export function ConfigPanel({
 
             <div className="form-group" style={{ flex: 1 }}>
               <label>Model Configuration</label>
-              <select 
-                className="form-control"
+              <Select 
                 value={editingAgent.modelConfigId} 
-                onChange={e => setEditingAgent({...editingAgent, modelConfigId: e.target.value})}
-              >
-                <option value="">Select a model config...</option>
-                {models.map(m => (
-                  <option key={m.id} value={m.id}>{m.name} ({m.model})</option>
-                ))}
-              </select>
+                onChange={(val) => setEditingAgent({...editingAgent, modelConfigId: val})}
+                placeholder="Select a model config..."
+                options={models.map(m => ({ value: m.id, label: `${m.name} (${m.model})` }))}
+              />
             </div>
           </div>
 
@@ -632,6 +632,30 @@ export function ConfigPanel({
     );
   };
 
+  const renderGeneralSettings = () => {
+    return (
+      <div className="config-section">
+        <div className="config-section-header">
+          <h3>{t('settings.general')}</h3>
+        </div>
+        <div className="config-card">
+          <div className="form-group">
+                <label>{t('general.language')}</label>
+                <Select 
+                  value={locale} 
+                  onChange={(val) => setLocale(val as 'zh' | 'en')}
+                  style={{ width: '300px' }}
+                  options={[
+                    { value: 'zh', label: t('general.language.zh') },
+                    { value: 'en', label: t('general.language.en') }
+                  ]}
+                />
+              </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="config-panel">
       {view === 'list' && (
@@ -646,15 +670,16 @@ export function ConfigPanel({
                 }}>
                   <IconSettings size={20} />
                 </div>
-                Configuration
+                {t('settings.title')}
               </div>
-              <div className="config-subtitle">Manage your models and agents</div>
+              <div className="config-subtitle">Manage your models, agents and preferences</div>
             </div>
           </div>
 
           <div className="config-content">
             {(activeSection === 'model' || !activeSection) && renderModelList()}
             {(activeSection === 'agent' || !activeSection) && renderAgentList()}
+            {activeSection === 'general' && renderGeneralSettings()}
           </div>
         </>
       )}

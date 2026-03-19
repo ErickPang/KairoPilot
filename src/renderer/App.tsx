@@ -9,6 +9,7 @@ import { ConfirmationModal } from './components/ConfirmationModal';
 import AuditLogViewer from './components/AuditLogViewer';
 import { PluginStorePanel } from './components/PluginStorePanel';
 import { IconChat, IconShield, IconSettings, IconPlugin } from './components/Icons';
+import { useTranslation } from './hooks/useTranslation';
 
 function App() {
   const [models, setModels] = useState<ModelConfig[]>([]);
@@ -24,7 +25,9 @@ function App() {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [confirmationRequest, setConfirmationRequest] = useState<{ id: string; tool: string; args: any } | null>(null);
   const [activeTab, setActiveTab] = useState<'chat' | 'plugins' | 'settings' | 'audit'>('chat');
-  const [activeConfigSection, setActiveConfigSection] = useState<string>('model');
+  const [activeConfigSection, setActiveConfigSection] = useState<string>('general');
+
+  const { t } = useTranslation();
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -362,7 +365,7 @@ function App() {
         <div 
           className={`nav-icon ${activeTab === 'chat' ? 'active' : ''}`}
           onClick={() => setActiveTab('chat')}
-          title="Chat"
+          title={t('nav.chat')}
         >
           <IconChat size={24} />
         </div>
@@ -370,7 +373,7 @@ function App() {
         <div 
           className={`nav-icon ${activeTab === 'plugins' ? 'active' : ''}`}
           onClick={() => setActiveTab('plugins')}
-          title="Skills"
+          title={t('nav.skills')}
         >
           <IconPlugin size={24} />
         </div>
@@ -380,7 +383,7 @@ function App() {
         <div 
           className={`nav-icon ${activeTab === 'audit' ? 'active' : ''}`}
           onClick={() => setActiveTab('audit')}
-          title="Audit Logs"
+          title={t('nav.auditLogs')}
         >
           <IconShield size={24} />
         </div>
@@ -388,7 +391,7 @@ function App() {
         <div 
           className={`nav-icon ${activeTab === 'settings' ? 'active' : ''}`}
           onClick={() => setActiveTab('settings')}
-          title="Settings"
+          title={t('nav.settings')}
         >
           <IconSettings size={24} />
         </div>

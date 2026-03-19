@@ -45,6 +45,21 @@ function getDb(): Database.Database {
       console.error('Failed to migrate sessions table:', error);
     }
 
+    // Migration for tool calls in messages table
+    try {
+      const msgColumns = db.pragma('table_info(messages)') as any[];
+      const hasName = msgColumns.some(col => col.name === 'name');
+      if (!hasName) {
+        db.exec(`
+          ALTER TABLE messages ADD COLUMN name TEXT;
+          ALTER TABLE messages ADD COLUMN tool_call_id TEXT;
+          ALTER TABLE messages ADD COLUMN tool_calls TEXT;
+        `);
+      }
+    } catch (error) {
+      console.error('Failed to migrate messages table:', error);
+    }
+
     migrateFromElectronStore(db);
   }
   return db;
@@ -90,7 +105,7 @@ function migrateFromElectronStore(db: Database.Database) {
 
     if (oldSessions.length > 0) {
       const insertSession = db.prepare('INSERT INTO sessions (id, title, created_at, updated_at) VALUES (@id, @title, @createdAt, @updatedAt)');
-      const insertMessage = db.prepare('INSERT INTO messages (id, session_id, role, content, timestamp) VALUES (@id, @sessionId, @role, @content, @timestamp)');
+      const insertMessage = db.prepare('INSERT INTO messages (id, session_id, role, content, timestamp, name, tool_call_id, tool_calls) VALUES (@id, @sessionId, @role, @content, @timestamp, @name, @toolCallId, @toolCalls)');
 
       const transaction = db.transaction(() => {
         for (const session of oldSessions) {
@@ -106,8 +121,11 @@ function migrateFromElectronStore(db: Database.Database) {
               id: uuidv4(),
               sessionId: session.id,
               role: msg.role,
-              content: msg.content,
-              timestamp: msg.timestamp || Date.now()
+              content: msg.content || '',
+              timestamp: msg.timestamp || Date.now(),
+              name: msg.name || null,
+              toolCallId: msg.tool_call_id || null,
+              toolCalls: msg.tool_calls ? JSON.stringify(msg.tool_calls) : null
             });
           }
         }
@@ -148,16 +166,28 @@ export function getSessions(agentId?: string): Session[] {
   const sessions = db.prepare(query).all(...params) as any[];
   
   return sessions.map(s => {
-    const messages = db.prepare('SELECT role, content, timestamp FROM messages WHERE session_id = ? ORDER BY timestamp ASC').all(s.id) as any[];
+    const messages = db.prepare('SELECT role, content, timestamp, name, tool_call_id, tool_calls FROM messages WHERE session_id = ? ORDER BY timestamp ASC').all(s.id) as any[];
     return {
       id: s.id,
       title: s.title,
       agentId: s.agent_id,
-      messages: messages.map(m => ({
-        role: m.role,
-        content: m.content,
-        timestamp: m.timestamp
-      })),
+      messages: messages.map(m => {
+        const msg: ChatMessage = {
+          role: m.role,
+          content: m.content,
+          timestamp: m.timestamp
+        };
+        if (m.name) msg.name = m.name;
+        if (m.tool_call_id) msg.tool_call_id = m.tool_call_id;
+        if (m.tool_calls) {
+          try {
+            msg.tool_calls = JSON.parse(m.tool_calls);
+          } catch (e) {
+            // Ignore parse errors
+          }
+        }
+        return msg;
+      }),
       createdAt: s.created_at,
       updatedAt: s.updated_at
     };
@@ -196,18 +226,30 @@ export function getSessionById(sessionId: string): Session | null {
   const sessionRow = db.prepare('SELECT * FROM sessions WHERE id = ?').get(sessionId) as any;
   if (!sessionRow) return null;
 
-  const messages = db.prepare('SELECT role, content, timestamp FROM messages WHERE session_id = ? ORDER BY timestamp ASC').all(sessionId) as any[];
+  const messages = db.prepare('SELECT role, content, timestamp, name, tool_call_id, tool_calls FROM messages WHERE session_id = ? ORDER BY timestamp ASC').all(sessionId) as any[];
 
   return {
     id: sessionRow.id,
     title: sessionRow.title,
     createdAt: sessionRow.created_at,
     updatedAt: sessionRow.updated_at,
-    messages: messages.map(m => ({
-      role: m.role,
-      content: m.content,
-      timestamp: m.timestamp
-    }))
+    messages: messages.map(m => {
+      const msg: ChatMessage = {
+        role: m.role,
+        content: m.content,
+        timestamp: m.timestamp
+      };
+      if (m.name) msg.name = m.name;
+      if (m.tool_call_id) msg.tool_call_id = m.tool_call_id;
+      if (m.tool_calls) {
+        try {
+          msg.tool_calls = JSON.parse(m.tool_calls);
+        } catch (e) {
+          // Ignore parse errors
+        }
+      }
+      return msg;
+    })
   };
 }
 
@@ -234,9 +276,18 @@ export function updateSessionMessages(sessionId: string, messages: ChatMessage[]
     
     db.prepare('DELETE FROM messages WHERE session_id = ?').run(sessionId);
     
-    const insert = db.prepare('INSERT INTO messages (id, session_id, role, content, timestamp) VALUES (?, ?, ?, ?, ?)');
+    const insert = db.prepare('INSERT INTO messages (id, session_id, role, content, timestamp, name, tool_call_id, tool_calls) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
     for (const msg of messages) {
-      insert.run(uuidv4(), sessionId, msg.role, msg.content, msg.timestamp || Date.now());
+      insert.run(
+        uuidv4(), 
+        sessionId, 
+        msg.role, 
+        msg.content || '', 
+        msg.timestamp || Date.now(),
+        msg.name || null,
+        msg.tool_call_id || null,
+        msg.tool_calls ? JSON.stringify(msg.tool_calls) : null
+      );
     }
   });
 

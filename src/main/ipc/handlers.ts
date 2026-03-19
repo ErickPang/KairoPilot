@@ -5,6 +5,7 @@ import { PermissionGuard } from '../core/security/permissions';
 import { ReadFileTool, WriteFileTool, ListDirectoryTool, DeleteFileTool } from '../core/tools/filesystem';
 import { createExecuteCommandTool } from '../core/tools/shell';
 import { SystemInfoTool } from '../core/tools/system';
+import { WebSearchTool, FetchWebpageTool } from '../core/tools/web';
 import path from 'path';
 import { 
   getAgentConfig, 
@@ -122,6 +123,8 @@ async function initializeAgent(config: ResolvedAgentConfig, sender?: WebContents
   currentAgent.registerTool(DeleteFileTool as any);
   currentAgent.registerTool(createExecuteCommandTool(workspace) as any);
   currentAgent.registerTool(SystemInfoTool as any);
+  currentAgent.registerTool(WebSearchTool as any);
+  currentAgent.registerTool(FetchWebpageTool as any);
 
   // Load and register dynamic plugins
   try {

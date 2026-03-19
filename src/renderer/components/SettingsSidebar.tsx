@@ -1,5 +1,6 @@
-import { IconCpu, IconBot } from './Icons';
+import { IconCpu, IconBot, IconSettings } from './Icons';
 import './SettingsSidebar.css';
+import { useTranslation } from '../hooks/useTranslation';
 
 interface SettingsSidebarProps {
   activeSection: string;
@@ -7,15 +8,18 @@ interface SettingsSidebarProps {
 }
 
 export function SettingsSidebar({ activeSection, onSelectSection }: SettingsSidebarProps) {
+  const { t } = useTranslation();
+
   const sections = [
-    { id: 'model', label: 'Model Configuration', icon: IconCpu },
-    { id: 'agent', label: 'Agent Capabilities', icon: IconBot },
+    { id: 'general', label: t('settings.general'), icon: IconSettings },
+    { id: 'model', label: t('settings.models'), icon: IconCpu },
+    { id: 'agent', label: t('settings.agents'), icon: IconBot },
   ];
 
   return (
     <div className="settings-sidebar">
       <div className="settings-sidebar-header">
-        <h2>Settings</h2>
+        <h2>{t('settings.title')}</h2>
       </div>
       
       <div className="settings-sidebar-menu">
