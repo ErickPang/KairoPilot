@@ -20,6 +20,7 @@ export interface AgentConfig {
   id: string;
   name: string; // e.g., "Main Agent", "Coding Assistant"
   workspace: string;
+  workspaceName?: string;
   systemPrompt: string;
   modelConfigId: string; // References ModelConfig.id
   allowedPaths: string[];
@@ -194,7 +195,23 @@ export function deleteModel(id: string) {
 }
 
 export function getAgents(): AgentConfig[] {
-  return getKairoPilotConfig().agents;
+  const config = getKairoPilotConfig();
+  
+  // Sync systemPrompt with KAIROPILOT.md for each agent
+  return config.agents.map(agent => {
+    if (agent.workspace) {
+      const kairopilotMdPath = path.join(agent.workspace, 'KAIROPILOT.md');
+      if (fs.existsSync(kairopilotMdPath)) {
+        try {
+          const content = fs.readFileSync(kairopilotMdPath, 'utf-8');
+          agent.systemPrompt = content;
+        } catch (e) {
+          console.error(`Failed to read KAIROPILOT.md for agent ${agent.id}:`, e);
+        }
+      }
+    }
+    return agent;
+  });
 }
 
 export function getAgent(id: string): AgentConfig | undefined {
@@ -203,6 +220,31 @@ export function getAgent(id: string): AgentConfig | undefined {
 
 export function saveAgent(agent: AgentConfig) {
   const config = getKairoPilotConfig();
+  
+  if (agent.id === 'mainAgent') {
+    agent.workspace = path.join(os.homedir(), '.kairopilot', 'workspace');
+    agent.workspaceName = undefined;
+  } else if (agent.workspaceName !== undefined) {
+    if (agent.workspaceName === '') {
+      agent.workspace = path.join(os.homedir(), '.kairopilot', 'workspace');
+    } else {
+      agent.workspace = path.join(os.homedir(), '.kairopilot', `workspace-${agent.workspaceName}`);
+    }
+  }
+
+  // Write systemPrompt to KAIROPILOT.md
+  if (agent.workspace) {
+    try {
+      if (!fs.existsSync(agent.workspace)) {
+        fs.mkdirSync(agent.workspace, { recursive: true });
+      }
+      const kairopilotMdPath = path.join(agent.workspace, 'KAIROPILOT.md');
+      fs.writeFileSync(kairopilotMdPath, agent.systemPrompt, 'utf-8');
+    } catch (e) {
+      console.error(`Failed to write KAIROPILOT.md for agent ${agent.id}:`, e);
+    }
+  }
+
   const index = config.agents.findIndex(a => a.id === agent.id);
   if (index !== -1) {
     config.agents[index] = agent;
@@ -213,6 +255,10 @@ export function saveAgent(agent: AgentConfig) {
 }
 
 export function deleteAgent(id: string) {
+  if (id === 'mainAgent') {
+    console.warn('Attempted to delete mainAgent, operation denied.');
+    return;
+  }
   const config = getKairoPilotConfig();
   config.agents = config.agents.filter(a => a.id !== id);
   // If active agent deleted, switch to another

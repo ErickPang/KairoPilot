@@ -37,6 +37,59 @@ export function ChatInterface({
   const [isDragging, setIsDragging] = useState(false);
   const dragCounter = React.useRef(0);
 
+  // Group messages to hide intermediate process steps
+  const groupedMessages = React.useMemo(() => {
+    const groups: { type: 'user' | 'final_answer' | 'process', messages: Message[] }[] = [];
+    let currentProcess: Message[] = [];
+
+    for (let i = 0; i < messages.length; i++) {
+      const msg = messages[i];
+      
+      if (msg.role === 'user') {
+        if (currentProcess.length > 0) {
+          groups.push({ type: 'process', messages: currentProcess });
+          currentProcess = [];
+        }
+        groups.push({ type: 'user', messages: [msg] });
+      } else {
+        // It's an assistant, tool, or thinking message.
+        // Check if it's the final assistant message in this turn.
+        let isFinalInTurn = false;
+        if (msg.role === 'assistant') {
+          let hasMoreAfter = false;
+          for (let j = i + 1; j < messages.length; j++) {
+            if (messages[j].role === 'user') {
+              break;
+            }
+            if (messages[j].role === 'assistant' || messages[j].role === 'tool' || messages[j].role === 'thinking') {
+              hasMoreAfter = true;
+              break;
+            }
+          }
+          if (!hasMoreAfter) {
+            isFinalInTurn = true;
+          }
+        }
+
+        if (isFinalInTurn) {
+          if (currentProcess.length > 0) {
+            groups.push({ type: 'process', messages: currentProcess });
+            currentProcess = [];
+          }
+          groups.push({ type: 'final_answer', messages: [msg] });
+        } else {
+          currentProcess.push(msg);
+        }
+      }
+    }
+
+    if (currentProcess.length > 0) {
+      groups.push({ type: 'process', messages: currentProcess });
+    }
+
+    return groups;
+  }, [messages]);
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
@@ -124,32 +177,85 @@ export function ChatInterface({
           </div>
         )}
         
-        {messages.map((msg, i) => (
-          <div key={i} className={`message ${msg.role}`}>
-            <div className="avatar">
-              {msg.role === 'user' ? <IconUser size={18} /> : (msg.role === 'tool' ? <IconTool size={18} /> : <IconBot size={18} />)}
-            </div>
-            <div className="message-content">
-              {msg.role === 'user' || msg.role === 'tool' ? (
-                <div style={{ whiteSpace: 'pre-wrap' }}>
-                  {msg.content}
-                  {msg.details && (
-                    <details className="message-details">
-                      <summary className="message-summary">Details</summary>
-                      <pre className="message-pre">{JSON.stringify(msg.details, null, 2)}</pre>
-                    </details>
-                  )}
+        {groupedMessages.map((group, groupIdx) => {
+          if (group.type === 'process') {
+            const isLatestLoading = loading && groupIdx === groupedMessages.length - 1;
+            return (
+              <div key={`group-wrapper-${groupIdx}`} className="message system" style={{ margin: '0.5rem auto' }}>
+                <div className="avatar" style={{ backgroundColor: 'transparent', color: 'var(--muted-fg)' }}>
+                  <IconCpu size={18} />
                 </div>
-              ) : (
-                <div className="markdown-body">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                <div className="message-content" style={{ width: '100%', padding: 0 }}>
+                  <details 
+                    key={`group-${groupIdx}`} 
+                    open={isLatestLoading}
+                    className="message-process-group" 
+                    style={{ background: 'var(--sidebar-bg)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)', padding: '0.5rem' }}
+                  >
+                    <summary className="process-summary" style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--muted-fg)', fontSize: '0.85rem', userSelect: 'none', padding: '0.25rem' }}>
+                      {isLatestLoading ? 'Working on it...' : `View Process (${group.messages.length} steps)`}
+                    </summary>
+                    <div className="process-content" style={{ marginTop: '0.5rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                      {group.messages.map((msg, i) => (
+                        <div key={i} className={`message ${msg.role} process-item`} style={{ padding: '0.5rem', margin: 0, fontSize: '0.9em', background: 'var(--background)', border: '1px solid var(--border)', maxWidth: '100%' }}>
+                          <div className="avatar" style={{ width: '24px', height: '24px', padding: '4px' }}>
+                            {msg.role === 'tool' ? <IconTool size={14} /> : <IconBot size={14} />}
+                          </div>
+                          <div className="message-content" style={{ padding: '0.25rem 0.5rem' }}>
+                            {msg.role === 'tool' ? (
+                              <div style={{ whiteSpace: 'pre-wrap' }}>
+                                {msg.content}
+                                {msg.details && (
+                                  <details className="message-details">
+                                    <summary className="message-summary">Details</summary>
+                                    <pre className="message-pre">{JSON.stringify(msg.details, null, 2)}</pre>
+                                  </details>
+                                )}
+                              </div>
+                            ) : (
+                              <div className="markdown-body">
+                                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                  {msg.content}
+                                </ReactMarkdown>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                </div>
+              </div>
+            );
+          }
+
+          return group.messages.map((msg, i) => (
+            <div key={`msg-${groupIdx}-${i}`} className={`message ${msg.role}`}>
+              <div className="avatar">
+                {msg.role === 'user' ? <IconUser size={18} /> : (msg.role === 'tool' ? <IconTool size={18} /> : <IconBot size={18} />)}
+              </div>
+              <div className="message-content">
+                {msg.role === 'user' || msg.role === 'tool' ? (
+                  <div style={{ whiteSpace: 'pre-wrap' }}>
                     {msg.content}
-                  </ReactMarkdown>
-                </div>
-              )}
+                    {msg.details && (
+                      <details className="message-details">
+                        <summary className="message-summary">Details</summary>
+                        <pre className="message-pre">{JSON.stringify(msg.details, null, 2)}</pre>
+                      </details>
+                    )}
+                  </div>
+                ) : (
+                  <div className="markdown-body">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      {msg.content}
+                    </ReactMarkdown>
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
-        ))}
+          ));
+        })}
         <div ref={messagesEndRef} />
       </div>
 

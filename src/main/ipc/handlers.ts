@@ -1,6 +1,7 @@
 import { ipcMain, dialog } from 'electron';
 import { AgentRuntime } from '../core/agent/runtime';
 import { OpenAIProvider } from '../core/llm/provider';
+import { PromptBuilder } from '../core/llm/prompt';
 import { PermissionGuard } from '../core/security/permissions';
 import { ReadFileTool, WriteFileTool, ListDirectoryTool, DeleteFileTool } from '../core/tools/filesystem';
 import { createExecuteCommandTool } from '../core/tools/shell';
@@ -27,6 +28,7 @@ import {
 import { createSession, getActiveSession, updateSessionMessages, updateSessionTitle, deleteSession, clearAllSessions, setActiveSessionId, getSessions } from '../store/chat';
 import { addAuditLog, getAuditLogs } from '../store/audit';
 import os from 'os';
+import { z } from 'zod';
 
 import { v4 as uuidv4 } from 'uuid';
 import { WebContents } from 'electron';
@@ -92,8 +94,12 @@ async function initializeAgent(config: ResolvedAgentConfig, sender?: WebContents
     model: model.model || 'gpt-3.5-turbo',
   });
 
-  // Create Agent
-  const systemPromptWithContext = `${agent.systemPrompt}\n\nCurrent Workspace: ${workspace}`;
+  // Create Agent Prompt using PromptBuilder
+  const systemPromptWithContext = PromptBuilder.buildSystemPrompt({
+    workspace: workspace,
+    agentPrompt: agent.systemPrompt
+  });
+
   currentAgent = new AgentRuntime(llm, permissions, systemPromptWithContext, async (toolName, args) => {
     if (!sender) {
       console.warn('No sender available for confirmation, auto-denying.');
@@ -135,6 +141,25 @@ async function initializeAgent(config: ResolvedAgentConfig, sender?: WebContents
     }
   } catch (error) {
     console.error('Failed to load dynamic plugins:', error);
+  }
+
+  // Load and register Agent Skills (SKILL.md) as Tools
+  try {
+    const agentSkills = await pluginManager.getMergedSkillsForAgent(agent.id);
+    for (const skill of agentSkills) {
+      const skillTool = {
+        name: `skill_${skill.id.replace(/[^a-zA-Z0-9_-]/g, '_')}`,
+        description: `Use this skill when you need to: ${skill.description}. Calling this will return the standard operating procedure (SOP) or instructions.`,
+        parameters: z.object({}), // no parameters needed
+        execute: async () => {
+          return `[SKILL INSTRUCTIONS: ${skill.name}]\n\n${skill.content}`;
+        }
+      };
+      currentAgent.registerTool(skillTool as any);
+      console.log(`[Agent] Registered skill tool: ${skillTool.name} (Source: ${skill.source})`);
+    }
+  } catch (error) {
+    console.error('Failed to load agent skills:', error);
   }
   
   return true;

@@ -332,7 +332,12 @@ function App() {
       const fullConfig = await window.ipcRenderer.invoke('config:get-all');
       setAgents(fullConfig.agents);
       if (activeAgentId === id) {
-        setActiveAgentId(null);
+        setActiveAgentId(fullConfig.activeAgentId || null);
+        if (fullConfig.activeAgentId) {
+          await window.ipcRenderer.invoke('agent:init', fullConfig.activeAgentId);
+        }
+        await loadSessions();
+        await loadActiveSession();
       }
     } catch (error) {
       console.error('Failed to delete agent:', error);
@@ -349,7 +354,9 @@ function App() {
       setLoading(false);
       
       if (result.success) {
-        // Maybe clear session or notify user?
+        // Refresh sessions for the newly selected agent
+        await loadSessions();
+        await loadActiveSession();
       } else {
         alert('Failed to initialize agent: ' + result.error);
       }

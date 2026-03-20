@@ -186,18 +186,6 @@ export function ConfigPanel({
       setEditingAgent(null);
     }
   };
-  
-  const handleSelectDirectory = async () => {
-    if (!editingAgent) return;
-    try {
-      const path = await window.ipcRenderer.invoke('system:selectDirectory');
-      if (path) {
-        setEditingAgent({ ...editingAgent, workspace: path });
-      }
-    } catch (error) {
-      console.error('Failed to select directory:', error);
-    }
-  };
 
   const handleProviderChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     if (!editingModel) return;
@@ -333,13 +321,15 @@ export function ConfigPanel({
               >
                 <IconEdit size={18} />
               </button>
-              <button 
-                onClick={() => onDeleteAgent(agent.id)}
-                className="btn-icon danger"
-                title="Delete"
-              >
-                <IconTrash size={18} />
-              </button>
+              {agent.id !== 'mainAgent' && (
+                <button 
+                  onClick={() => onDeleteAgent(agent.id)}
+                  className="btn-icon danger"
+                  title="Delete"
+                >
+                  <IconTrash size={18} />
+                </button>
+              )}
             </div>
           </div>
         );
@@ -533,6 +523,9 @@ export function ConfigPanel({
 
   const renderAgentEdit = () => {
     if (!editingAgent) return null;
+    
+    const isNewAgent = !agents.some(a => a.id === editingAgent.id);
+    
     return (
       <>
         <div className="config-header">
@@ -540,7 +533,7 @@ export function ConfigPanel({
             <button onClick={() => setView('list')} className="btn-icon" style={{ marginRight: '0.5rem' }}>
               <IconArrowLeft size={24} />
             </button>
-            <span>{editingAgent.id ? 'Edit Agent' : 'New Agent'}</span>
+            <span>{isNewAgent ? 'New Agent' : 'Edit Agent'}</span>
           </div>
         </div>
 
@@ -553,10 +546,19 @@ export function ConfigPanel({
               <input 
                 className="form-control"
                 value={editingAgent.name} 
-                onChange={e => setEditingAgent({...editingAgent, name: e.target.value})}
+                onChange={e => {
+                  const newName = e.target.value;
+                  const updates: Partial<typeof editingAgent> = { name: newName };
+                  if (isNewAgent) {
+                    updates.workspaceName = newName.toLowerCase().replace(/\s+/g, '-').replace(/[^a-zA-Z0-9_-]/g, '');
+                  }
+                  setEditingAgent({...editingAgent, ...updates});
+                }}
                 placeholder="e.g. Coding Assistant"
-                autoFocus
+                disabled={!isNewAgent}
+                autoFocus={isNewAgent}
               />
+              {!isNewAgent && <div className="form-help">Agent name cannot be changed after creation.</div>}
             </div>
 
             <div className="form-group" style={{ flex: 1 }}>
@@ -571,7 +573,7 @@ export function ConfigPanel({
           </div>
 
           <div className="form-group">
-            <label>System Prompt</label>
+            <label>KAIROPILOT.md (Workspace Instructions)</label>
             <textarea 
               className="form-control"
               value={editingAgent.systemPrompt} 
@@ -579,30 +581,48 @@ export function ConfigPanel({
               rows={6}
               placeholder="You are a helpful AI assistant..."
             />
-            <div className="form-help">Define the agent's personality, capabilities, and constraints.</div>
+            <div className="form-help">These instructions will be saved as KAIROPILOT.md in the agent's workspace directory and injected as dynamic context.</div>
           </div>
 
           <div className="form-section-title">Environment & Capabilities</div>
 
           <div className="form-group">
-            <label>Workspace Directory</label>
-            <div style={{ display: 'flex', gap: '0.5rem' }}>
-              <input 
-                className="form-control"
-                value={editingAgent.workspace} 
-                readOnly 
-                placeholder="Default Workspace (System Managed)"
-                style={{ cursor: 'default', color: editingAgent.workspace ? 'inherit' : 'var(--muted-fg)' }}
-              />
-              <button 
-                onClick={handleSelectDirectory} 
-                className="btn btn-secondary"
-                title="Choose Directory"
-              >
-                <IconFolder size={18} /> Browse
-              </button>
+            <label>Workspace Name</label>
+            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+              {editingAgent.id === 'mainAgent' ? (
+                <span style={{ color: 'var(--foreground)', whiteSpace: 'nowrap', padding: '0.5rem 0' }}>~/.kairopilot/workspace</span>
+              ) : (
+                <>
+                  <span style={{ color: 'var(--muted-fg)', whiteSpace: 'nowrap' }}>~/.kairopilot/workspace-</span>
+                  <input 
+                    className="form-control"
+                    value={editingAgent.workspaceName !== undefined ? editingAgent.workspaceName : (
+                      editingAgent.workspace ? 
+                        (editingAgent.workspace.match(/workspace-(.+)$/) ? editingAgent.workspace.match(/workspace-(.+)$/)![1] : (
+                          editingAgent.workspace.endsWith('workspace') ? '' : 'custom'
+                        ))
+                        : ''
+                    )}
+                    onChange={e => {
+                      const val = e.target.value.replace(/[^a-zA-Z0-9_-]/g, '');
+                      setEditingAgent({...editingAgent, workspaceName: val});
+                    }} 
+                    placeholder="default"
+                    disabled={!isNewAgent}
+                    style={{ flex: 1 }}
+                  />
+                </>
+              )}
             </div>
-            <div className="form-help">The directory where this agent is allowed to read and write files.</div>
+            {editingAgent.id === 'mainAgent' ? (
+              <div className="form-help">The main agent always uses the default workspace directory.</div>
+            ) : (
+              <div className="form-help">
+                {isNewAgent 
+                  ? 'Only alphanumeric characters, dashes, and underscores are allowed. Leave empty for default workspace.' 
+                  : 'Workspace cannot be changed after creation.'}
+              </div>
+            )}
           </div>
 
           <div className="form-section-title">Permissions</div>

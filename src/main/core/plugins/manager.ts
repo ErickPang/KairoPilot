@@ -4,6 +4,7 @@ import path from 'path';
 import vm from 'vm';
 import { z } from 'zod';
 import { ToolDefinition } from '../llm/types';
+import { getAgent } from '../../store/config';
 
 export interface PluginManifest {
   id: string;
@@ -109,6 +110,14 @@ const getPluginCode = (id: string) => {
   return `module.exports = { tools: [] };`;
 };
 
+export interface AgentSkill {
+  id: string;
+  name: string;
+  description: string;
+  content: string;
+  source: 'public' | 'agent';
+}
+
 export class PluginManager {
   private publicSkillsDir: string;
   private registryPath: string;
@@ -141,15 +150,120 @@ export class PluginManager {
   private getWorkspaceDir(scope: string): string {
     if (scope === 'public') return this.publicSkillsDir;
     
-    const homeDir = app.getPath('home');
     if (scope.startsWith('agent:')) {
       const agentId = scope.split(':')[1];
+      const agent = getAgent(agentId);
+      if (agent && agent.workspace) {
+        return path.join(agent.workspace, 'skills');
+      }
+
+      // Fallback
+      const homeDir = app.getPath('home');
       const workspaceName = agentId === 'mainAgent' ? 'workspace' : `workspace-${agentId}`;
       return path.join(homeDir, '.kairopilot', workspaceName, 'skills');
     }
     
     // Fallback for any legacy 'workspace' scope
+    const homeDir = app.getPath('home');
     return path.join(homeDir, '.kairopilot', 'workspace', 'skills');
+  }
+
+  private async parseSkillFile(dirPath: string, folderName: string): Promise<AgentSkill | null> {
+    try {
+      const skillPath = path.join(dirPath, 'SKILL.md');
+      const content = await fs.readFile(skillPath, 'utf-8');
+      
+      const fmMatch = content.match(/^---\r?\n([\s\S]+?)\r?\n---/);
+      let name = folderName;
+      let description = `Skill: ${name}`;
+      let body = content;
+
+      if (fmMatch) {
+        const frontMatter = fmMatch[1];
+        body = content.slice(fmMatch[0].length).trim();
+        
+        const nameMatch = frontMatter.match(/^name:\s*(.+)/m);
+        if (nameMatch) name = nameMatch[1].trim();
+        
+        const descMatch = frontMatter.match(/^description:\s*(.+)/m);
+        if (descMatch) description = descMatch[1].trim();
+        
+        if (frontMatter.match(/^description:\s*\|/m)) {
+           const descLines = [];
+           const lines = frontMatter.split(/\r?\n/);
+           let inDesc = false;
+           for (const line of lines) {
+             if (line.match(/^description:\s*\|/)) {
+               inDesc = true;
+               continue;
+             }
+             if (inDesc) {
+               if (line.match(/^[a-z]+:/)) break;
+               descLines.push(line.trim());
+             }
+           }
+           if (descLines.length > 0) {
+             description = descLines.filter(Boolean).join(" ");
+           }
+        }
+      } else {
+        const nameMatch = content.match(/^name:\s*(.+)/m);
+        if (nameMatch) name = nameMatch[1].trim();
+        const descMatch = content.match(/^description:\s*(.+)/m);
+        if (descMatch) description = descMatch[1].trim();
+      }
+
+      return {
+        id: folderName,
+        name,
+        description,
+        content: body,
+        source: 'public'
+      };
+    } catch (e) {
+      return null;
+    }
+  }
+
+  private async scanSkillsDirectory(dir: string, source: 'public' | 'agent'): Promise<AgentSkill[]> {
+    const skills: AgentSkill[] = [];
+    try {
+      const entries = await fs.readdir(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.isDirectory() && !entry.name.startsWith('.')) {
+          const skill = await this.parseSkillFile(path.join(dir, entry.name), entry.name);
+          if (skill) {
+            skill.source = source;
+            skills.push(skill);
+          }
+        }
+      }
+    } catch (e) {
+      // Directory might not exist, ignore
+    }
+    return skills;
+  }
+
+  async getMergedSkillsForAgent(agentId: string): Promise<AgentSkill[]> {
+    await this.init();
+    const publicSkills = await this.scanSkillsDirectory(this.publicSkillsDir, 'public');
+    
+    const agentSkillsDir = this.getWorkspaceDir(`agent:${agentId}`);
+    const agentSkills = await this.scanSkillsDirectory(agentSkillsDir, 'agent');
+
+    const skillMap = new Map<string, AgentSkill>();
+    
+    // Load public skills first
+    for (const skill of publicSkills) {
+      skillMap.set(skill.id, skill);
+    }
+
+    // Override with agent skills (if same id, agent workspace wins)
+    for (const skill of agentSkills) {
+      skillMap.set(skill.id, skill);
+    }
+
+    return Array.from(skillMap.values());
   }
 
   async getStorePlugins(): Promise<PluginManifest[]> {
@@ -160,13 +274,80 @@ export class PluginManager {
 
   async getInstalledPlugins(): Promise<InstalledPlugin[]> {
     await this.init();
+    let registryPlugins: InstalledPlugin[] = [];
     try {
       const data = await fs.readFile(this.registryPath, 'utf-8');
-      return JSON.parse(data) as InstalledPlugin[];
+      registryPlugins = JSON.parse(data) as InstalledPlugin[];
     } catch (e) {
       console.error('Failed to read plugin registry', e);
-      return [];
     }
+
+    // Scan for manually added .js files or directories in the public skills directory
+    try {
+      const entries = await fs.readdir(this.publicSkillsDir, { withFileTypes: true });
+      for (const entry of entries) {
+        let id: string | null = null;
+        let pluginName = '';
+        let description = 'Manually added local skill';
+        let version = 'local';
+        let isDir = false;
+
+        if (entry.isFile() && entry.name.endsWith('.js')) {
+          id = entry.name.replace('.js', '');
+          pluginName = id;
+        } else if (entry.isDirectory()) {
+          // Check if it's a valid skill directory (e.g., contains SKILL.md or index.js)
+          const dirPath = path.join(this.publicSkillsDir, entry.name);
+          try {
+            const files = await fs.readdir(dirPath);
+            if (files.includes('SKILL.md') || files.includes('index.js')) {
+              id = entry.name;
+              pluginName = id;
+              isDir = true;
+              
+              // Optionally parse SKILL.md for metadata
+              if (files.includes('SKILL.md')) {
+                try {
+                  const content = await fs.readFile(path.join(dirPath, 'SKILL.md'), 'utf-8');
+                  const nameMatch = content.match(/name:\s*(.+)/);
+                  const descMatch = content.match(/description:\s*(.+)/);
+                  const versionMatch = content.match(/version:\s*(.+)/);
+                  
+                  if (nameMatch) pluginName = nameMatch[1].trim();
+                  if (descMatch) description = descMatch[1].trim();
+                  if (versionMatch) version = versionMatch[1].trim();
+                } catch (e) {
+                  // ignore parse error
+                }
+              }
+            }
+          } catch (e) {
+            continue;
+          }
+        }
+
+        if (id) {
+          // If not already in registry for 'public' scope, add a placeholder entry
+          if (!registryPlugins.find(p => p.id === id && p.scope === 'public')) {
+            registryPlugins.push({
+              id: id,
+              name: pluginName,
+              description: description,
+              version: version,
+              author: 'Local User',
+              icon: isDir ? '📁' : '📄',
+              installedAt: Date.now(),
+              filePath: isDir ? path.join(this.publicSkillsDir, entry.name) : path.join(this.publicSkillsDir, entry.name),
+              scope: 'public'
+            });
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to scan public skills directory:', e);
+    }
+
+    return registryPlugins;
   }
 
   async installPlugin(id: string, scope: string = 'public'): Promise<boolean> {
@@ -190,15 +371,23 @@ export class PluginManager {
     const filePath = path.join(targetDir, `${id}.js`);
     await fs.writeFile(filePath, code, 'utf-8');
 
-    // Update registry
     const newPlugin: InstalledPlugin = {
       ...storePlugin,
       installedAt: Date.now(),
       filePath,
       scope
     };
-    installed.push(newPlugin);
-    await fs.writeFile(this.registryPath, JSON.stringify(installed, null, 2), 'utf-8');
+
+    // Update registry by reading it directly to avoid writing local-only plugins back
+    try {
+      const data = await fs.readFile(this.registryPath, 'utf-8');
+      const registryPlugins = JSON.parse(data) as InstalledPlugin[];
+      registryPlugins.push(newPlugin);
+      await fs.writeFile(this.registryPath, JSON.stringify(registryPlugins, null, 2), 'utf-8');
+    } catch (e) {
+      // If registry read fails, just write the new plugin as an array
+      await fs.writeFile(this.registryPath, JSON.stringify([newPlugin], null, 2), 'utf-8');
+    }
 
     return true;
   }
@@ -209,16 +398,27 @@ export class PluginManager {
     const plugin = installed.find(p => p.id === id && p.scope === scope);
     if (!plugin) return true;
 
-    // Remove file
+    // Remove file or directory
     try {
-      await fs.unlink(plugin.filePath);
+      const stat = await fs.stat(plugin.filePath);
+      if (stat.isDirectory()) {
+        await fs.rm(plugin.filePath, { recursive: true, force: true });
+      } else {
+        await fs.unlink(plugin.filePath);
+      }
     } catch (e) {
-      console.warn('Failed to delete plugin file:', e);
+      console.warn('Failed to delete plugin file/directory:', e);
     }
 
-    // Update registry
-    installed = installed.filter(p => !(p.id === id && p.scope === scope));
-    await fs.writeFile(this.registryPath, JSON.stringify(installed, null, 2), 'utf-8');
+    // Update registry by reading it directly to avoid writing local-only plugins back
+    try {
+      const data = await fs.readFile(this.registryPath, 'utf-8');
+      let registryPlugins = JSON.parse(data) as InstalledPlugin[];
+      registryPlugins = registryPlugins.filter(p => !(p.id === id && p.scope === scope));
+      await fs.writeFile(this.registryPath, JSON.stringify(registryPlugins, null, 2), 'utf-8');
+    } catch (e) {
+      console.error('Failed to update plugin registry during uninstall', e);
+    }
 
     return true;
   }
@@ -240,7 +440,23 @@ export class PluginManager {
 
     for (const plugin of pluginsToLoad) {
       try {
-        const code = await fs.readFile(plugin.filePath, 'utf-8');
+        const stat = await fs.stat(plugin.filePath);
+        let codePath = plugin.filePath;
+        
+        if (stat.isDirectory()) {
+          // Check if index.js exists
+          const indexJsPath = path.join(plugin.filePath, 'index.js');
+          try {
+            await fs.access(indexJsPath);
+            codePath = indexJsPath;
+          } catch (e) {
+            // It's a directory but no index.js (maybe a prompt-only skill with SKILL.md)
+            console.log(`[PluginManager] Skill ${plugin.id} is a directory without index.js, skipping JS load.`);
+            continue;
+          }
+        }
+
+        const code = await fs.readFile(codePath, 'utf-8');
         
         // Setup secure context with injected kairo API
         const sandbox = {

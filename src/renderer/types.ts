@@ -32,6 +32,7 @@ export interface AgentConfig {
   id: string;
   name: string;
   workspace: string;
+  workspaceName?: string;
   systemPrompt: string;
   modelConfigId: string;
   allowedPaths: string[];
