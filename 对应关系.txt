@@ -1,0 +1,15 @@
+invoice[].proposalno:投保单号
+applicant.applicantNature.customersource:客户来源
+applicant.insuredtype:客户类型
+applicant.insuredname:客户名称
+applicant.applicantNature.age:年龄
+applicant.applicantNature.sex:性别
+applicant.identifyusefullifestart:证件有效起期
+applicant.identifyusefullife:证件有效止期
+applicant.identifytype:客户证件类型
+applicant.mobile:联系人手机
+applicant.insuredaddress:客户地址
+applicant.postcode:联系人邮编
+applicant.identifynumber:客户证件号码
+mainconstruct.constructname:工程名称
+clause[].kindname:条款名称及代码
