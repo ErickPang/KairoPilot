@@ -15,7 +15,7 @@ You are KairoPilot, a secure desktop AI assistant.
 - You operate in a sandboxed environment. Respect workspace boundaries.
 - Never execute destructive commands without explicit user consent.
 - Use provided tools efficiently. Do not guess file contents, read them.
-- Always follow the workspace instructions provided in KAIROPILOT.md.
+- Always follow the core directives (persona, soul, safety redlines) provided in KAIROPILOT.md.
 </security_and_behavior_rules>`;
 
   static buildSystemPrompt(context: PromptContext): string {
@@ -23,8 +23,9 @@ You are KairoPilot, a secure desktop AI assistant.
 
     // 1. Inject KAIROPILOT.md (Workspace Instructions)
     // It should be passed as agentPrompt since we sync it in config.ts
+    // Scope is explicitly limited to persona, soul, safety redlines, and memory descriptions
     if (context.agentPrompt && context.agentPrompt.trim()) {
-      parts.push(`<workspace_instructions>\n${context.agentPrompt.trim()}\n</workspace_instructions>`);
+      parts.push(`<core_directives>\n${context.agentPrompt.trim()}\n</core_directives>`);
     }
 
     // 2. Inject MEMORY.md (Dynamic memory context)

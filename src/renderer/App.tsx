@@ -8,6 +8,7 @@ import { ChatInterface } from './components/ChatInterface';
 import { ConfirmationModal } from './components/ConfirmationModal';
 import AuditLogViewer from './components/AuditLogViewer';
 import { PluginStorePanel } from './components/PluginStorePanel';
+import { SkillStorePanel } from './components/SkillStorePanel'; // Added skill store panel
 import { Dashboard } from './components/Dashboard';
 import { IconChat, IconShield, IconSettings, IconPlugin, IconDashboard } from './components/Icons';
 import { useTranslation } from './hooks/useTranslation';
@@ -38,7 +39,7 @@ function App() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [confirmationRequest, setConfirmationRequest] = useState<{ id: string; tool: string; args: Record<string, unknown> } | null>(null);
-  const [activeTab, setActiveTab] = useState<'chat' | 'plugins' | 'settings' | 'audit' | 'dashboard'>('chat');
+  const [activeTab, setActiveTab] = useState<'chat' | 'plugins' | 'skills' | 'settings' | 'audit' | 'dashboard'>('chat');
   const [activeConfigSection, setActiveConfigSection] = useState<string>('general');
 
   const { t } = useTranslation();
@@ -404,9 +405,18 @@ function App() {
         <div 
           className={`nav-icon ${activeTab === 'plugins' ? 'active' : ''}`}
           onClick={() => setActiveTab('plugins')}
-          title={t('nav.skills')}
+          title={t('nav.plugins')}
         >
           <IconPlugin size={24} />
+        </div>
+
+        <div 
+          className={`nav-icon ${activeTab === 'skills' ? 'active' : ''}`}
+          onClick={() => setActiveTab('skills')}
+          title={t('nav.skills')}
+        >
+          {/* We'll use a generic icon for skills for now, like a star or magic wand. Using IconPlugin temporarily or you can add IconSkill */}
+          <IconPlugin size={24} /> 
         </div>
         
         <div className="nav-spacer" />
@@ -475,6 +485,12 @@ function App() {
       {activeTab === 'plugins' && (
         <div className="main-content" style={{ padding: 0, height: '100%', overflow: 'hidden' }}>
           <PluginStorePanel />
+        </div>
+      )}
+
+      {activeTab === 'skills' && (
+        <div className="main-content" style={{ padding: 0, height: '100%', overflow: 'hidden' }}>
+          <SkillStorePanel />
         </div>
       )}
       

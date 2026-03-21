@@ -16,6 +16,7 @@ const zh: Record<TranslationKey, string> = {
 
   // Navigation
   'nav.chat': '聊天',
+  'nav.plugins': '插件',
   'nav.skills': '技能',
   'nav.auditLogs': '审计日志',
   'nav.settings': '设置',
@@ -109,9 +110,23 @@ const zh: Record<TranslationKey, string> = {
   'modal.deny': '拒绝 (Deny)',
   'modal.allow': '允许执行 (Allow)',
 
-  // Skills
-  'skills.installed': '已安装插件',
-  'skills.marketplace': '插件商店',
+  // Skills & Plugins
+  'plugins.subtitle': '管理本地与市场的底层能力扩展',
+  'plugins.installedTab': '已安装',
+  'plugins.uninstalledTab': '未安装 (市场)',
+  'plugins.installedTitle': '已安装插件',
+  'plugins.noInstalled': '暂无已安装插件',
+
+  'skills.publicCategory': '公共技能 (所有 Agent 可用)',
+  'skills.agentCategory': 'Agent 技能: {agent}',
+  'skills.title': '技能商店 (Skills)',
+  'skills.subtitle': '查看所有公共技能与各个 Agent 专属技能',
+  'skills.noPublic': '暂无公共技能',
+  'skills.noAgent': '暂无专属技能',
+
+  'skills.installed': '已安装技能',
+  'skills.marketplace': '技能市场',
+  'skills.comingSoon': '技能市场正在建设中，敬请期待...',
   'skills.install': '安装',
   'skills.uninstall': '卸载',
   'skills.loading': '加载插件中...',
@@ -126,6 +141,7 @@ const zh: Record<TranslationKey, string> = {
   'skills.author': '作者',
   'skills.installedAt': '安装时间',
   'skills.by': '作者 {author}',
+  'skills.description': '描述',
   
   // Agents
   'agent.defaultName': '主 Agent',
@@ -159,8 +175,8 @@ const zh: Record<TranslationKey, string> = {
   'config.agentNameHelp': '您的 AI Agent 名称。',
   'config.linkedModel': '关联模型',
   'config.linkedModelHelp': '此 Agent 将使用的 LLM 配置。',
-  'config.systemPrompt': '系统提示词',
-  'config.systemPromptHelp': '定义 Agent 行为和个性的指令。',
+  'config.systemPrompt': '系统提示词 (KAIROPILOT.md)',
+  'config.systemPromptHelp': '定义 Agent 的人设、灵魂、安全红线和记忆描述等非插件类核心指令。',
   'config.security': '安全与权限',
   'config.workspace': '工作区目录',
   'config.selectWorkspace': '选择目录',

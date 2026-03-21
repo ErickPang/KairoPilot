@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { IconPlugin, IconTrash, IconRefresh } from './Icons';
 import './PluginStorePanel.css';
 import { useTranslation } from '../hooks/useTranslation';
+import { AgentConfig } from '../../main/store/config';
 
 interface PluginManifest {
   id: string;
@@ -22,6 +23,7 @@ export function PluginStorePanel() {
   const { t } = useTranslation();
   const [storePlugins, setStorePlugins] = useState<PluginManifest[]>([]);
   const [installedPlugins, setInstalledPlugins] = useState<InstalledPlugin[]>([]);
+  const [agents, setAgents] = useState<AgentConfig[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionInProgress, setActionInProgress] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -46,12 +48,21 @@ export function PluginStorePanel() {
     setLoading(true);
     setError(null);
     try {
-      const [store, installed] = await Promise.all([
+      const [store, installed, fetchedAgents] = await Promise.all([
         window.ipcRenderer.invoke('plugins:getStore'),
-        window.ipcRenderer.invoke('plugins:getInstalled')
+        window.ipcRenderer.invoke('plugins:getInstalled'),
+        window.ipcRenderer.invoke('config:get-agents')
       ]);
+      
+      // Inject native tools as installed plugins
+      const nativeTools: InstalledPlugin[] = [
+        { id: 'web_search', name: 'Web Search', description: 'Search the internet for real-time information.', version: '1.0.0', author: 'KairoPilot', installedAt: Date.now(), filePath: 'built-in', scope: 'public', icon: '🔍' },
+        { id: 'web_fetch', name: 'Web Fetch', description: 'Fetch and read content from specific URLs.', version: '1.0.0', author: 'KairoPilot', installedAt: Date.now(), filePath: 'built-in', scope: 'public', icon: '🌐' }
+      ];
+      
       setStorePlugins(store as unknown as PluginManifest[]);
-      setInstalledPlugins(installed as unknown as InstalledPlugin[]);
+      setInstalledPlugins([...nativeTools, ...(installed as unknown as InstalledPlugin[])]);
+      setAgents(fetchedAgents as AgentConfig[]);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to fetch plugins');
     } finally {
@@ -96,19 +107,9 @@ export function PluginStorePanel() {
     }
   };
 
-  const uninstalledPlugins = storePlugins;
+  const uninstalledPlugins = storePlugins.filter(p => !installedPlugins.find(ip => ip.id === p.id));
 
-  const publicSkills = installedPlugins.filter(p => p.scope === 'public');
-  
-  // Group non-public plugins by agent
-  const agentPlugins = installedPlugins.reduce((acc, plugin) => {
-    if (plugin.scope.startsWith('agent:')) {
-      const agentId = plugin.scope.split(':')[1];
-      if (!acc[agentId]) acc[agentId] = [];
-      acc[agentId].push(plugin);
-    }
-    return acc;
-  }, {} as Record<string, InstalledPlugin[]>);
+  const publicPlugins = installedPlugins.filter(p => p.scope === 'public');
 
   return (
     <div className="config-panel">
@@ -123,9 +124,9 @@ export function PluginStorePanel() {
               }}>
                 <IconPlugin size={20} />
               </div>
-              {t('nav.skills')}
+              {t('nav.plugins')}
             </div>
-            <div className="config-subtitle">{t('skills.marketplace')}</div>
+            <div className="config-subtitle">{t('plugins.subtitle')}</div>
           </div>
           <button onClick={loadPlugins} className="btn btn-secondary" disabled={loading}>
             <IconRefresh size={16} className={loading ? 'spinning' : ''} />
@@ -137,13 +138,13 @@ export function PluginStorePanel() {
             className={`plugin-tab ${activeTab === 'installed' ? 'active' : ''}`}
             onClick={() => setActiveTab('installed')}
           >
-            {t('skills.installed')}
+            {t('plugins.installedTab')}
           </button>
           <button 
             className={`plugin-tab ${activeTab === 'store' ? 'active' : ''}`}
             onClick={() => setActiveTab('store')}
           >
-            {t('skills.marketplace')}
+            {t('plugins.uninstalledTab')}
           </button>
         </div>
       </div>
@@ -166,41 +167,22 @@ export function PluginStorePanel() {
 
         {!loading && activeTab === 'installed' && (
           <div className="installed-skills-container">
-            <h3 className="skill-category-title">{t('skills.publicSkills')} (~/.kairopilot/skills)</h3>
-            {publicSkills.length === 0 ? (
-              <div className="empty-state">{t('skills.noPublicSkills')}</div>
+            <h3 className="skill-category-title">{t('plugins.installedTitle')}</h3>
+            {publicPlugins.length === 0 ? (
+              <div className="empty-state">{t('plugins.noInstalled')}</div>
             ) : (
               <div className="skill-list">
-                {publicSkills.map(plugin => (
+                {publicPlugins.map(plugin => (
                   <InstalledSkillItem 
                     key={`${plugin.id}-${plugin.scope}`} 
                     plugin={plugin} 
                     onUninstall={() => handleUninstall(plugin.id, plugin.scope)}
                     isWorking={actionInProgress === `${plugin.id}-${plugin.scope}`}
+                    isNative={plugin.filePath === 'built-in'}
                   />
                 ))}
               </div>
             )}
-
-            {Object.entries(agentPlugins).map(([agentId, plugins]) => (
-              <div key={agentId}>
-                <h3 className="skill-category-title" style={{ marginTop: '2rem' }}>{t('skills.agentSkills')}: {agentId}</h3>
-                <div className="skill-list">
-                  {plugins.length === 0 ? (
-                    <div className="empty-state">{t('skills.noAgentSkills')}</div>
-                  ) : (
-                    plugins.map(plugin => (
-                      <InstalledSkillItem 
-                        key={`${plugin.id}-${plugin.scope}`} 
-                        plugin={plugin} 
-                        onUninstall={() => handleUninstall(plugin.id, plugin.scope)}
-                        isWorking={actionInProgress === `${plugin.id}-${plugin.scope}`}
-                      />
-                    ))
-                  )}
-                </div>
-              </div>
-            ))}
           </div>
         )}
 
@@ -253,7 +235,7 @@ export function PluginStorePanel() {
         <div className="modal-overlay" onClick={() => setInstallModalOpen(false)}>
           <div className="modal-content" onClick={e => e.stopPropagation()}>
             <h3 style={{ marginBottom: '1rem', color: 'var(--foreground)' }}>{t('skills.installScope')}</h3>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', maxHeight: '300px', overflowY: 'auto' }}>
               <button 
                 className="btn btn-secondary" 
                 onClick={() => handleConfirmInstall('public')}
@@ -261,20 +243,16 @@ export function PluginStorePanel() {
               >
                 {t('skills.publicScope')}
               </button>
-              <button 
-                className="btn btn-secondary" 
-                onClick={() => handleConfirmInstall('agent:mainAgent')}
-                style={{ justifyContent: 'flex-start', padding: '0.75rem', backgroundColor: 'var(--background)' }}
-              >
-                {t('skills.agentScope', { agent: 'mainAgent' })}
-              </button>
-              <button 
-                className="btn btn-secondary" 
-                onClick={() => handleConfirmInstall('agent:wechat')}
-                style={{ justifyContent: 'flex-start', padding: '0.75rem', backgroundColor: 'var(--background)' }}
-              >
-                {t('skills.agentScope', { agent: 'wechat' })}
-              </button>
+              {agents.map(agent => (
+                <button 
+                  key={agent.id}
+                  className="btn btn-secondary" 
+                  onClick={() => handleConfirmInstall(`agent:${agent.id}`)}
+                  style={{ justifyContent: 'flex-start', padding: '0.75rem', backgroundColor: 'var(--background)' }}
+                >
+                  {t('skills.agentScope', { agent: agent.name })}
+                </button>
+              ))}
             </div>
             <div style={{ marginTop: '1rem', display: 'flex', justifyContent: 'flex-end' }}>
               <button className="btn" onClick={() => setInstallModalOpen(false)}>{t('common.cancel')}</button>
@@ -286,7 +264,7 @@ export function PluginStorePanel() {
   );
 }
 
-function InstalledSkillItem({ plugin, onUninstall, isWorking }: { plugin: InstalledPlugin, onUninstall: () => void, isWorking: boolean }) {
+function InstalledSkillItem({ plugin, onUninstall, isWorking, isNative }: { plugin: InstalledPlugin, onUninstall: () => void, isWorking: boolean, isNative?: boolean }) {
   const [expanded, setExpanded] = useState(false);
   const { t } = useTranslation();
   
@@ -300,19 +278,21 @@ function InstalledSkillItem({ plugin, onUninstall, isWorking }: { plugin: Instal
             <div style={{ fontSize: '0.8rem', color: 'var(--muted-fg)' }}>v{plugin.version}</div>
           </div>
         </div>
-        <button 
-          className="btn btn-secondary btn-sm btn-danger"
-          onClick={(e) => {
-            e.stopPropagation();
-            if(confirm(t('common.confirm') + ' ' + t('skills.uninstall') + '?')) {
-              onUninstall();
-            }
-          }}
-          disabled={isWorking}
-        >
-          {isWorking ? <IconRefresh size={14} className="spinning" /> : <IconTrash size={14} />}
-          <span style={{ marginLeft: '4px' }}>{t('skills.uninstall')}</span>
-        </button>
+        {!isNative && (
+          <button 
+            className="btn btn-secondary btn-sm btn-danger"
+            onClick={(e) => {
+              e.stopPropagation();
+              if(confirm(t('common.confirm') + ' ' + t('skills.uninstall') + '?')) {
+                onUninstall();
+              }
+            }}
+            disabled={isWorking}
+          >
+            {isWorking ? <IconRefresh size={14} className="spinning" /> : <IconTrash size={14} />}
+            <span style={{ marginLeft: '4px' }}>{t('skills.uninstall')}</span>
+          </button>
+        )}
       </div>
       {expanded && (
         <div className="skill-item-details" onClick={(e) => e.stopPropagation()}>

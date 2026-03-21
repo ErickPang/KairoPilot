@@ -16,6 +16,7 @@ const en = {
 
   // Navigation
   'nav.chat': 'Chat',
+  'nav.plugins': 'Plugins',
   'nav.skills': 'Skills',
   'nav.auditLogs': 'Audit Logs',
   'nav.settings': 'Settings',
@@ -109,9 +110,23 @@ const en = {
   'modal.deny': 'Deny',
   'modal.allow': 'Allow',
 
-  // Skills
-  'skills.installed': 'Installed',
-  'skills.marketplace': 'Marketplace',
+  // Skills & Plugins
+  'plugins.subtitle': 'Manage local and marketplace core capabilities',
+  'plugins.installedTab': 'Installed',
+  'plugins.uninstalledTab': 'Not Installed (Market)',
+  'plugins.installedTitle': 'Installed Plugins',
+  'plugins.noInstalled': 'No installed plugins.',
+
+  'skills.publicCategory': 'Public Skills (Available to all Agents)',
+  'skills.agentCategory': 'Agent Skills: {agent}',
+  'skills.title': 'Skills Store',
+  'skills.subtitle': 'View all public and agent-specific skills',
+  'skills.noPublic': 'No public skills found.',
+  'skills.noAgent': 'No specific skills found.',
+
+  'skills.installed': 'Installed Skills',
+  'skills.marketplace': 'Skills Marketplace',
+  'skills.comingSoon': 'Skill marketplace is under construction, coming soon...',
   'skills.install': 'Install',
   'skills.uninstall': 'Uninstall',
   'skills.loading': 'Loading plugins...',
@@ -126,6 +141,7 @@ const en = {
   'skills.author': 'Author',
   'skills.installedAt': 'Installed',
   'skills.by': 'By {author}',
+  'skills.description': 'Description',
   
   // Agents
   'agent.defaultName': 'Main Agent',
@@ -159,8 +175,8 @@ const en = {
   'config.agentNameHelp': 'Name of your AI agent.',
   'config.linkedModel': 'Linked Model',
   'config.linkedModelHelp': 'The LLM configuration this agent will use.',
-  'config.systemPrompt': 'System Prompt',
-  'config.systemPromptHelp': 'Instructions that define the agent\'s behavior and personality.',
+  'config.systemPrompt': 'System Prompt (KAIROPILOT.md)',
+  'config.systemPromptHelp': 'Define the agent\'s persona, soul, safety redlines, and memory descriptions (exclude plugin/skill specifics).',
   'config.security': 'Security & Permissions',
   'config.workspace': 'Workspace Directory',
   'config.selectWorkspace': 'Select Directory',

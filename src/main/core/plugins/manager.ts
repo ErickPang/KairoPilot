@@ -39,12 +39,12 @@ const MOCK_STORE: PluginManifest[] = [
     icon: '₿'
   },
   {
-    id: 'kairo-websearch-plugin',
-    name: 'Web Search',
-    description: 'Search the internet for real-time information using DuckDuckGo.',
-    version: '1.1.0',
-    author: 'Community',
-    icon: '🔍'
+    id: 'kairo-github-plugin',
+    name: 'GitHub Integration',
+    description: 'Interact with GitHub repositories and issues.',
+    version: '1.2.0',
+    author: 'Kairo Team',
+    icon: '🐙'
   }
 ];
 
@@ -89,18 +89,18 @@ const getPluginCode = (id: string) => {
       };
      `;
   }
-  if (id === 'kairo-websearch-plugin') {
+  if (id === 'kairo-github-plugin') {
       return `
       module.exports = {
         tools: [
           {
-            name: 'web_search',
-            description: 'Search the web for up-to-date information.',
+            name: 'github_search',
+            description: 'Search GitHub repositories.',
             parameters: z.object({
               query: z.string().describe('The search query')
             }),
             execute: async ({ query }) => {
-              return "Search results for " + query + ":\\n1. Found some relevant information...\\n2. Another source says something interesting.";
+              return "GitHub Search results for " + query + ":\\n1. Found some popular repos...\\n2. React, Vue, etc.";
             }
           }
         ]
@@ -281,72 +281,6 @@ export class PluginManager {
     } catch (e) {
       console.error('Failed to read plugin registry', e);
     }
-
-    // Scan for manually added .js files or directories in the public skills directory
-    try {
-      const entries = await fs.readdir(this.publicSkillsDir, { withFileTypes: true });
-      for (const entry of entries) {
-        let id: string | null = null;
-        let pluginName = '';
-        let description = 'Manually added local skill';
-        let version = 'local';
-        let isDir = false;
-
-        if (entry.isFile() && entry.name.endsWith('.js')) {
-          id = entry.name.replace('.js', '');
-          pluginName = id;
-        } else if (entry.isDirectory()) {
-          // Check if it's a valid skill directory (e.g., contains SKILL.md or index.js)
-          const dirPath = path.join(this.publicSkillsDir, entry.name);
-          try {
-            const files = await fs.readdir(dirPath);
-            if (files.includes('SKILL.md') || files.includes('index.js')) {
-              id = entry.name;
-              pluginName = id;
-              isDir = true;
-              
-              // Optionally parse SKILL.md for metadata
-              if (files.includes('SKILL.md')) {
-                try {
-                  const content = await fs.readFile(path.join(dirPath, 'SKILL.md'), 'utf-8');
-                  const nameMatch = content.match(/name:\s*(.+)/);
-                  const descMatch = content.match(/description:\s*(.+)/);
-                  const versionMatch = content.match(/version:\s*(.+)/);
-                  
-                  if (nameMatch) pluginName = nameMatch[1].trim();
-                  if (descMatch) description = descMatch[1].trim();
-                  if (versionMatch) version = versionMatch[1].trim();
-                } catch (e) {
-                  // ignore parse error
-                }
-              }
-            }
-          } catch (e) {
-            continue;
-          }
-        }
-
-        if (id) {
-          // If not already in registry for 'public' scope, add a placeholder entry
-          if (!registryPlugins.find(p => p.id === id && p.scope === 'public')) {
-            registryPlugins.push({
-              id: id,
-              name: pluginName,
-              description: description,
-              version: version,
-              author: 'Local User',
-              icon: isDir ? '📁' : '📄',
-              installedAt: Date.now(),
-              filePath: isDir ? path.join(this.publicSkillsDir, entry.name) : path.join(this.publicSkillsDir, entry.name),
-              scope: 'public'
-            });
-          }
-        }
-      }
-    } catch (e) {
-      console.warn('Failed to scan public skills directory:', e);
-    }
-
     return registryPlugins;
   }
 

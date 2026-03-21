@@ -187,7 +187,7 @@ let previousCpus = os.cpus();
     }
   }
 
-import { pluginManager } from '../core/plugins/manager';
+import { pluginManager, AgentSkill } from '../core/plugins/manager';
 
 export function setupHandlers() {
   // --- Plugin Store Handlers ---
@@ -197,6 +197,23 @@ export function setupHandlers() {
 
   ipcMain.handle('plugins:getInstalled', async () => {
     return pluginManager.getInstalledPlugins();
+  });
+
+  ipcMain.handle('skills:getAll', async () => {
+    const agents = getAgents();
+    const result: Record<string, AgentSkill[]> = {};
+    
+    // For now let's just get public skills using pluginManager.getMergedSkillsForAgent('mainAgent') and filter by 'public'
+    const mainSkills = await pluginManager.getMergedSkillsForAgent('mainAgent');
+    result['public'] = mainSkills.filter((s: AgentSkill) => s.source === 'public');
+    
+    // For each agent, get their skills
+    for (const agent of agents) {
+      const agentSkills = await pluginManager.getMergedSkillsForAgent(agent.id);
+      result[agent.id] = agentSkills.filter((s: AgentSkill) => s.source === 'agent');
+    }
+    
+    return result;
   });
 
   ipcMain.handle('plugins:install', async (_, args) => {
