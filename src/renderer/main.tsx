@@ -7,7 +7,7 @@ import { I18nProvider } from './components/layout/I18nProvider'
 // Mock ipcRenderer for browser preview
 if (!window.ipcRenderer) {
   window.ipcRenderer = {
-    invoke: (async (channel: string, ...args: any[]) => {
+    invoke: (async (channel: string, ...args: unknown[]) => {
       console.log(`[Mock] invoke ${channel}`, args);
       if (channel === 'config:get') return {};
       if (channel === 'chat:getActiveSession') return null;
@@ -32,21 +32,21 @@ if (!window.ipcRenderer) {
         uptime: 123
       };
       return null;
-    }) as any,
-    on: (channel, _listener) => {
+    }) as CustomIpcRenderer['invoke'],
+    on: (channel: string) => {
       console.log(`[Mock] on ${channel}`);
       return () => {};
     },
-    send: (channel, ...args) => {
+    send: (channel: string, ...args: unknown[]) => {
       console.log(`[Mock] send ${channel}`, args);
     },
-    off: (channel, _listener) => {
+    off: (channel: string) => {
       console.log(`[Mock] off ${channel}`);
     },
-    removeListener: (channel, _listener) => {
+    removeListener: (channel: string) => {
       console.log(`[Mock] removeListener ${channel}`);
     },
-    removeAllListeners: (channel) => {
+    removeAllListeners: (channel: string) => {
       console.log(`[Mock] removeAllListeners ${channel}`);
     }
   };

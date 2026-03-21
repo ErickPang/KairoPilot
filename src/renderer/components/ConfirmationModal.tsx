@@ -2,7 +2,7 @@ import { IconShield } from './Icons';
 import { useTranslation } from '../hooks/useTranslation';
 
 interface ConfirmationModalProps {
-  request: { id: string; tool: string; args: any };
+  request: { id: string; tool: string; args: Record<string, unknown> };
   onConfirm: () => void;
   onDeny: () => void;
 }

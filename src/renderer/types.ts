@@ -1,8 +1,8 @@
 export interface Message {
   role: 'user' | 'assistant' | 'system' | 'tool' | 'thinking';
-  content: string;
-  details?: any;
-  tool_calls?: any[];
+  content?: string;
+  details?: Record<string, unknown>;
+  tool_calls?: Record<string, unknown>[];
   tool_call_id?: string;
   name?: string;
 }
@@ -62,8 +62,8 @@ export interface AuditLogEntry {
   id: string;
   timestamp: number;
   tool: string;
-  args: any;
-  result?: any;
+  args: Record<string, unknown>;
+  result?: unknown;
   error?: string;
   sessionId?: string;
 }

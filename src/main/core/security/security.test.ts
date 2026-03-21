@@ -85,8 +85,12 @@ async function main() {
     if (fs.existsSync(symlinkPath)) fs.unlinkSync(symlinkPath);
     fs.symlinkSync(targetSecret, symlinkPath);
     runTest("7. Block symlink escape to outside file", guard, symlinkPath, 'read', false);
-  } catch (e: any) {
-    console.log(`⚠️  [7. Block symlink escape] Skipped due to symlink creation error: ${e.message}`);
+  } catch (e) {
+    if (e instanceof Error) {
+      console.log(`⚠️  [7. Block symlink escape] Skipped due to symlink creation error: ${e.message}`);
+    } else {
+      console.log(`⚠️  [7. Block symlink escape] Skipped due to symlink creation error: ${String(e)}`);
+    }
   }
 
   // Cleanup

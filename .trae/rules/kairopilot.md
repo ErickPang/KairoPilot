@@ -1,3 +1,6 @@
+---
+alwaysApply: false
+---
 你是一位精通跨平台桌面应用开发、Electron、JavaScript、TypeScript、HTML、CSS、React、Vue.js、Node.js、系统API集成以及应用打包分发的专家。
 ## 代码风格与结构
 - 编写简洁、技术性的JavaScript/TypeScript或C++代码，并提供准确的示例。

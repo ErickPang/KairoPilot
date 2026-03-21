@@ -1,0 +1,183 @@
+.audit-viewer-icon-header {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: var(--primary-gradient);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--primary-fg);
+  box-shadow: 0 4px 12px var(--ring);
+}
+
+.audit-viewer-loading, .audit-viewer-empty {
+  text-align: center;
+  padding: 4rem;
+  color: var(--muted-fg);
+}
+
+.audit-viewer-empty-icon {
+  background: var(--primary-muted);
+  padding: 2rem;
+  border-radius: 50%;
+  color: var(--primary);
+  box-shadow: inset 0 2px 4px rgba(255,255,255,0.8), 0 4px 12px var(--ring);
+  display: inline-block;
+  margin-bottom: 1.5rem;
+}
+
+.audit-viewer-empty-text {
+  font-weight: 600;
+  color: var(--foreground);
+  font-size: 1.25rem;
+}
+
+.audit-log-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  max-height: calc(100vh - 200px);
+  overflow-y: auto;
+  padding-right: 0.5rem;
+}
+
+/* Custom Scrollbar for Audit Log List */
+.audit-log-list::-webkit-scrollbar {
+  width: 6px;
+}
+.audit-log-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+.audit-log-list::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
+.audit-log-list::-webkit-scrollbar-thumb:hover {
+  background: var(--muted-fg);
+}
+
+.audit-log-card {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 1rem;
+  margin: 0;
+  transition: all 0.2s ease;
+}
+
+.audit-log-card.is-error {
+  background: linear-gradient(135deg, rgba(254,242,242,0.6) 0%, rgba(254,242,242,0.9) 100%);
+  border-color: rgba(239, 68, 68, 0.2);
+}
+
+.audit-log-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.audit-log-tool-info {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.audit-log-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.audit-log-icon.is-success {
+  background: var(--primary-muted);
+  color: var(--primary);
+}
+
+.audit-log-icon.is-error {
+  background: rgba(239, 68, 68, 0.1);
+  color: var(--destructive);
+}
+
+.audit-log-tool-name {
+  font-weight: 600;
+  font-size: 1.05rem;
+  color: var(--foreground);
+}
+
+.audit-log-timestamp {
+  color: var(--muted-fg);
+  font-size: 0.8rem;
+  margin-top: 0.2rem;
+}
+
+.audit-log-badge {
+  padding: 0.4rem 0.75rem;
+}
+
+.audit-log-badge.is-error {
+  background: rgba(239, 68, 68, 0.1);
+  color: var(--destructive);
+}
+
+.audit-log-badge.is-success {
+  background: var(--primary-muted);
+  color: var(--success);
+}
+
+.audit-log-details {
+  border-radius: 8px;
+  border: 1px solid;
+  padding: 1rem;
+}
+
+.audit-log-details.is-success {
+  background: rgba(0, 0, 0, 0.02);
+  border-color: rgba(0, 0, 0, 0.05);
+}
+
+.audit-log-details.is-error {
+  background: rgba(255, 255, 255, 0.6);
+  border-color: rgba(239, 68, 68, 0.15);
+}
+
+.audit-log-section-title {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted-fg);
+  margin-bottom: 0.5rem;
+}
+
+.audit-log-args {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.85rem;
+  color: var(--foreground);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.audit-log-error-container {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px dashed rgba(239, 68, 68, 0.3);
+  color: var(--destructive);
+}
+
+.audit-log-error-title {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.5rem;
+}
+
+.audit-log-error-text {
+  font-size: 0.9rem;
+  white-space: pre-wrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}

@@ -36,7 +36,7 @@ function getDb(): Database.Database {
     
     // Migration for agent_id column
     try {
-      const columns = db.pragma('table_info(sessions)') as any[];
+      const columns = db.pragma('table_info(sessions)') as { name: string }[];
       const hasAgentId = columns.some(col => col.name === 'agent_id');
       if (!hasAgentId) {
         db.prepare('ALTER TABLE sessions ADD COLUMN agent_id TEXT').run();
@@ -49,7 +49,7 @@ function getDb(): Database.Database {
 
     // Migration for tool calls and usage in messages table
     try {
-      const msgColumns = db.pragma('table_info(messages)') as any[];
+      const msgColumns = db.pragma('table_info(messages)') as { name: string }[];
       const hasName = msgColumns.some(col => col.name === 'name');
       if (!hasName) {
         db.exec(`
@@ -164,7 +164,7 @@ function migrateFromElectronStore(db: Database.Database) {
 export function getSessions(agentId?: string): Session[] {
   const db = getDb();
   let query = 'SELECT id, title, agent_id, created_at, updated_at FROM sessions';
-  const params: any[] = [];
+  const params: unknown[] = [];
   
   if (agentId) {
     query += ' WHERE agent_id = ?';
@@ -173,10 +173,10 @@ export function getSessions(agentId?: string): Session[] {
   
   query += ' ORDER BY updated_at DESC';
   
-  const sessions = db.prepare(query).all(...params) as any[];
+  const sessions = db.prepare(query).all(...params) as { id: string; title: string; agent_id: string; created_at: number; updated_at: number }[];
   
   return sessions.map(s => {
-    const messages = db.prepare('SELECT role, content, timestamp, name, tool_call_id, tool_calls, usage FROM messages WHERE session_id = ? ORDER BY timestamp ASC').all(s.id) as any[];
+    const messages = db.prepare('SELECT role, content, timestamp, name, tool_call_id, tool_calls, usage FROM messages WHERE session_id = ? ORDER BY timestamp ASC').all(s.id) as { role: ChatMessage['role']; content: string; timestamp: number; name?: string; tool_call_id?: string; tool_calls?: string; usage?: string }[];
     return {
       id: s.id,
       title: s.title,
@@ -193,13 +193,15 @@ export function getSessions(agentId?: string): Session[] {
           try {
             msg.tool_calls = JSON.parse(m.tool_calls);
           } catch (e) {
-            // Ignore parse errors
+            console.warn('[DB] Failed to parse tool_calls:', e);
           }
         }
         if (m.usage) {
           try {
             msg.usage = JSON.parse(m.usage);
-          } catch (e) {}
+          } catch (e) {
+            console.warn('[DB] Failed to parse usage:', e);
+          }
         }
         return msg;
       }),
@@ -238,10 +240,10 @@ export function getActiveSession(): Session | null {
 
 export function getSessionById(sessionId: string): Session | null {
   const db = getDb();
-  const sessionRow = db.prepare('SELECT * FROM sessions WHERE id = ?').get(sessionId) as any;
+  const sessionRow = db.prepare('SELECT * FROM sessions WHERE id = ?').get(sessionId) as { id: string; title: string; agent_id: string; created_at: number; updated_at: number } | undefined;
   if (!sessionRow) return null;
 
-  const messages = db.prepare('SELECT role, content, timestamp, name, tool_call_id, tool_calls, usage FROM messages WHERE session_id = ? ORDER BY timestamp ASC').all(sessionId) as any[];
+  const messages = db.prepare('SELECT role, content, timestamp, name, tool_call_id, tool_calls, usage FROM messages WHERE session_id = ? ORDER BY timestamp ASC').all(sessionId) as { role: ChatMessage['role']; content: string; timestamp: number; name?: string; tool_call_id?: string; tool_calls?: string; usage?: string }[];
 
   return {
     id: sessionRow.id,

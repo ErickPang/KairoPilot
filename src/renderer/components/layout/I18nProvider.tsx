@@ -1,17 +1,6 @@
-import { createContext, useState, useEffect, useCallback, type ReactNode } from 'react';
+import { useState, useEffect, useCallback, type ReactNode } from 'react';
 import { type Locale, type TranslationKey, translate } from '../../i18n';
-
-interface I18nContextValue {
-  locale: Locale;
-  setLocale: (locale: Locale) => void;
-  t: (key: TranslationKey, params?: Record<string, string | number>) => string;
-}
-
-export const I18nContext = createContext<I18nContextValue>({
-  locale: 'en',
-  setLocale: () => {},
-  t: (key) => key,
-});
+import { I18nContext } from './I18nContext';
 
 const STORAGE_KEY = 'kairopilot_locale';
 

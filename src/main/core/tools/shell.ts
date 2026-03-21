@@ -11,8 +11,9 @@ export const createExecuteCommandTool = (cwd: string): ToolDefinition => ({
   parameters: z.object({
     command: z.string().describe('The shell command to execute'),
   }),
-  execute: async ({ command }: { command: string }) => {
+  execute: async (args: Record<string, unknown>) => {
     try {
+      const command = args.command as string;
       console.log(`Executing command: ${command} in ${cwd}`);
       const { stdout, stderr } = await execAsync(command, { cwd });
       return {
@@ -20,12 +21,13 @@ export const createExecuteCommandTool = (cwd: string): ToolDefinition => ({
         stderr: stderr.trim(),
         exitCode: 0
       };
-    } catch (error: any) {
+    } catch (error) {
+      const err = error as { stdout?: string; stderr?: string; code?: number; message: string };
       return {
-        stdout: error.stdout?.trim() || '',
-        stderr: error.stderr?.trim() || error.message,
-        exitCode: error.code || 1,
-        error: error.message
+        stdout: err.stdout?.trim() || '',
+        stderr: err.stderr?.trim() || err.message,
+        exitCode: err.code || 1,
+        error: err.message
       };
     }
   },

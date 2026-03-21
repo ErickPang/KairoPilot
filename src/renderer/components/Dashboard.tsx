@@ -24,7 +24,7 @@ export function Dashboard({ agents, systemStats }: DashboardProps) {
   useEffect(() => {
     const fetchStats = async () => {
       try {
-        const data = await window.ipcRenderer.invoke('chat:getAgentStats');
+        const data = await window.ipcRenderer.invoke('chat:getAgentStats') as AgentStats[];
         setStats(data);
       } catch (error) {
         console.error('Failed to fetch agent stats:', error);

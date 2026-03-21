@@ -394,7 +394,7 @@ export class PluginManager {
 
   async uninstallPlugin(id: string, scope: string): Promise<boolean> {
     await this.init();
-    let installed = await this.getInstalledPlugins();
+    const installed = await this.getInstalledPlugins();
     const plugin = installed.find(p => p.id === id && p.scope === scope);
     if (!plugin) return true;
 

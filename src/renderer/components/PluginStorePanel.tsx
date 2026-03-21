@@ -50,10 +50,10 @@ export function PluginStorePanel() {
         window.ipcRenderer.invoke('plugins:getStore'),
         window.ipcRenderer.invoke('plugins:getInstalled')
       ]);
-      setStorePlugins(store);
-      setInstalledPlugins(installed);
-    } catch (e: any) {
-      setError(e.message || 'Failed to load plugins');
+      setStorePlugins(store as unknown as PluginManifest[]);
+      setInstalledPlugins(installed as unknown as InstalledPlugin[]);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to fetch plugins');
     } finally {
       setLoading(false);
     }
@@ -73,8 +73,8 @@ export function PluginStorePanel() {
       } else {
         setError(result.error || 'Failed to install plugin');
       }
-    } catch (e: any) {
-      setError(e.message || 'Failed to install plugin');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to install plugin');
     } finally {
       setActionInProgress(null);
     }
@@ -89,8 +89,8 @@ export function PluginStorePanel() {
       } else {
         setError(result.error || 'Failed to uninstall plugin');
       }
-    } catch (e: any) {
-      setError(e.message || 'Failed to uninstall plugin');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to install plugin');
     } finally {
       setActionInProgress(null);
     }

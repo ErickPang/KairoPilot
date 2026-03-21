@@ -8,12 +8,13 @@ export const ReadFileTool: ToolDefinition = {
   parameters: z.object({
     path: z.string().describe('The absolute path to the file to read.'),
   }),
-  execute: async ({ path }: { path: string }) => {
+  execute: async (args: Record<string, unknown>) => {
     try {
+      const path = args.path as string;
       const content = await fs.readFile(path, 'utf-8');
       return { content };
-    } catch (error: any) {
-      throw new Error(`Failed to read file: ${error.message}`);
+    } catch (error) {
+      throw new Error(`Failed to read file: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   },
 };
@@ -25,12 +26,14 @@ export const WriteFileTool: ToolDefinition = {
     path: z.string().describe('The absolute path to the file to write.'),
     content: z.string().describe('The content to write.'),
   }),
-  execute: async ({ path, content }: { path: string; content: string }) => {
+  execute: async (args: Record<string, unknown>) => {
     try {
+      const path = args.path as string;
+      const content = args.content as string;
       await fs.outputFile(path, content, 'utf-8');
       return { success: true };
-    } catch (error: any) {
-      throw new Error(`Failed to write file: ${error.message}`);
+    } catch (error) {
+      throw new Error(`Failed to write file: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   },
 };
@@ -41,12 +44,13 @@ export const ListDirectoryTool: ToolDefinition = {
   parameters: z.object({
     path: z.string().describe('The absolute path to the directory.'),
   }),
-  execute: async ({ path }: { path: string }) => {
+  execute: async (args: Record<string, unknown>) => {
     try {
+      const path = args.path as string;
       const files = await fs.readdir(path);
       return { files };
-    } catch (error: any) {
-      throw new Error(`Failed to list directory: ${error.message}`);
+    } catch (error) {
+      return `Failed to list directory: ${error instanceof Error ? error.message : 'Unknown error'}`;
     }
   },
 };
@@ -57,12 +61,13 @@ export const DeleteFileTool: ToolDefinition = {
   parameters: z.object({
     path: z.string().describe('The absolute path to the file or directory to delete.'),
   }),
-  execute: async ({ path }: { path: string }) => {
+  execute: async (args: Record<string, unknown>) => {
     try {
+      const path = args.path as string;
       await fs.remove(path); // fs-extra remove handles both files and directories
       return { success: true };
-    } catch (error: any) {
-      throw new Error(`Failed to delete path: ${error.message}`);
+    } catch (error) {
+      throw new Error(`Failed to delete path: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   },
 };

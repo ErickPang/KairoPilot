@@ -5,7 +5,7 @@ export interface ChatMessage {
   content: string;
   name?: string; // For tool outputs
   tool_call_id?: string; // Essential for OpenAI tool responses
-  tool_calls?: any[]; // For function calling
+  tool_calls?: Record<string, unknown>[]; // For function calling
   timestamp?: number;
   usage?: {
     prompt_tokens: number;
@@ -25,7 +25,7 @@ export interface ToolDefinition {
   name: string;
   description: string;
   parameters: z.ZodSchema; // Using Zod for strict typing
-  execute: (args: any) => Promise<any>;
+  execute: (args: Record<string, unknown>) => Promise<unknown>;
 }
 
 export interface LLMProvider {

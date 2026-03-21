@@ -8,10 +8,12 @@ export const WebSearchTool: ToolDefinition = {
     query: z.string().describe('The search query'),
     maxResults: z.number().optional().describe('Maximum number of results to return (default: 5, max: 10)')
   }),
-  execute: async (args: { query: string, maxResults?: number }) => {
+  execute: async (args: Record<string, unknown>) => {
     try {
-      const limit = Math.min(args.maxResults || 5, 10);
-      const searchUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(args.query)}`;
+      const query = args.query as string;
+      const maxResults = args.maxResults as number | undefined;
+      const limit = Math.min(maxResults || 5, 10);
+      const searchUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
       
       const response = await fetch(searchUrl, {
         headers: {
@@ -79,9 +81,11 @@ export const FetchWebpageTool: ToolDefinition = {
     url: z.string().describe('The URL of the webpage to fetch'),
     maxLength: z.number().optional().describe('Maximum number of characters to return (default: 8000)')
   }),
-  execute: async (args: { url: string, maxLength?: number }) => {
+  execute: async (args: Record<string, unknown>) => {
     try {
-      const response = await fetch(args.url, {
+      const url = args.url as string;
+      const maxLength = args.maxLength as number | undefined;
+      const response = await fetch(url, {
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
         },
@@ -106,7 +110,7 @@ export const FetchWebpageTool: ToolDefinition = {
         .replace(/\s+/g, ' ')
         .trim();
         
-      const limit = args.maxLength || 8000;
+      const limit = maxLength || 8000;
       if (text.length > limit) {
         text = text.substring(0, limit) + '... [Content truncated]';
       }

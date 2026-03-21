@@ -7,15 +7,15 @@ export class AgentRuntime {
   private history: ChatMessage[] = [];
   private systemPrompt: string;
   private permissionGuard: PermissionGuard;
-  private confirmAction?: (toolName: string, args: any) => Promise<boolean>;
-  private auditLog?: (entry: { tool: string, args: any, result?: any, error?: string }) => void;
+  private confirmAction?: (toolName: string, args: Record<string, unknown>) => Promise<boolean>;
+  private auditLog?: (entry: { tool: string, args: Record<string, unknown>, result?: unknown, error?: string }) => void;
 
   constructor(
     llm: LLMProvider, 
     permissionGuard: PermissionGuard,
     systemPrompt: string = "You are a helpful AI assistant.",
-    confirmAction?: (toolName: string, args: any) => Promise<boolean>,
-    auditLog?: (entry: { tool: string, args: any, result?: any, error?: string }) => void
+    confirmAction?: (toolName: string, args: Record<string, unknown>) => Promise<boolean>,
+    auditLog?: (entry: { tool: string, args: Record<string, unknown>, result?: unknown, error?: string }) => void
   ) {
     this.llm = llm;
     this.systemPrompt = systemPrompt;
@@ -41,7 +41,7 @@ export class AgentRuntime {
   }
 
   // The main loop: This is where the magic happens
-  async chat(userInput: string, onUpdate?: (update: any) => void): Promise<string> {
+  async chat(userInput: string, onUpdate?: (update: Record<string, unknown>) => void): Promise<string> {
     // 1. Add user message to history
     const userMessage: ChatMessage = { role: 'user', content: userInput };
     this.history.push(userMessage);
@@ -76,8 +76,10 @@ export class AgentRuntime {
 
       // 6. Check if LLM wants to use a tool
       if (response.tool_calls && response.tool_calls.length > 0) {
-        for (const call of response.tool_calls) {
-          const toolName = call.function.name;
+        for (const rawCall of response.tool_calls) {
+            // Need to type cast safely
+            const call = rawCall as { id: string; function: { name: string; arguments: string } };
+            const toolName = call.function.name;
           const args = JSON.parse(call.function.arguments);
           
           if (onUpdate) onUpdate({ type: 'tool-call', tool: toolName, args });
@@ -96,10 +98,11 @@ export class AgentRuntime {
               result = JSON.stringify(output);
               if (onUpdate) onUpdate({ type: 'tool-result', tool: toolName, result: output });
               if (this.auditLog) this.auditLog({ tool: toolName, args, result: output });
-            } catch (error: any) {
-              result = `Error executing tool: ${error.message}`;
-              if (onUpdate) onUpdate({ type: 'tool-error', tool: toolName, error: error.message });
-              if (this.auditLog) this.auditLog({ tool: toolName, args, error: error.message });
+            } catch (error) {
+              const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+              result = `Error executing tool: ${errorMessage}`;
+              if (onUpdate) onUpdate({ type: 'tool-error', tool: toolName, error: errorMessage });
+              if (this.auditLog) this.auditLog({ tool: toolName, args, error: errorMessage });
             }
           } else {
             result = `Tool ${toolName} not found.`;
@@ -128,19 +131,21 @@ export class AgentRuntime {
     return finalResponse;
   }
 
-  private async checkPermission(toolName: string, args: any) {
+  private async checkPermission(toolName: string, args: Record<string, unknown>) {
     // This maps specific tools to permission checks
     // For MVP, we hardcode some known tools
     if (toolName === 'read_file' || toolName === 'write_file' || toolName === 'list_directory' || toolName === 'delete_file') {
       const mode = (toolName === 'write_file' || toolName === 'delete_file') ? 'write' : 'read';
       // For list_directory, we check read permission on the path
-      if (!this.permissionGuard.checkFileSystem(args.path, mode)) {
-        throw new Error(`Permission Denied: File System access to ${args.path} is not allowed.`);
+      const path = (args.path || args.file_path) as string;
+      if (!this.permissionGuard.checkFileSystem(path, mode)) {
+        throw new Error(`Permission Denied: File System access to ${path} is not allowed.`);
       }
     }
     
     if (toolName === 'execute_command') {
-      if (!this.permissionGuard.checkShellCommand(args.command)) {
+        const cmd = args.command as string;
+        if (!this.permissionGuard.checkShellCommand(cmd)) {
         throw new Error(`Permission Denied: Command '${args.command}' is not allowed.`);
       }
     }
@@ -149,7 +154,7 @@ export class AgentRuntime {
       // By default, let's allow search if network is not strictly blocked, 
       // or we can use checkNetwork if it's strictly enforced.
       // We pass the URL or a dummy domain to check if network is enabled.
-      const urlToCheck = args.url || 'https://duckduckgo.com';
+      const urlToCheck = (args.url || 'https://duckduckgo.com') as string;
       if (!this.permissionGuard.checkNetwork(urlToCheck)) {
         throw new Error(`Permission Denied: Network access to ${urlToCheck} is not allowed.`);
       }

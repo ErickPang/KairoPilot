@@ -5,24 +5,21 @@ export interface AuditLogEntry {
   id: string;
   timestamp: number;
   tool: string;
-  args: any;
-  result?: any;
+  args: Record<string, unknown>;
+  result?: unknown;
   error?: string;
   sessionId?: string;
 }
 
-let store: Store;
+let store: Store<{ logs: AuditLogEntry[] }>;
 
-function getStore(): Store {
+function getStore(): Store<{ logs: AuditLogEntry[] }> {
   if (!store) {
-    store = new Store({
+    store = new Store<{ logs: AuditLogEntry[] }>({
       name: 'audit-logs',
-      schema: {
-        logs: {
-          type: 'array',
-          default: [],
-        }
-      } as any
+      defaults: {
+        logs: []
+      }
     });
   }
   return store;

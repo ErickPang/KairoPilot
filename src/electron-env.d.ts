@@ -23,18 +23,20 @@ declare namespace NodeJS {
 
 // Custom IPC interface matching preload.ts
 interface CustomIpcRenderer {
-  on(channel: string, listener: (event: any, ...args: any[]) => void): () => void;
-  off(channel: string, listener: (...args: any[]) => void): void;
-  send(channel: string, ...args: any[]): void;
-  invoke(channel: string, ...args: any[]): Promise<any>;
+  on(channel: string, listener: (event: unknown, ...args: unknown[]) => void): () => void;
+  off(channel: string, listener: (...args: unknown[]) => void): void;
+  send(channel: string, ...args: unknown[]): void;
+  invoke(channel: string, ...args: unknown[]): Promise<unknown>;
   invoke(channel: 'ollama:check', baseUrl?: string): Promise<{running: boolean; message?: string; error?: string}>;
   invoke(channel: 'ollama:start'): Promise<{success: boolean; error?: string}>;
   invoke(channel: 'ollama:pull', args: {baseUrl: string; modelName: string}): Promise<{success: boolean; error?: string}>;
-  invoke(channel: 'plugins:getStore'): Promise<any[]>;
-  invoke(channel: 'plugins:getInstalled'): Promise<any[]>;
+  invoke(channel: 'plugins:getStore'): Promise<Record<string, unknown>[]>;
+  invoke(channel: 'plugins:getInstalled'): Promise<Record<string, unknown>[]>;
   invoke(channel: 'plugins:install', args: {id: string, scope?: string}): Promise<{success: boolean; error?: string}>;
   invoke(channel: 'plugins:uninstall', args: {id: string, scope?: string}): Promise<{success: boolean; error?: string}>;
-  removeListener(channel: string, listener: (...args: any[]) => void): void;
+  invoke(channel: 'agent:init', args: Record<string, unknown>): Promise<{success: boolean; error?: string}>;
+  invoke(channel: 'agent:chat', args: {userInput: string}): Promise<{content?: string; error?: string}>;
+  removeListener(channel: string, listener: (...args: unknown[]) => void): void;
   removeAllListeners(channel: string): void;
 }
 

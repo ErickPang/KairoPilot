@@ -12,6 +12,19 @@ import { Dashboard } from './components/Dashboard';
 import { IconChat, IconShield, IconSettings, IconPlugin, IconDashboard } from './components/Icons';
 import { useTranslation } from './hooks/useTranslation';
 
+interface AgentUpdate {
+  type: string;
+  message?: string;
+  plugin?: string;
+  params?: Record<string, unknown>;
+  logs?: string;
+  content?: string;
+  tool?: string;
+  args?: Record<string, unknown>;
+  result?: unknown;
+  error?: string;
+}
+
 function App() {
   const [models, setModels] = useState<ModelConfig[]>([]);
   const [agents, setAgents] = useState<AgentConfig[]>([]);
@@ -24,7 +37,7 @@ function App() {
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
-  const [confirmationRequest, setConfirmationRequest] = useState<{ id: string; tool: string; args: any } | null>(null);
+  const [confirmationRequest, setConfirmationRequest] = useState<{ id: string; tool: string; args: Record<string, unknown> } | null>(null);
   const [activeTab, setActiveTab] = useState<'chat' | 'plugins' | 'settings' | 'audit' | 'dashboard'>('chat');
   const [activeConfigSection, setActiveConfigSection] = useState<string>('general');
 
@@ -34,7 +47,7 @@ function App() {
 
   const fetchModels = async (config: ModelConfig) => {
     try {
-      const modelList = await window.ipcRenderer.invoke('llm:listModels', config);
+      const modelList = await window.ipcRenderer.invoke('llm:listModels', config) as string[];
       if (modelList && modelList.length > 0) {
         setAvailableModels(modelList);
       }
@@ -55,7 +68,7 @@ function App() {
   useEffect(() => {
     const interval = setInterval(async () => {
       try {
-        const stats = await window.ipcRenderer.invoke('system:stats');
+        const stats = await window.ipcRenderer.invoke('system:stats') as SystemStats | null;
         setSystemStats(stats);
       } catch (error) {
         // console.error('Failed to fetch system stats:', error);
@@ -67,7 +80,7 @@ function App() {
 
   const loadSessions = async () => {
     try {
-      const allSessions = await window.ipcRenderer.invoke('chat:getSessions');
+      const allSessions = await window.ipcRenderer.invoke('chat:getSessions') as Session[];
       setSessions(allSessions);
     } catch (error) {
       console.error('Failed to load sessions:', error);
@@ -76,7 +89,7 @@ function App() {
 
   const loadActiveSession = async () => {
     try {
-      const session = await window.ipcRenderer.invoke('chat:getActiveSession');
+      const session = await window.ipcRenderer.invoke('chat:getActiveSession') as Session | null;
       if (session) {
         setMessages(session.messages);
         setActiveSessionId(session.id);
@@ -91,7 +104,7 @@ function App() {
 
   const handleCreateSession = async () => {
     try {
-      const newSession = await window.ipcRenderer.invoke('chat:createSession');
+      const newSession = await window.ipcRenderer.invoke('chat:createSession') as Session;
       setSessions(prev => [newSession, ...prev]);
       setActiveSessionId(newSession.id);
       setMessages([]);
@@ -106,7 +119,7 @@ function App() {
       await window.ipcRenderer.invoke('chat:setActiveSession', sessionId);
       setActiveSessionId(sessionId);
       
-      const active = await window.ipcRenderer.invoke('chat:getActiveSession');
+      const active = await window.ipcRenderer.invoke('chat:getActiveSession') as Session | null;
       if (active) {
         setMessages(active.messages);
       } else {
@@ -149,7 +162,7 @@ function App() {
   useEffect(() => {
     const loadConfig = async () => {
       try {
-        const fullConfig = await window.ipcRenderer.invoke('config:get-all');
+        const fullConfig = await window.ipcRenderer.invoke('config:get-all') as { models: ModelConfig[], agents: AgentConfig[], activeAgentId?: string };
         if (fullConfig) {
           setModels(fullConfig.models || []);
           setAgents(fullConfig.agents || []);
@@ -158,7 +171,7 @@ function App() {
           // Auto-init active agent if exists
           if (fullConfig.activeAgentId) {
              try {
-               const result = await window.ipcRenderer.invoke('agent:init', fullConfig.activeAgentId);
+               const result = await window.ipcRenderer.invoke('agent:init', fullConfig.activeAgentId) as { success: boolean, error?: string };
                if (result.success) {
                  await loadSessions();
                  await loadActiveSession();
@@ -177,32 +190,33 @@ function App() {
 
   // Listen for agent updates
   useEffect(() => {
-    const removeListener = window.ipcRenderer.on('agent:update', (_event, update: any) => {
+    const removeListener = window.ipcRenderer.on('agent:update', (_event: unknown, ...args: unknown[]) => {
+      const update = args[0] as AgentUpdate;
       if (update.type === 'thinking') {
         setMessages(prev => {
           const lastMsg = prev[prev.length - 1];
           if (lastMsg && lastMsg.role === 'thinking') {
-            return [...prev.slice(0, -1), { role: 'thinking', content: update.content }];
+            return [...prev.slice(0, -1), { role: 'thinking', content: update.content || '' }];
           }
-          return [...prev, { role: 'thinking', content: update.content }];
+          return [...prev, { role: 'thinking', content: update.content || '' }];
         });
       } else if (update.type === 'tool-call') {
         setMessages(prev => [...prev, { 
           role: 'tool', 
-          content: t('app.toolCall', { tool: update.tool }),
+          content: t('app.toolCall', { tool: update.tool || 'unknown' }),
           details: update.args 
         }]);
       } else if (update.type === 'tool-result') {
         setMessages(prev => [...prev, { 
           role: 'tool', 
-          content: t('app.toolResult', { tool: update.tool }),
-          details: update.result 
+          content: t('app.toolResult', { tool: update.tool || 'unknown' }),
+          details: (update.result as Record<string, unknown>) || {}
         }]);
       } else if (update.type === 'tool-error') {
         setMessages(prev => [...prev, { 
           role: 'tool', 
-          content: t('app.toolError', { tool: update.tool }),
-          details: update.error 
+          content: t('app.toolError', { tool: update.tool || 'unknown' }),
+          details: { error: update.error } 
         }]);
       }
     });
@@ -210,11 +224,12 @@ function App() {
     return () => {
       removeListener();
     };
-  }, []);
+  }, [t]);
 
   // Listen for confirmation requests
   useEffect(() => {
-    const removeListener = window.ipcRenderer.on('agent:ask-confirmation', (_event, request: any) => {
+    const removeListener = window.ipcRenderer.on('agent:ask-confirmation', (_event: unknown, ...args: unknown[]) => {
+      const request = args[0] as { id: string; tool: string; args: Record<string, unknown> };
       setConfirmationRequest(request);
     });
     return () => removeListener();
@@ -259,7 +274,7 @@ function App() {
 
     // Ensure active session exists
     if (!activeSessionId) {
-      const newSession = await window.ipcRenderer.invoke('chat:createSession', input.substring(0, 30));
+      const newSession = await window.ipcRenderer.invoke('chat:createSession', input.substring(0, 30)) as Session;
       setSessions(prev => [newSession, ...prev]);
       setActiveSessionId(newSession.id);
       await window.ipcRenderer.invoke('chat:setActiveSession', newSession.id);
@@ -271,7 +286,7 @@ function App() {
     setLoading(true);
 
     try {
-      const result = await window.ipcRenderer.invoke('agent:chat', input);
+      const result = await window.ipcRenderer.invoke('agent:chat', input) as { error?: string, content: string };
       
       if (result.error) {
         setMessages(prev => [...prev, { role: 'assistant', content: `Error: ${result.error}` }]);
@@ -280,8 +295,8 @@ function App() {
       }
       
       await loadSessions();
-    } catch (error: any) {
-      setMessages(prev => [...prev, { role: 'assistant', content: `Error: ${error.message}` }]);
+    } catch (error) {
+      setMessages(prev => [...prev, { role: 'assistant', content: `Error: ${(error as Error).message}` }]);
     } finally {
       setLoading(false);
     }
@@ -293,7 +308,7 @@ function App() {
     try {
       await window.ipcRenderer.invoke('config:save-model', model);
       // Refresh
-      const fullConfig = await window.ipcRenderer.invoke('config:get-all');
+      const fullConfig = await window.ipcRenderer.invoke('config:get-all') as { models: ModelConfig[], agents: AgentConfig[], activeAgentId?: string };
       setModels(fullConfig.models);
     } catch (error) {
       console.error('Failed to save model:', error);
@@ -304,7 +319,7 @@ function App() {
     if (!confirm(t('app.deleteModelConfirm'))) return;
     try {
       await window.ipcRenderer.invoke('config:delete-model', id);
-      const fullConfig = await window.ipcRenderer.invoke('config:get-all');
+      const fullConfig = await window.ipcRenderer.invoke('config:get-all') as { models: ModelConfig[], agents: AgentConfig[], activeAgentId?: string };
       setModels(fullConfig.models);
     } catch (error) {
       console.error('Failed to delete model:', error);
@@ -314,7 +329,7 @@ function App() {
   const handleSaveAgent = async (agent: AgentConfig) => {
     try {
       await window.ipcRenderer.invoke('config:save-agent', agent);
-      const fullConfig = await window.ipcRenderer.invoke('config:get-all');
+      const fullConfig = await window.ipcRenderer.invoke('config:get-all') as { models: ModelConfig[], agents: AgentConfig[], activeAgentId?: string };
       setAgents(fullConfig.agents);
       
       // If this is the active agent, re-init?
@@ -330,7 +345,7 @@ function App() {
     if (!confirm(t('app.deleteAgentConfirm'))) return;
     try {
       await window.ipcRenderer.invoke('config:delete-agent', id);
-      const fullConfig = await window.ipcRenderer.invoke('config:get-all');
+      const fullConfig = await window.ipcRenderer.invoke('config:get-all') as { models: ModelConfig[], agents: AgentConfig[], activeAgentId?: string };
       setAgents(fullConfig.agents);
       if (activeAgentId === id) {
         setActiveAgentId(fullConfig.activeAgentId || null);
@@ -351,7 +366,7 @@ function App() {
       setActiveAgentId(id);
       // Init agent
       setLoading(true);
-      const result = await window.ipcRenderer.invoke('agent:init', id);
+      const result = await window.ipcRenderer.invoke('agent:init', id) as { success: boolean, error?: string };
       setLoading(false);
       
       if (result.success) {
@@ -359,7 +374,7 @@ function App() {
         await loadSessions();
         await loadActiveSession();
       } else {
-        alert(t('app.initAgentFailed', { error: result.error }));
+        alert(t('app.initAgentFailed', { error: result.error || 'Unknown' }));
       }
     } catch (error) {
       console.error('Failed to set active agent:', error);
@@ -483,7 +498,7 @@ function App() {
 
       {activeTab === 'audit' && (
         <div className="main-content" style={{ padding: 0, height: '100%', overflow: 'hidden' }}>
-          <AuditLogViewer onClose={() => setActiveTab('chat')} />
+          <AuditLogViewer />
         </div>
       )}
       

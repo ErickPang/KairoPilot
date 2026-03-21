@@ -25,8 +25,8 @@ export const SystemInfoTool: ToolDefinition = {
         freeMemory: `${(freeMem / (1024 * 1024 * 1024)).toFixed(2)} GB`,
         uptime: `${(uptime / 3600).toFixed(2)} hours`
       };
-    } catch (error: any) {
-      throw new Error(`Failed to get system info: ${error.message}`);
+    } catch (error) {
+      throw new Error(`Failed to get system info: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   },
 };

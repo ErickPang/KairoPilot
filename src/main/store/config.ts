@@ -145,7 +145,7 @@ function migrateLegacyConfig(legacy: LegacyConfig): KairoPilotConfig {
   const newModel: ModelConfig = {
     id: modelId,
     name: 'Migrated Model',
-    provider: (legacy.llm?.provider as any) || 'openai',
+    provider: (legacy.llm?.provider as ModelConfig['provider']) || 'openai',
     baseUrl: legacy.llm?.baseUrl || 'https://api.openai.com/v1',
     apiKey: legacy.llm?.apiKey || '',
     model: legacy.llm?.model || 'gpt-4o'

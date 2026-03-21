@@ -92,7 +92,7 @@ export function ChatInterface({
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  }, [messages, loading, messagesEndRef]);
 
   const handleDragEnter = (e: React.DragEvent) => {
     e.preventDefault();
@@ -122,7 +122,7 @@ export function ChatInterface({
     const files = Array.from(e.dataTransfer.files);
     if (files.length > 0) {
       // Try to get path from File object
-      const filePaths = files.map(f => (f as any).path).filter(p => p);
+      const filePaths = files.map(f => (f as File & { path?: string }).path).filter(p => p);
       
       if (filePaths.length > 0) {
         const pathString = filePaths.map(p => `Context file: ${p}`).join('\n');

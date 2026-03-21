@@ -1,5 +1,6 @@
 import { ipcMain, dialog } from 'electron';
 import { AgentRuntime } from '../core/agent/runtime';
+import { ToolDefinition } from '../core/llm/types';
 import { OpenAIProvider } from '../core/llm/provider';
 import { PromptBuilder } from '../core/llm/prompt';
 import { PermissionGuard } from '../core/security/permissions';
@@ -124,20 +125,20 @@ async function initializeAgent(config: ResolvedAgentConfig, sender?: WebContents
    });
    
   // Register Tools
-  currentAgent.registerTool(ReadFileTool as any);
-  currentAgent.registerTool(WriteFileTool as any);
-  currentAgent.registerTool(ListDirectoryTool as any);
-  currentAgent.registerTool(DeleteFileTool as any);
-  currentAgent.registerTool(createExecuteCommandTool(workspace) as any);
-  currentAgent.registerTool(SystemInfoTool as any);
-  currentAgent.registerTool(WebSearchTool as any);
-  currentAgent.registerTool(FetchWebpageTool as any);
+  currentAgent.registerTool(ReadFileTool as unknown as ToolDefinition);
+  currentAgent.registerTool(WriteFileTool as unknown as ToolDefinition);
+  currentAgent.registerTool(ListDirectoryTool as unknown as ToolDefinition);
+  currentAgent.registerTool(DeleteFileTool as unknown as ToolDefinition);
+  currentAgent.registerTool(createExecuteCommandTool(workspace) as unknown as ToolDefinition);
+  currentAgent.registerTool(SystemInfoTool as unknown as ToolDefinition);
+  currentAgent.registerTool(WebSearchTool as unknown as ToolDefinition);
+  currentAgent.registerTool(FetchWebpageTool as unknown as ToolDefinition);
 
   // Load and register dynamic plugins
   try {
     const dynamicTools = await pluginManager.loadAllTools(agent.id);
     for (const tool of dynamicTools) {
-      currentAgent.registerTool(tool as any);
+      currentAgent.registerTool(tool as unknown as ToolDefinition);
       console.log(`[Agent] Registered dynamic tool: ${tool.name}`);
     }
   } catch (error) {
@@ -156,7 +157,7 @@ async function initializeAgent(config: ResolvedAgentConfig, sender?: WebContents
           return `[SKILL INSTRUCTIONS: ${skill.name}]\n\n${skill.content}`;
         }
       };
-      currentAgent.registerTool(skillTool as any);
+      currentAgent.registerTool(skillTool as unknown as ToolDefinition);
       console.log(`[Agent] Registered skill tool: ${skillTool.name} (Source: ${skill.source})`);
     }
   } catch (error) {
@@ -169,33 +170,21 @@ async function initializeAgent(config: ResolvedAgentConfig, sender?: WebContents
 let previousCpus = os.cpus();
 
   // Helper to resolve config from ID or object
-  async function resolveAgentConfig(configOrId: any): Promise<ResolvedAgentConfig> {
+  async function resolveAgentConfig(configOrId: string | AgentConfig | ResolvedAgentConfig): Promise<ResolvedAgentConfig> {
     if (typeof configOrId === 'string') {
       const agent = getAgent(configOrId);
-      if (!agent) throw new Error(`Agent with ID ${configOrId} not found`);
-      
+      if (!agent) throw new Error(`Agent not found: ${configOrId}`);
       const model = getModel(agent.modelConfigId);
-      // If model not found, maybe use default or throw?
-      // For robustness, if model missing, use a dummy one to avoid crash, but warn.
-      const resolvedModel = model || { 
-        id: 'dummy',
-        name: 'Dummy Model',
-        provider: 'openai', 
-        apiKey: '', 
-        baseUrl: '', 
-        model: 'gpt-3.5-turbo' 
-      };
-      
-      return { agent, model: resolvedModel };
+      if (!model) throw new Error(`Model not found: ${agent.modelConfigId}`);
+      return { agent, model };
+    } else if ('agent' in configOrId && 'model' in configOrId) {
+      return configOrId as ResolvedAgentConfig;
+    } else {
+      const agent = configOrId as AgentConfig;
+      const model = getModel(agent.modelConfigId);
+      if (!model) throw new Error(`Model not found: ${agent.modelConfigId}`);
+      return { agent, model };
     }
-    
-    // If passed a full ResolvedAgentConfig object (unlikely but possible for testing)
-    if (configOrId && configOrId.agent && configOrId.model) {
-      return configOrId;
-    }
-    
-    // Fallback for legacy calls or malformed data - try to reconstruct or fail
-    throw new Error("Invalid configuration provided to resolveAgentConfig");
   }
 
 import { pluginManager } from '../core/plugins/manager';
@@ -216,8 +205,8 @@ export function setupHandlers() {
       const scope = typeof args === 'string' ? 'public' : (args.scope || 'public');
       await pluginManager.installPlugin(id, scope);
       return { success: true };
-    } catch (e: any) {
-      return { success: false, error: e.message };
+    } catch (e) {
+      return { success: false, error: e instanceof Error ? e.message : 'Unknown error' };
     }
   });
 
@@ -227,8 +216,8 @@ export function setupHandlers() {
       const scope = typeof args === 'string' ? 'public' : (args.scope || 'public');
       await pluginManager.uninstallPlugin(id, scope);
       return { success: true };
-    } catch (e: any) {
-      return { success: false, error: e.message };
+    } catch (e) {
+      return { success: false, error: e instanceof Error ? e.message : 'Unknown error' };
     }
   });
 
@@ -339,8 +328,8 @@ export function setupHandlers() {
         model: 'dummy', // Model not needed for listing
       });
       return await llm.listModels();
-    } catch (error: any) {
-      console.warn(`[Handlers] Failed to list models: ${error.message}`);
+    } catch (error) {
+      console.warn(`[Handlers] Failed to list models: ${error instanceof Error ? error.message : 'Unknown error'}`);
       return [];
     }
   });
@@ -354,8 +343,8 @@ export function setupHandlers() {
         return { running: true, message: await response.text() };
       }
       return { running: false, error: `HTTP Status: ${response.status}` };
-    } catch (error: any) {
-      return { running: false, error: error.message };
+    } catch (error) {
+      return { running: false, error: error instanceof Error ? error.message : 'Unknown error' };
     }
   });
 
@@ -368,7 +357,7 @@ export function setupHandlers() {
         windowsHide: true
       });
       
-      child.on('error', (err: any) => {
+      child.on('error', (err: Error) => {
         resolve({ success: false, error: err.message });
       });
 
@@ -402,6 +391,7 @@ export function setupHandlers() {
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
 
+      // eslint-disable-next-line no-constant-condition
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
@@ -420,8 +410,8 @@ export function setupHandlers() {
       }
 
       return { success: true };
-    } catch (error: any) {
-      return { success: false, error: error.message };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
     }
   });
 
@@ -488,9 +478,9 @@ export function setupHandlers() {
       
       await initializeAgent(config, event.sender);
       return { success: true };
-    } catch (error: any) {
+    } catch (error) {
       console.error('Failed to init agent:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
     }
   });
 
@@ -548,8 +538,9 @@ export function setupHandlers() {
       updateSessionMessages(session.id, currentAgent.getHistory());
 
       return { content: response };
-    } catch (error: any) {
-      return { error: error.message };
+    } catch (error) {
+      console.error('Agent chat error:', error);
+      return { error: error instanceof Error ? error.message : 'Unknown error' };
     }
   });
 }

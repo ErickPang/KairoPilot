@@ -26,7 +26,7 @@ interface IconProps {
   size?: number;
   className?: string;
   style?: CSSProperties;
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 export const IconDashboard = ({ size = 24, className = '', ...props }: IconProps) => (
