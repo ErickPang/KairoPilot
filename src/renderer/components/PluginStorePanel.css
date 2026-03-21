@@ -2,38 +2,38 @@
   display: flex;
   gap: 1rem;
   margin-top: 1rem;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid rgba(226, 232, 240, 0.6);
   width: 100%;
+  padding-bottom: 0.5rem;
 }
 
 .plugin-tab {
   background: none;
   border: none;
-  padding: 0.5rem 1rem;
+  padding: 0.5rem 1.25rem;
   font-size: 0.95rem;
   color: var(--muted-fg);
   cursor: pointer;
   position: relative;
-  transition: color 0.2s ease;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  border-radius: var(--radius-md);
+  box-shadow: none;
 }
 
 .plugin-tab:hover {
   color: var(--foreground);
+  background: rgba(255, 255, 255, 0.5);
 }
 
 .plugin-tab.active {
-  color: var(--primary);
-  font-weight: 500;
+  color: var(--primary-fg);
+  background: var(--primary-gradient);
+  font-weight: 600;
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.2);
 }
 
 .plugin-tab.active::after {
-  content: '';
-  position: absolute;
-  bottom: -1px;
-  left: 0;
-  right: 0;
-  height: 2px;
-  background-color: var(--primary);
+  display: none;
 }
 
 .skill-category-title {
@@ -52,17 +52,19 @@
 }
 
 .skill-list-item {
-  background-color: var(--background);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  padding: 1rem;
+  background-color: rgba(255, 255, 255, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  border-radius: var(--radius-lg);
+  padding: 1.25rem;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), inset 0 1px 0 rgba(255, 255, 255, 1);
 }
 
 .skill-list-item:hover {
-  border-color: var(--primary-muted);
-  box-shadow: var(--shadow-sm);
+  transform: translateY(-2px);
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), inset 0 1px 0 rgba(255, 255, 255, 1);
+  border-color: rgba(255, 255, 255, 0.9);
 }
 
 .skill-item-header {
