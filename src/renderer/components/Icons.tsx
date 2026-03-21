@@ -17,7 +17,8 @@ import {
   Check,
   Terminal,
   ChevronDown,
-  Puzzle
+  Puzzle,
+  Activity
 } from 'lucide-react';
 import { CSSProperties } from 'react';
 
@@ -27,6 +28,10 @@ interface IconProps {
   style?: CSSProperties;
   [key: string]: any;
 }
+
+export const IconDashboard = ({ size = 24, className = '', ...props }: IconProps) => (
+  <Activity size={size} className={className} strokeWidth={1.5} {...props} />
+);
 
 export const IconArrowLeft = ({ size = 24, className = '', ...props }: IconProps) => (
   <ArrowLeft size={size} className={className} strokeWidth={1.5} {...props} />

@@ -7,6 +7,11 @@ export interface ChatMessage {
   tool_call_id?: string; // Essential for OpenAI tool responses
   tool_calls?: any[]; // For function calling
   timestamp?: number;
+  usage?: {
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
+  };
 }
 
 export interface LLMConfig {

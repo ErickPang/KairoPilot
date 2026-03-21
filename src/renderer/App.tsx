@@ -8,7 +8,8 @@ import { ChatInterface } from './components/ChatInterface';
 import { ConfirmationModal } from './components/ConfirmationModal';
 import AuditLogViewer from './components/AuditLogViewer';
 import { PluginStorePanel } from './components/PluginStorePanel';
-import { IconChat, IconShield, IconSettings, IconPlugin } from './components/Icons';
+import { Dashboard } from './components/Dashboard';
+import { IconChat, IconShield, IconSettings, IconPlugin, IconDashboard } from './components/Icons';
 import { useTranslation } from './hooks/useTranslation';
 
 function App() {
@@ -24,7 +25,7 @@ function App() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [confirmationRequest, setConfirmationRequest] = useState<{ id: string; tool: string; args: any } | null>(null);
-  const [activeTab, setActiveTab] = useState<'chat' | 'plugins' | 'settings' | 'audit'>('chat');
+  const [activeTab, setActiveTab] = useState<'chat' | 'plugins' | 'settings' | 'audit' | 'dashboard'>('chat');
   const [activeConfigSection, setActiveConfigSection] = useState<string>('general');
 
   const { t } = useTranslation();
@@ -378,6 +379,14 @@ function App() {
         </div>
 
         <div 
+          className={`nav-icon ${activeTab === 'dashboard' ? 'active' : ''}`}
+          onClick={() => setActiveTab('dashboard')}
+          title="Dashboard"
+        >
+          <IconDashboard size={24} />
+        </div>
+
+        <div 
           className={`nav-icon ${activeTab === 'plugins' ? 'active' : ''}`}
           onClick={() => setActiveTab('plugins')}
           title={t('nav.skills')}
@@ -440,6 +449,12 @@ function App() {
             }
           }}
         />
+      )}
+
+      {activeTab === 'dashboard' && (
+        <div className="main-content" style={{ padding: 0, height: '100%', overflow: 'hidden' }}>
+          <Dashboard agents={agents} systemStats={systemStats} />
+        </div>
       )}
 
       {activeTab === 'plugins' && (

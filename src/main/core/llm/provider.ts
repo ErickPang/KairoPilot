@@ -94,7 +94,12 @@ export class OpenAIProvider implements LLMProvider {
     return {
       role: message.role,
       content: message.content || '',
-      tool_calls: message.tool_calls
+      tool_calls: message.tool_calls,
+      usage: response.usage ? {
+        prompt_tokens: response.usage.prompt_tokens,
+        completion_tokens: response.usage.completion_tokens,
+        total_tokens: response.usage.total_tokens
+      } : undefined
     };
   }
 

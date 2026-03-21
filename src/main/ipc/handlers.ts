@@ -25,9 +25,10 @@ import {
   AgentConfig,
   ModelConfig
 } from '../store/config';
-import { createSession, getActiveSession, updateSessionMessages, updateSessionTitle, deleteSession, clearAllSessions, setActiveSessionId, getSessions } from '../store/chat';
+import { createSession, getActiveSession, updateSessionMessages, updateSessionTitle, deleteSession, clearAllSessions, setActiveSessionId, getSessions, getAgentStats } from '../store/chat';
 import { addAuditLog, getAuditLogs } from '../store/audit';
 import os from 'os';
+import { spawn } from 'child_process';
 import { z } from 'zod';
 
 import { v4 as uuidv4 } from 'uuid';
@@ -325,6 +326,10 @@ export function setupHandlers() {
     return { success: true };
   });
 
+  ipcMain.handle('chat:getAgentStats', async () => {
+    return getAgentStats();
+  });
+
   ipcMain.handle('llm:listModels', async (_, config) => {
     try {
       const llm = new OpenAIProvider({
@@ -356,7 +361,6 @@ export function setupHandlers() {
 
   ipcMain.handle('ollama:start', async () => {
     return new Promise((resolve) => {
-      const { spawn } = require('child_process');
       // Spawn ollama serve in detached mode
       const child = spawn('ollama', ['serve'], {
         detached: true,

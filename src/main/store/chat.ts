@@ -41,11 +41,13 @@ function getDb(): Database.Database {
       if (!hasAgentId) {
         db.prepare('ALTER TABLE sessions ADD COLUMN agent_id TEXT').run();
       }
+      // Migrate legacy sessions to mainAgent
+      db.prepare("UPDATE sessions SET agent_id = 'mainAgent' WHERE agent_id IS NULL").run();
     } catch (error) {
       console.error('Failed to migrate sessions table:', error);
     }
 
-    // Migration for tool calls in messages table
+    // Migration for tool calls and usage in messages table
     try {
       const msgColumns = db.pragma('table_info(messages)') as any[];
       const hasName = msgColumns.some(col => col.name === 'name');
@@ -54,6 +56,13 @@ function getDb(): Database.Database {
           ALTER TABLE messages ADD COLUMN name TEXT;
           ALTER TABLE messages ADD COLUMN tool_call_id TEXT;
           ALTER TABLE messages ADD COLUMN tool_calls TEXT;
+        `);
+      }
+      
+      const hasUsage = msgColumns.some(col => col.name === 'usage');
+      if (!hasUsage) {
+        db.exec(`
+          ALTER TABLE messages ADD COLUMN usage TEXT;
         `);
       }
     } catch (error) {
@@ -105,7 +114,7 @@ function migrateFromElectronStore(db: Database.Database) {
 
     if (oldSessions.length > 0) {
       const insertSession = db.prepare('INSERT INTO sessions (id, title, created_at, updated_at) VALUES (@id, @title, @createdAt, @updatedAt)');
-      const insertMessage = db.prepare('INSERT INTO messages (id, session_id, role, content, timestamp, name, tool_call_id, tool_calls) VALUES (@id, @sessionId, @role, @content, @timestamp, @name, @toolCallId, @toolCalls)');
+      const insertMessage = db.prepare('INSERT INTO messages (id, session_id, role, content, timestamp, name, tool_call_id, tool_calls, usage) VALUES (@id, @sessionId, @role, @content, @timestamp, @name, @toolCallId, @toolCalls, @usage)');
 
       const transaction = db.transaction(() => {
         for (const session of oldSessions) {
@@ -125,7 +134,8 @@ function migrateFromElectronStore(db: Database.Database) {
               timestamp: msg.timestamp || Date.now(),
               name: msg.name || null,
               toolCallId: msg.tool_call_id || null,
-              toolCalls: msg.tool_calls ? JSON.stringify(msg.tool_calls) : null
+              toolCalls: msg.tool_calls ? JSON.stringify(msg.tool_calls) : null,
+              usage: msg.usage ? JSON.stringify(msg.usage) : null
             });
           }
         }
@@ -157,7 +167,7 @@ export function getSessions(agentId?: string): Session[] {
   const params: any[] = [];
   
   if (agentId) {
-    query += ' WHERE agent_id = ? OR agent_id IS NULL';
+    query += ' WHERE agent_id = ?';
     params.push(agentId);
   }
   
@@ -166,7 +176,7 @@ export function getSessions(agentId?: string): Session[] {
   const sessions = db.prepare(query).all(...params) as any[];
   
   return sessions.map(s => {
-    const messages = db.prepare('SELECT role, content, timestamp, name, tool_call_id, tool_calls FROM messages WHERE session_id = ? ORDER BY timestamp ASC').all(s.id) as any[];
+    const messages = db.prepare('SELECT role, content, timestamp, name, tool_call_id, tool_calls, usage FROM messages WHERE session_id = ? ORDER BY timestamp ASC').all(s.id) as any[];
     return {
       id: s.id,
       title: s.title,
@@ -185,6 +195,11 @@ export function getSessions(agentId?: string): Session[] {
           } catch (e) {
             // Ignore parse errors
           }
+        }
+        if (m.usage) {
+          try {
+            msg.usage = JSON.parse(m.usage);
+          } catch (e) {}
         }
         return msg;
       }),
@@ -226,7 +241,7 @@ export function getSessionById(sessionId: string): Session | null {
   const sessionRow = db.prepare('SELECT * FROM sessions WHERE id = ?').get(sessionId) as any;
   if (!sessionRow) return null;
 
-  const messages = db.prepare('SELECT role, content, timestamp, name, tool_call_id, tool_calls FROM messages WHERE session_id = ? ORDER BY timestamp ASC').all(sessionId) as any[];
+  const messages = db.prepare('SELECT role, content, timestamp, name, tool_call_id, tool_calls, usage FROM messages WHERE session_id = ? ORDER BY timestamp ASC').all(sessionId) as any[];
 
   return {
     id: sessionRow.id,
@@ -244,6 +259,13 @@ export function getSessionById(sessionId: string): Session | null {
       if (m.tool_calls) {
         try {
           msg.tool_calls = JSON.parse(m.tool_calls);
+        } catch (e) {
+          // Ignore parse errors
+        }
+      }
+      if (m.usage) {
+        try {
+          msg.usage = JSON.parse(m.usage);
         } catch (e) {
           // Ignore parse errors
         }
@@ -276,7 +298,7 @@ export function updateSessionMessages(sessionId: string, messages: ChatMessage[]
     
     db.prepare('DELETE FROM messages WHERE session_id = ?').run(sessionId);
     
-    const insert = db.prepare('INSERT INTO messages (id, session_id, role, content, timestamp, name, tool_call_id, tool_calls) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+    const insert = db.prepare('INSERT INTO messages (id, session_id, role, content, timestamp, name, tool_call_id, tool_calls, usage) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
     for (const msg of messages) {
       insert.run(
         uuidv4(), 
@@ -286,7 +308,8 @@ export function updateSessionMessages(sessionId: string, messages: ChatMessage[]
         msg.timestamp || Date.now(),
         msg.name || null,
         msg.tool_call_id || null,
-        msg.tool_calls ? JSON.stringify(msg.tool_calls) : null
+        msg.tool_calls ? JSON.stringify(msg.tool_calls) : null,
+        msg.usage ? JSON.stringify(msg.usage) : null
       );
     }
   });
@@ -327,4 +350,60 @@ export function clearAllSessions() {
     db.prepare('DELETE FROM app_state WHERE key = ?').run('active_session_id');
   });
   transaction();
+}
+
+export interface AgentStats {
+  agentId: string;
+  totalSessions: number;
+  totalMessages: number;
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+}
+
+export function getAgentStats(): AgentStats[] {
+  const db = getDb();
+  const sessions = db.prepare('SELECT id, agent_id FROM sessions').all() as {id: string, agent_id: string}[];
+  const messages = db.prepare('SELECT session_id, role, usage FROM messages').all() as {session_id: string, role: string, usage: string | null}[];
+
+  const statsMap = new Map<string, AgentStats>();
+
+  for (const session of sessions) {
+    const agentId = session.agent_id || 'mainAgent';
+    if (!statsMap.has(agentId)) {
+      statsMap.set(agentId, {
+        agentId,
+        totalSessions: 0,
+        totalMessages: 0,
+        promptTokens: 0,
+        completionTokens: 0,
+        totalTokens: 0
+      });
+    }
+    const stat = statsMap.get(agentId)!;
+    stat.totalSessions += 1;
+  }
+
+  for (const msg of messages) {
+    const session = sessions.find(s => s.id === msg.session_id);
+    if (session) {
+      const agentId = session.agent_id || 'mainAgent';
+      const stat = statsMap.get(agentId);
+      if (stat) {
+        stat.totalMessages += 1;
+        if (msg.usage) {
+          try {
+            const usage = JSON.parse(msg.usage);
+            stat.promptTokens += usage.prompt_tokens || 0;
+            stat.completionTokens += usage.completion_tokens || 0;
+            stat.totalTokens += usage.total_tokens || 0;
+          } catch (e) {
+            // ignore
+          }
+        }
+      }
+    }
+  }
+
+  return Array.from(statsMap.values());
 }

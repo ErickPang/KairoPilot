@@ -90,6 +90,22 @@ function getConfigPath(): string {
   return path.join(app.getPath('userData'), 'kairopilot.json');
 }
 
+function ensureAgentWorkspaceAndPrompt(agent: AgentConfig) {
+  if (agent.workspace) {
+    try {
+      if (!fs.existsSync(agent.workspace)) {
+        fs.mkdirSync(agent.workspace, { recursive: true });
+      }
+      const kairopilotMdPath = path.join(agent.workspace, 'KAIROPILOT.md');
+      if (!fs.existsSync(kairopilotMdPath)) {
+        fs.writeFileSync(kairopilotMdPath, agent.systemPrompt || '', 'utf-8');
+      }
+    } catch (e) {
+      console.error(`Failed to initialize workspace for agent ${agent.id}:`, e);
+    }
+  }
+}
+
 export function getKairoPilotConfig(): KairoPilotConfig {
   const configPath = getConfigPath();
   try {
@@ -100,20 +116,25 @@ export function getKairoPilotConfig(): KairoPilotConfig {
       // Check if migration is needed (version check or structure check)
       if (!rawConfig.models || !Array.isArray(rawConfig.models)) {
         console.log('Migrating legacy config to new structure...');
-        return migrateLegacyConfig(rawConfig);
+        const migrated = migrateLegacyConfig(rawConfig);
+        migrated.agents.forEach(ensureAgentWorkspaceAndPrompt);
+        return migrated;
       }
 
       // Ensure defaults for new fields
-      return {
+      const finalConfig = {
         ...DEFAULT_CONFIG,
         ...rawConfig
       };
+      finalConfig.agents.forEach(ensureAgentWorkspaceAndPrompt);
+      return finalConfig;
     }
   } catch (error) {
     console.error('Failed to load config:', error);
   }
   
   // Return default if file doesn't exist or error
+  DEFAULT_CONFIG.agents.forEach(ensureAgentWorkspaceAndPrompt);
   saveKairoPilotConfig(DEFAULT_CONFIG);
   return DEFAULT_CONFIG;
 }
@@ -256,8 +277,7 @@ export function saveAgent(agent: AgentConfig) {
 
 export function deleteAgent(id: string) {
   if (id === 'mainAgent') {
-    console.warn('Attempted to delete mainAgent, operation denied.');
-    return;
+    throw new Error('Main Agent cannot be deleted');
   }
   const config = getKairoPilotConfig();
   config.agents = config.agents.filter(a => a.id !== id);
