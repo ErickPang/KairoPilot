@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { AuditLogEntry } from '../types';
 import { IconRefresh } from './Icons';
+import { useTranslation } from '../hooks/useTranslation';
 
 interface AuditLogViewerProps {
   onClose: () => void;
@@ -9,6 +10,7 @@ interface AuditLogViewerProps {
 export default function AuditLogViewer({ onClose }: AuditLogViewerProps) {
   const [logs, setLogs] = useState<AuditLogEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const { t } = useTranslation();
 
   useEffect(() => {
     loadLogs();
@@ -29,17 +31,17 @@ export default function AuditLogViewer({ onClose }: AuditLogViewerProps) {
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <div className="audit-content" style={{ flex: 1, overflowY: 'auto' }}>
         {loading ? (
-          <div style={{ padding: '2rem', textAlign: 'center', color: '#666' }}>Loading...</div>
+          <div style={{ padding: '2rem', textAlign: 'center', color: '#666' }}>{t('common.loading')}</div>
         ) : logs.length === 0 ? (
-          <div style={{ padding: '2rem', textAlign: 'center', color: '#666' }}>No audit logs found.</div>
+          <div style={{ padding: '2rem', textAlign: 'center', color: '#666' }}>{t('audit.noLogs')}</div>
         ) : (
           <table className="audit-table">
             <thead>
               <tr>
-                <th>Time</th>
-                <th>Tool</th>
-                <th>Arguments</th>
-                <th>Status</th>
+                <th>{t('audit.time')}</th>
+                <th>{t('audit.tool')}</th>
+                <th>{t('audit.arguments')}</th>
+                <th>{t('audit.status')}</th>
               </tr>
             </thead>
             <tbody>
@@ -55,9 +57,9 @@ export default function AuditLogViewer({ onClose }: AuditLogViewerProps) {
                   </td>
                   <td>
                     {log.error ? (
-                      <span className="status-error" title={log.error}>Error</span>
+                      <span className="status-error" title={log.error}>{t('common.error')}</span>
                     ) : (
-                      <span className="status-success">Success</span>
+                      <span className="status-success">{t('common.success')}</span>
                     )}
                   </td>
                 </tr>
@@ -71,11 +73,11 @@ export default function AuditLogViewer({ onClose }: AuditLogViewerProps) {
         <button 
           className="secondary" 
           onClick={loadLogs}
-          title="Refresh Logs"
+          title={t('audit.refreshLogs')}
         >
-          <IconRefresh size={16} /> Refresh
+          <IconRefresh size={16} /> {t('common.refresh')}
         </button>
-        <button className="primary" onClick={onClose}>Close</button>
+        <button className="primary" onClick={onClose}>{t('common.close')}</button>
       </div>
     </div>
   );

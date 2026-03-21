@@ -121,7 +121,7 @@ function App() {
 
   const handleDeleteSession = async (e: React.MouseEvent, sessionId: string) => {
     e.stopPropagation();
-    if (!confirm('Are you sure you want to delete this chat?')) return;
+    if (!confirm(t('app.deleteChatConfirm'))) return;
     
     try {
       await window.ipcRenderer.invoke('chat:deleteSession', sessionId);
@@ -189,19 +189,19 @@ function App() {
       } else if (update.type === 'tool-call') {
         setMessages(prev => [...prev, { 
           role: 'tool', 
-          content: `Calling tool: ${update.tool}`,
+          content: t('app.toolCall', { tool: update.tool }),
           details: update.args 
         }]);
       } else if (update.type === 'tool-result') {
         setMessages(prev => [...prev, { 
           role: 'tool', 
-          content: `Tool result: ${update.tool}`,
+          content: t('app.toolResult', { tool: update.tool }),
           details: update.result 
         }]);
       } else if (update.type === 'tool-error') {
         setMessages(prev => [...prev, { 
           role: 'tool', 
-          content: `Tool error: ${update.tool}`,
+          content: t('app.toolError', { tool: update.tool }),
           details: update.error 
         }]);
       }
@@ -250,10 +250,10 @@ function App() {
     if (!activeAgentId && agents.length > 0) {
       // Auto-select first agent? Or warn user?
       // For now, warn user
-      setMessages(prev => [...prev, { role: 'assistant', content: 'Please select an active agent in Settings first.' }]);
+      setMessages(prev => [...prev, { role: 'assistant', content: t('app.selectAgentWarn') }]);
       return;
     } else if (agents.length === 0) {
-       setMessages(prev => [...prev, { role: 'assistant', content: 'Please configure an agent in Settings first.' }]);
+       setMessages(prev => [...prev, { role: 'assistant', content: t('app.configureAgentWarn') }]);
        return;
     }
 
@@ -301,7 +301,7 @@ function App() {
   };
 
   const handleDeleteModel = async (id: string) => {
-    if (!confirm('Delete this model configuration?')) return;
+    if (!confirm(t('app.deleteModelConfirm'))) return;
     try {
       await window.ipcRenderer.invoke('config:delete-model', id);
       const fullConfig = await window.ipcRenderer.invoke('config:get-all');
@@ -327,7 +327,7 @@ function App() {
   };
 
   const handleDeleteAgent = async (id: string) => {
-    if (!confirm('Delete this agent?')) return;
+    if (!confirm(t('app.deleteAgentConfirm'))) return;
     try {
       await window.ipcRenderer.invoke('config:delete-agent', id);
       const fullConfig = await window.ipcRenderer.invoke('config:get-all');
@@ -359,7 +359,7 @@ function App() {
         await loadSessions();
         await loadActiveSession();
       } else {
-        alert('Failed to initialize agent: ' + result.error);
+        alert(t('app.initAgentFailed', { error: result.error }));
       }
     } catch (error) {
       console.error('Failed to set active agent:', error);
@@ -381,7 +381,7 @@ function App() {
         <div 
           className={`nav-icon ${activeTab === 'dashboard' ? 'active' : ''}`}
           onClick={() => setActiveTab('dashboard')}
-          title="Dashboard"
+          title={t('nav.dashboard')}
         >
           <IconDashboard size={24} />
         </div>

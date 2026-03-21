@@ -160,15 +160,15 @@ export function PluginStorePanel() {
 
         {loading && (
           <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--muted-fg)' }}>
-            Loading plugins...
+            {t('skills.loading')}
           </div>
         )}
 
         {!loading && activeTab === 'installed' && (
           <div className="installed-skills-container">
-            <h3 className="skill-category-title">公共 Skills (~/.kairopilot/skills)</h3>
+            <h3 className="skill-category-title">{t('skills.publicSkills')} (~/.kairopilot/skills)</h3>
             {publicSkills.length === 0 ? (
-              <div className="empty-state">No public skills installed.</div>
+              <div className="empty-state">{t('skills.noPublicSkills')}</div>
             ) : (
               <div className="skill-list">
                 {publicSkills.map(plugin => (
@@ -184,10 +184,10 @@ export function PluginStorePanel() {
 
             {Object.entries(agentPlugins).map(([agentId, plugins]) => (
               <div key={agentId}>
-                <h3 className="skill-category-title" style={{ marginTop: '2rem' }}>Agent: {agentId}</h3>
+                <h3 className="skill-category-title" style={{ marginTop: '2rem' }}>{t('skills.agentSkills')}: {agentId}</h3>
                 <div className="skill-list">
                   {plugins.length === 0 ? (
-                    <div className="empty-state">No skills installed for this agent.</div>
+                    <div className="empty-state">{t('skills.noAgentSkills')}</div>
                   ) : (
                     plugins.map(plugin => (
                       <InstalledSkillItem 
@@ -207,7 +207,7 @@ export function PluginStorePanel() {
         {!loading && activeTab === 'store' && (
           <div>
             {uninstalledPlugins.length === 0 ? (
-              <div className="empty-state">All available plugins are already installed!</div>
+              <div className="empty-state">{t('skills.allInstalled')}</div>
             ) : (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '1rem' }}>
                 {uninstalledPlugins.map(plugin => (
@@ -223,7 +223,7 @@ export function PluginStorePanel() {
                       <div style={{ flex: 1 }}>
                         <h4 style={{ margin: '0 0 0.25rem 0' }}>{plugin.name}</h4>
                         <div style={{ fontSize: '0.8rem', color: 'var(--muted-fg)' }}>
-                          v{plugin.version} • By {plugin.author}
+                          v{plugin.version} • {t('skills.by', { author: plugin.author })}
                         </div>
                       </div>
                     </div>
@@ -252,32 +252,32 @@ export function PluginStorePanel() {
       {installModalOpen && (
         <div className="modal-overlay" onClick={() => setInstallModalOpen(false)}>
           <div className="modal-content" onClick={e => e.stopPropagation()}>
-            <h3 style={{ marginBottom: '1rem', color: 'var(--foreground)' }}>Select Installation Scope</h3>
+            <h3 style={{ marginBottom: '1rem', color: 'var(--foreground)' }}>{t('skills.installScope')}</h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
               <button 
                 className="btn btn-secondary" 
                 onClick={() => handleConfirmInstall('public')}
                 style={{ justifyContent: 'flex-start', padding: '0.75rem', backgroundColor: 'var(--background)' }}
               >
-                Public Skill (Available to all agents)
+                {t('skills.publicScope')}
               </button>
               <button 
                 className="btn btn-secondary" 
                 onClick={() => handleConfirmInstall('agent:mainAgent')}
                 style={{ justifyContent: 'flex-start', padding: '0.75rem', backgroundColor: 'var(--background)' }}
               >
-                Agent: mainAgent
+                {t('skills.agentScope', { agent: 'mainAgent' })}
               </button>
               <button 
                 className="btn btn-secondary" 
                 onClick={() => handleConfirmInstall('agent:wechat')}
                 style={{ justifyContent: 'flex-start', padding: '0.75rem', backgroundColor: 'var(--background)' }}
               >
-                Agent: wechat
+                {t('skills.agentScope', { agent: 'wechat' })}
               </button>
             </div>
             <div style={{ marginTop: '1rem', display: 'flex', justifyContent: 'flex-end' }}>
-              <button className="btn" onClick={() => setInstallModalOpen(false)}>Cancel</button>
+              <button className="btn" onClick={() => setInstallModalOpen(false)}>{t('common.cancel')}</button>
             </div>
           </div>
         </div>
@@ -318,8 +318,8 @@ function InstalledSkillItem({ plugin, onUninstall, isWorking }: { plugin: Instal
         <div className="skill-item-details" onClick={(e) => e.stopPropagation()}>
           <p>{plugin.description}</p>
           <div className="skill-meta">
-            <span><strong>Author:</strong> {plugin.author}</span>
-            <span><strong>Installed:</strong> {new Date(plugin.installedAt).toLocaleString()}</span>
+            <span><strong>{t('skills.author')}:</strong> {plugin.author}</span>
+            <span><strong>{t('skills.installedAt')}:</strong> {new Date(plugin.installedAt).toLocaleString()}</span>
           </div>
         </div>
       )}

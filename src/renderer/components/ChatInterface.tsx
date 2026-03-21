@@ -141,13 +141,13 @@ export function ChatInterface({
     >
       {isDragging && (
         <div className="drag-overlay">
-          Drop files to add context
+          {t('chat.dropFiles')}
         </div>
       )}
 
       <div className="chat-header">
         <div className="header-title">
-          {loading ? 'Thinking...' : 'KairoPilot Agent'}
+          {loading ? t('chat.thinking') : t('chat.agentName')}
         </div>
         <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
           {systemStats && (
@@ -172,8 +172,8 @@ export function ChatInterface({
             color: 'var(--muted-fg)',
             paddingBottom: '20%'
           }}>
-            <h2 style={{ color: 'var(--foreground)', marginBottom: '0.5rem' }}>Welcome to KairoPilot</h2>
-            <p>Start a conversation or drag & drop files to begin.</p>
+            <h2 style={{ color: 'var(--foreground)', marginBottom: '0.5rem' }}>{t('chat.welcome')}</h2>
+            <p>{t('chat.welcomeDesc')}</p>
           </div>
         )}
         
@@ -193,7 +193,7 @@ export function ChatInterface({
                     style={{ background: 'var(--sidebar-bg)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)', padding: '0.5rem' }}
                   >
                     <summary className="process-summary" style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--muted-fg)', fontSize: '0.85rem', userSelect: 'none', padding: '0.25rem' }}>
-                      {isLatestLoading ? 'Working on it...' : `View Process (${group.messages.length} steps)`}
+                      {isLatestLoading ? t('chat.working') : t('chat.viewProcess', { count: group.messages.length })}
                     </summary>
                     <div className="process-content" style={{ marginTop: '0.5rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                       {group.messages.map((msg, i) => (
@@ -207,7 +207,7 @@ export function ChatInterface({
                                 {msg.content}
                                 {msg.details && (
                                   <details className="message-details">
-                                    <summary className="message-summary">Details</summary>
+                                    <summary className="message-summary">{t('chat.details')}</summary>
                                     <pre className="message-pre">{JSON.stringify(msg.details, null, 2)}</pre>
                                   </details>
                                 )}
@@ -240,7 +240,7 @@ export function ChatInterface({
                     {msg.content}
                     {msg.details && (
                       <details className="message-details">
-                        <summary className="message-summary">Details</summary>
+                        <summary className="message-summary">{t('chat.details')}</summary>
                         <pre className="message-pre">{JSON.stringify(msg.details, null, 2)}</pre>
                       </details>
                     )}
@@ -291,12 +291,12 @@ export function ChatInterface({
                   label: m.name, 
                   description: m.model 
                 }))}
-                placeholder="Select a model..."
+                placeholder={t('chat.selectModel')}
                 disabled={loading}
                 placement="top"
                 size="sm"
                 icon={<IconCpu size={14} style={{ color: 'var(--muted-fg)' }} />}
-                dropdownTitle="Select a model"
+                dropdownTitle={t('chat.selectModelTitle')}
               />
             </div>
             <button 

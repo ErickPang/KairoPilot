@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Session } from '../types';
 import { IconPlus, IconEdit, IconTrash } from './Icons';
+import { useTranslation } from '../hooks/useTranslation';
 
 interface SidebarProps {
   sessions: Session[];
@@ -21,6 +22,7 @@ export function Sidebar({
 }: SidebarProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState('');
+  const { t } = useTranslation();
 
   const startEditing = (e: React.MouseEvent, session: Session) => {
     e.stopPropagation();
@@ -47,11 +49,11 @@ export function Sidebar({
     <div className="sidebar">
       <div className="sidebar-header">
         <button className="new-chat-btn" onClick={handleCreateSession}>
-          <IconPlus size={16} /> New Chat
+          <IconPlus size={16} /> {t('sidebar.newChat')}
         </button>
       </div>
       {sessions.length > 0 && (
-        <div className="sidebar-section-label">Recent</div>
+        <div className="sidebar-section-label">{t('sidebar.recent')}</div>
       )}
       <div className="session-list">
         {sessions.map(session => (
@@ -73,19 +75,19 @@ export function Sidebar({
               />
             ) : (
               <>
-                <span className="session-title" title={session.title}>{session.title || 'New Chat'}</span>
+                <span className="session-title" title={session.title}>{session.title || t('sidebar.newChat')}</span>
                 <div className="session-actions">
                   <button 
                     className="icon-btn"
                     onClick={(e) => startEditing(e, session)}
-                    title="Rename"
+                    title={t('sidebar.rename')}
                   >
                     <IconEdit size={14} />
                   </button>
                   <button 
                     className="icon-btn"
                     onClick={(e) => handleDeleteSession(e, session.id)}
-                    title="Delete"
+                    title={t('sidebar.delete')}
                   >
                     <IconTrash size={14} />
                   </button>

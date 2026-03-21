@@ -135,11 +135,11 @@ export function ConfigPanel({
           setIsStartingOllama(false);
         }, 2000);
       } else {
-        alert('Failed to start Ollama: ' + res.error);
+        alert(t('config.startOllamaFailed', { error: res.error || 'Unknown' }));
         setIsStartingOllama(false);
       }
     } catch (e: any) {
-      alert('Error starting Ollama: ' + e.message);
+      alert(t('config.startOllamaError', { error: e.message || 'Unknown' }));
       setIsStartingOllama(false);
     }
   };
@@ -222,10 +222,10 @@ export function ConfigPanel({
     <div className="config-section">
       <div className="config-section-header">
         <h3 className="config-section-title" style={{ margin: 0, border: 'none', padding: 0 }}>
-          <IconCpu size={20} /> Models
+          <IconCpu size={20} /> {t('config.models')}
         </h3>
         <button onClick={handleCreateModel} className="btn btn-primary">
-          <IconPlus size={16} /> Add Model
+          <IconPlus size={16} /> {t('config.addModel')}
         </button>
       </div>
 
@@ -244,14 +244,14 @@ export function ConfigPanel({
             <button 
               onClick={() => handleEditModel(model)}
               className="btn-icon"
-              title="Edit"
+              title={t('common.edit')}
             >
               <IconEdit size={18} />
             </button>
             <button 
               onClick={() => onDeleteModel(model.id)}
               className="btn-icon danger"
-              title="Delete"
+              title={t('common.delete')}
             >
               <IconTrash size={18} />
             </button>
@@ -261,9 +261,9 @@ export function ConfigPanel({
       
       {models.length === 0 && (
         <div style={{ padding: '3rem', textAlign: 'center', opacity: 0.5, border: '1px dashed var(--border)', borderRadius: 'var(--radius-lg)' }}>
-          <p>No models configured.</p>
+          <p>{t('config.noModels')}</p>
           <button onClick={handleCreateModel} className="btn btn-primary" style={{ marginTop: '1rem' }}>
-            Add First Model
+            {t('config.addFirstModel')}
           </button>
         </div>
       )}
@@ -274,10 +274,10 @@ export function ConfigPanel({
     <div className="config-section">
       <div className="config-section-header">
         <h3 className="config-section-title" style={{ margin: 0, border: 'none', padding: 0 }}>
-          <IconBot size={20} /> Agents
+          <IconBot size={20} /> {t('config.agents')}
         </h3>
         <button onClick={handleCreateAgent} className="btn btn-primary">
-          <IconPlus size={16} /> Add Agent
+          <IconPlus size={16} /> {t('config.addAgent')}
         </button>
       </div>
 
@@ -290,17 +290,17 @@ export function ConfigPanel({
             <div className="card-info">
               <h4>
                 {agent.name}
-                {isActive && <span className="badge badge-primary" style={{ marginLeft: '0.5rem' }}>Active</span>}
+                {isActive && <span className="badge badge-primary" style={{ marginLeft: '0.5rem' }}>{t('config.active')}</span>}
               </h4>
               <div className="card-meta">
-                <span title="Linked Model">
+                <span title={t('config.linkedModel')}>
                   <IconCpu size={14} style={{ marginRight: '4px', verticalAlign: 'text-bottom' }} />
                   {linkedModel ? linkedModel.name : 'Unknown'}
                 </span>
                 <span>•</span>
-                <span title="Workspace">
+                <span title={t('config.workspace')}>
                   <IconFolder size={14} style={{ marginRight: '4px', verticalAlign: 'text-bottom' }} />
-                  {agent.workspace ? 'Custom Workspace' : 'Default Workspace'}
+                  {agent.workspace ? t('config.customWorkspace') : t('config.defaultWorkspace')}
                 </span>
               </div>
             </div>
@@ -309,7 +309,7 @@ export function ConfigPanel({
                 <button 
                   onClick={() => onSetActiveAgent(agent.id)}
                   className="btn-icon"
-                  title="Set Active"
+                  title={t('config.setActive')}
                 >
                   <IconCheck size={18} />
                 </button>
@@ -317,7 +317,7 @@ export function ConfigPanel({
               <button 
                 onClick={() => handleEditAgent(agent)}
                 className="btn-icon"
-                title="Edit"
+                title={t('common.edit')}
               >
                 <IconEdit size={18} />
               </button>
@@ -325,7 +325,7 @@ export function ConfigPanel({
                 <button 
                   onClick={() => onDeleteAgent(agent.id)}
                   className="btn-icon danger"
-                  title="Delete"
+                  title={t('common.delete')}
                 >
                   <IconTrash size={18} />
                 </button>
@@ -337,9 +337,9 @@ export function ConfigPanel({
 
       {agents.length === 0 && (
         <div style={{ padding: '3rem', textAlign: 'center', opacity: 0.5, border: '1px dashed var(--border)', borderRadius: 'var(--radius-lg)' }}>
-          <p>No agents configured.</p>
+          <p>{t('config.noAgents')}</p>
           <button onClick={handleCreateAgent} className="btn btn-primary" style={{ marginTop: '1rem' }}>
-            Create First Agent
+            {t('config.createFirstAgent')}
           </button>
         </div>
       )}
@@ -355,28 +355,28 @@ export function ConfigPanel({
             <button onClick={() => setView('list')} className="btn-icon" style={{ marginRight: '0.5rem' }}>
               <IconArrowLeft size={24} />
             </button>
-            <span>{editingModel.id ? 'Edit Model' : 'New Model'}</span>
+            <span>{editingModel.id ? t('config.editModel') : t('config.newModel')}</span>
           </div>
         </div>
 
         <div className="config-content">
-          <div className="form-section-title">General Information</div>
+          <div className="form-section-title">{t('config.generalInfo')}</div>
           
           <div className="form-row">
             <div className="form-group" style={{ flex: 2 }}>
-              <label>Configuration Name</label>
+              <label>{t('config.configName')}</label>
               <input 
                 className="form-control"
                 value={editingModel.name} 
                 onChange={e => setEditingModel({...editingModel, name: e.target.value})}
-                placeholder="e.g. My GPT-4o"
+                placeholder={t('config.placeholder.modelName')}
                 autoFocus
               />
-              <div className="form-help">A friendly name to identify this configuration.</div>
+              <div className="form-help">{t('config.configNameHelp')}</div>
             </div>
 
             <div className="form-group" style={{ flex: 1 }}>
-              <label>Provider</label>
+              <label>{t('config.provider')}</label>
               <Select 
                 value={editingModel.provider} 
                 onChange={(val) => handleProviderChange({ target: { value: val } } as any)}
@@ -392,21 +392,21 @@ export function ConfigPanel({
             </div>
           </div>
 
-          <div className="form-section-title">Connection Details</div>
+          <div className="form-section-title">{t('config.connectionDetails')}</div>
 
           <div className="form-group">
-            <label>Base URL</label>
+            <label>{t('config.baseUrl')}</label>
             <input 
-              className="form-control"
-              value={editingModel.baseUrl} 
-              onChange={e => setEditingModel({...editingModel, baseUrl: e.target.value})}
-              placeholder="https://api.openai.com/v1"
-            />
-            <div className="form-help">The API endpoint URL. Usually auto-filled based on provider.</div>
+                className="form-control"
+                value={editingModel.baseUrl || ''} 
+                onChange={e => setEditingModel({...editingModel, baseUrl: e.target.value})}
+                placeholder={t('config.placeholder.baseUrl')}
+              />
+            <div className="form-help">{t('config.baseUrlHelp')}</div>
           </div>
 
           <div className="form-group">
-            <label>API Key</label>
+            <label>{t('config.apiKey')}</label>
             <input 
               className="form-control"
               type="password" 
@@ -414,18 +414,18 @@ export function ConfigPanel({
               onChange={e => setEditingModel({...editingModel, apiKey: e.target.value})}
               placeholder="sk-..." 
             />
-            <div className="form-help">Your secret API key. Stored securely on your device.</div>
+            <div className="form-help">{t('config.apiKeyHelp')}</div>
           </div>
 
           <div className="form-group">
-            <label>Model ID</label>
+            <label>{t('config.modelId')}</label>
             <div style={{ display: 'flex', gap: '0.5rem' }}>
               <div style={{ flex: 1, position: 'relative' }}>
                 <input 
                   className="form-control"
                   value={editingModel.model} 
                   onChange={e => setEditingModel({...editingModel, model: e.target.value})}
-                  placeholder="e.g. gpt-4o"
+                  placeholder={t('config.placeholder.modelId')}
                   list="available-models"
                 />
                 <datalist id="available-models">
@@ -435,12 +435,12 @@ export function ConfigPanel({
               <button 
                 onClick={() => onFetchModels(editingModel)}
                 className="btn btn-secondary"
-                title="Fetch available models from provider"
+                title={t('config.fetchModels')}
               >
-                <IconRefresh size={18} /> Fetch Models
+                <IconRefresh size={18} /> {t('config.fetchModels')}
               </button>
             </div>
-            <div className="form-help">The specific model identifier (e.g. gpt-4, claude-3-opus). Click 'Fetch Models' to load from provider.</div>
+            <div className="form-help">{t('config.modelIdHelp')}</div>
           </div>
 
           {editingModel.provider === 'ollama' && (
@@ -462,7 +462,7 @@ export function ConfigPanel({
                     borderRadius: '50%', 
                     background: ollamaStatus?.running ? 'var(--success)' : 'var(--danger)' 
                   }}></span>
-                  {ollamaStatus?.running ? 'Running' : 'Not Running / Unreachable'}
+                  {ollamaStatus?.running ? t('config.ollamaRunning') : t('config.ollamaNotRunning')}
                   
                   {!ollamaStatus?.running && (
                     <button 
@@ -471,19 +471,19 @@ export function ConfigPanel({
                       className="btn btn-secondary" 
                       style={{ padding: '0.15rem 0.5rem', fontSize: '0.75rem', marginLeft: '0.5rem' }}
                     >
-                      {isStartingOllama ? 'Starting...' : 'Start Process'}
+                      {isStartingOllama ? t('config.ollamaStarting') : t('config.ollamaStart')}
                     </button>
                   )}
                 </div>
               </div>
               
-              <label>Pull New Model</label>
+              <label>{t('config.ollamaPull')}</label>
               <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.25rem' }}>
                  <input 
                     className="form-control"
                     value={modelToPull} 
                     onChange={e => setModelToPull(e.target.value)} 
-                    placeholder="e.g. llama3:8b, qwen2:7b" 
+                    placeholder={t('config.placeholder.ollamaModel')} 
                     disabled={isPulling || !ollamaStatus?.running}
                  />
                  <button 
@@ -491,9 +491,10 @@ export function ConfigPanel({
                     className="btn btn-primary" 
                     disabled={isPulling || !modelToPull || !ollamaStatus?.running}
                  >
-                   {isPulling ? 'Pulling...' : 'Pull'}
+                   {isPulling ? t('config.pulling') : t('config.pull')}
                  </button>
               </div>
+              <div className="form-help">{t('config.ollamaPullHelp')}</div>
               {pullProgress && (
                 <div style={{ marginTop: '0.75rem', fontSize: '0.85rem', color: 'var(--muted-fg)' }}>
                   <div>Status: {pullProgress.status}</div>
@@ -513,8 +514,8 @@ export function ConfigPanel({
           )}
 
           <div className="form-actions">
-            <button className="btn btn-secondary" onClick={() => setView('list')}>Cancel</button>
-            <button className="btn btn-primary" onClick={handleSaveModel}>Save Model Configuration</button>
+            <button className="btn btn-secondary" onClick={() => setView('list')}>{t('common.cancel')}</button>
+            <button className="btn btn-primary" onClick={handleSaveModel}>{t('common.save')}</button>
           </div>
         </div>
       </>
@@ -533,16 +534,16 @@ export function ConfigPanel({
             <button onClick={() => setView('list')} className="btn-icon" style={{ marginRight: '0.5rem' }}>
               <IconArrowLeft size={24} />
             </button>
-            <span>{isNewAgent ? 'New Agent' : 'Edit Agent'}</span>
+            <span>{isNewAgent ? t('config.newAgent') : t('config.editAgent')}</span>
           </div>
         </div>
 
         <div className="config-content">
-          <div className="form-section-title">Identity & Role</div>
+          <div className="form-section-title">{t('config.agentInfo')}</div>
 
           <div className="form-row">
             <div className="form-group" style={{ flex: 1 }}>
-              <label>Agent Name</label>
+              <label>{t('config.agentName')}</label>
               <input 
                 className="form-control"
                 value={editingAgent.name} 
@@ -558,36 +559,36 @@ export function ConfigPanel({
                 disabled={!isNewAgent}
                 autoFocus={isNewAgent}
               />
-              {!isNewAgent && <div className="form-help">Agent name cannot be changed after creation.</div>}
+              {!isNewAgent && <div className="form-help">{t('config.agentNameHelp')}</div>}
             </div>
 
             <div className="form-group" style={{ flex: 1 }}>
-              <label>Model Configuration</label>
+              <label>{t('config.linkedModel')}</label>
               <Select 
                 value={editingAgent.modelConfigId} 
                 onChange={(val) => setEditingAgent({...editingAgent, modelConfigId: val})}
-                placeholder="Select a model config..."
+                placeholder={t('config.selectModel')}
                 options={models.map(m => ({ value: m.id, label: `${m.name} (${m.model})` }))}
               />
             </div>
           </div>
 
           <div className="form-group">
-            <label>KAIROPILOT.md (Workspace Instructions)</label>
+            <label>{t('config.systemPrompt')}</label>
             <textarea 
               className="form-control"
               value={editingAgent.systemPrompt} 
               onChange={e => setEditingAgent({...editingAgent, systemPrompt: e.target.value})}
               rows={6}
-              placeholder="You are a helpful AI assistant..."
+              placeholder={t('config.placeholder.systemPrompt')}
             />
-            <div className="form-help">These instructions will be saved as KAIROPILOT.md in the agent's workspace directory and injected as dynamic context.</div>
+            <div className="form-help">{t('config.systemPromptHelp')}</div>
           </div>
 
-          <div className="form-section-title">Environment & Capabilities</div>
+          <div className="form-section-title">{t('config.workspace')}</div>
 
           <div className="form-group">
-            <label>Workspace Name</label>
+            <label>{t('config.workspaceName')}</label>
             <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
               {editingAgent.id === 'mainAgent' ? (
                 <span style={{ color: 'var(--foreground)', whiteSpace: 'nowrap', padding: '0.5rem 0' }}>~/.kairopilot/workspace</span>
@@ -607,7 +608,7 @@ export function ConfigPanel({
                       const val = e.target.value.replace(/[^a-zA-Z0-9_-]/g, '');
                       setEditingAgent({...editingAgent, workspaceName: val});
                     }} 
-                    placeholder="default"
+                    placeholder={t('config.placeholder.workspace')}
                     disabled={!isNewAgent}
                     style={{ flex: 1 }}
                   />
@@ -615,17 +616,17 @@ export function ConfigPanel({
               )}
             </div>
             {editingAgent.id === 'mainAgent' ? (
-              <div className="form-help">The main agent always uses the default workspace directory.</div>
+              <div className="form-help">{t('config.workspaceNameHelpMain')}</div>
             ) : (
               <div className="form-help">
                 {isNewAgent 
-                  ? 'Only alphanumeric characters, dashes, and underscores are allowed. Leave empty for default workspace.' 
-                  : 'Workspace cannot be changed after creation.'}
+                  ? t('config.workspaceNameHelp') 
+                  : t('config.workspaceNameHelpFixed')}
               </div>
             )}
           </div>
 
-          <div className="form-section-title">Permissions</div>
+          <div className="form-section-title">{t('config.security')}</div>
 
           <label className="form-checkbox">
             <input 
@@ -635,17 +636,17 @@ export function ConfigPanel({
             />
             <div>
               <div style={{ fontWeight: 500, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <IconTerminal size={16} /> Enable Shell Commands
+                <IconTerminal size={16} /> {t('config.allowShell')}
               </div>
               <div className="form-help" style={{ marginTop: '0.25rem', marginBottom: 0 }}>
-                Allow this agent to execute shell commands in the workspace.
+                {t('config.allowShellHelp')}
               </div>
             </div>
           </label>
 
           <div className="form-actions">
-            <button className="btn btn-secondary" onClick={() => setView('list')}>Cancel</button>
-            <button className="btn btn-primary" onClick={handleSaveAgent}>Save Agent Settings</button>
+            <button className="btn btn-secondary" onClick={() => setView('list')}>{t('common.cancel')}</button>
+            <button className="btn btn-primary" onClick={handleSaveAgent}>{t('common.save')}</button>
           </div>
         </div>
       </>
@@ -690,11 +691,11 @@ export function ConfigPanel({
                 }}>
                   <IconSettings size={20} />
                 </div>
-                {t('settings.title')}
-              </div>
-              <div className="config-subtitle">Manage your models, agents and preferences</div>
+              {t('settings.title')}
             </div>
+            <div className="config-subtitle">{t('settings.subtitle')}</div>
           </div>
+        </div>
 
           <div className="config-content">
             {(activeSection === 'model' || !activeSection) && renderModelList()}

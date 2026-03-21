@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { AgentConfig, SystemStats } from '../types';
 import { IconDashboard, IconBot, IconChat, IconCpu } from './Icons';
+import { useTranslation } from '../hooks/useTranslation';
 
 interface AgentStats {
   agentId: string;
@@ -18,6 +19,7 @@ interface DashboardProps {
 
 export function Dashboard({ agents, systemStats }: DashboardProps) {
   const [stats, setStats] = useState<AgentStats[]>([]);
+  const { t } = useTranslation();
 
   useEffect(() => {
     const fetchStats = async () => {
@@ -35,7 +37,7 @@ export function Dashboard({ agents, systemStats }: DashboardProps) {
   }, []);
 
   const getAgentName = (id: string) => {
-    if (id === 'mainAgent') return 'Main Agent';
+    if (id === 'mainAgent') return t('agent.defaultName');
     const agent = agents.find(a => a.id === id);
     return agent ? agent.name : 'Unknown Agent';
   };
@@ -156,14 +158,14 @@ export function Dashboard({ agents, systemStats }: DashboardProps) {
       `}</style>
 
       <h2 className="animate-stagger-1" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '2rem', fontSize: '2rem', fontWeight: 700, letterSpacing: '-0.02em', textShadow: '0 2px 10px rgba(0,0,0,0.05)' }}>
-        <IconDashboard size={36} color="var(--primary)" /> Monitoring Dashboard
-        <span className="live-dot" title="Live Updates"></span>
+        <IconDashboard size={36} color="var(--primary)" /> {t('dashboard.title')}
+        <span className="live-dot" title={t('dashboard.liveUpdates')}></span>
       </h2>
 
       <div className="animate-stagger-2" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '1.5rem', marginBottom: '3rem' }}>
         <div className="stat-card">
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <div style={{ color: 'var(--muted-fg)', fontWeight: 600, fontSize: '0.9rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Total Tokens</div>
+            <div style={{ color: 'var(--muted-fg)', fontWeight: 600, fontSize: '0.9rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('dashboard.totalTokens')}</div>
             <div className="stat-icon-wrapper" style={{ background: 'linear-gradient(135deg, #a78bfa 0%, #8b5cf6 100%)', color: '#ffffff' }}>
               <IconCpu size={22} />
             </div>
@@ -175,7 +177,7 @@ export function Dashboard({ agents, systemStats }: DashboardProps) {
 
         <div className="stat-card">
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <div style={{ color: 'var(--muted-fg)', fontWeight: 600, fontSize: '0.9rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Total Messages</div>
+            <div style={{ color: 'var(--muted-fg)', fontWeight: 600, fontSize: '0.9rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('dashboard.totalMessages')}</div>
             <div className="stat-icon-wrapper" style={{ background: 'linear-gradient(135deg, #34d399 0%, #10b981 100%)', color: '#ffffff' }}>
               <IconChat size={22} />
             </div>
@@ -187,7 +189,7 @@ export function Dashboard({ agents, systemStats }: DashboardProps) {
 
         <div className="stat-card">
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <div style={{ color: 'var(--muted-fg)', fontWeight: 600, fontSize: '0.9rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Total Sessions</div>
+            <div style={{ color: 'var(--muted-fg)', fontWeight: 600, fontSize: '0.9rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('dashboard.totalSessions')}</div>
             <div className="stat-icon-wrapper" style={{ background: 'linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%)', color: '#ffffff' }}>
               <IconBot size={22} />
             </div>
@@ -200,18 +202,18 @@ export function Dashboard({ agents, systemStats }: DashboardProps) {
 
       <div className="animate-stagger-3" style={{ marginBottom: '3rem' }}>
         <h3 style={{ marginBottom: '1rem', fontSize: '1.25rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          Agent Activity Breakdown
+          {t('dashboard.agentActivity')}
         </h3>
         <div className="dashboard-table-container">
           <table className="dashboard-table">
             <thead>
               <tr>
-                <th>Agent Name</th>
-                <th>Sessions</th>
-                <th>Messages</th>
-                <th>Prompt Tokens</th>
-                <th>Completion Tokens</th>
-                <th>Total Tokens</th>
+                <th>{t('dashboard.agentName')}</th>
+                <th>{t('dashboard.sessions')}</th>
+                <th>{t('dashboard.messages')}</th>
+                <th>{t('dashboard.promptTokens')}</th>
+                <th>{t('dashboard.completionTokens')}</th>
+                <th>{t('dashboard.totalTokens')}</th>
               </tr>
             </thead>
             <tbody>
@@ -229,8 +231,8 @@ export function Dashboard({ agents, systemStats }: DashboardProps) {
                         <IconBot size={48} />
                       </div>
                     </div>
-                    <div style={{ fontWeight: 600, color: 'var(--foreground)' }}>No agent activity yet</div>
-                    <div style={{ fontSize: '0.9rem', marginTop: '0.5rem', opacity: 0.8 }}>Start chatting to see stats appear here</div>
+                    <div style={{ fontWeight: 600, color: 'var(--foreground)' }}>{t('dashboard.noActivity')}</div>
+                    <div style={{ fontSize: '0.9rem', marginTop: '0.5rem', opacity: 0.8 }}>{t('dashboard.startChatting')}</div>
                   </td>
                 </tr>
               ) : (
@@ -259,11 +261,11 @@ export function Dashboard({ agents, systemStats }: DashboardProps) {
       
       {systemStats && (
         <div className="animate-stagger-4">
-           <h3 style={{ marginBottom: '1rem', fontSize: '1.25rem', fontWeight: 700 }}>System Resources</h3>
+           <h3 style={{ marginBottom: '1rem', fontSize: '1.25rem', fontWeight: 700 }}>{t('dashboard.systemResources')}</h3>
            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1.5rem' }}>
               <div className="stat-card">
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-                  <div style={{ color: 'var(--muted-fg)', fontSize: '0.875rem', fontWeight: 600, textTransform: 'uppercase' }}>CPU Usage</div>
+                  <div style={{ color: 'var(--muted-fg)', fontSize: '0.875rem', fontWeight: 600, textTransform: 'uppercase' }}>{t('dashboard.cpuUsage')}</div>
                   <div style={{ fontSize: '1.25rem', fontWeight: 700 }}>{systemStats.cpuUsage}%</div>
                 </div>
                 <div className="progress-bar-bg">
@@ -273,21 +275,21 @@ export function Dashboard({ agents, systemStats }: DashboardProps) {
 
               <div className="stat-card">
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-                  <div style={{ color: 'var(--muted-fg)', fontSize: '0.875rem', fontWeight: 600, textTransform: 'uppercase' }}>Memory Usage</div>
+                  <div style={{ color: 'var(--muted-fg)', fontSize: '0.875rem', fontWeight: 600, textTransform: 'uppercase' }}>{t('dashboard.memoryUsage')}</div>
                   <div style={{ fontSize: '1.25rem', fontWeight: 700 }}>{systemStats.memoryUsage}%</div>
                 </div>
                 <div className="progress-bar-bg">
                   <div className="progress-bar-fill" style={{ width: `${Math.min(systemStats.memoryUsage, 100)}%`, backgroundColor: systemStats.memoryUsage > 80 ? '#ef4444' : '#10b981' }}></div>
                 </div>
                 <div style={{ fontSize: '0.8rem', color: 'var(--muted-fg)', marginTop: '0.75rem', textAlign: 'right', fontWeight: 500 }}>
-                  {systemStats.totalMemory} GB Total
+                  {t('dashboard.totalGb', { total: systemStats.totalMemory })}
                 </div>
               </div>
 
               <div className="stat-card" style={{ display: 'flex', justifyContent: 'center' }}>
-                <div style={{ color: 'var(--muted-fg)', fontSize: '0.875rem', fontWeight: 600, textTransform: 'uppercase', marginBottom: '0.5rem' }}>System Uptime</div>
+                <div style={{ color: 'var(--muted-fg)', fontSize: '0.875rem', fontWeight: 600, textTransform: 'uppercase', marginBottom: '0.5rem' }}>{t('dashboard.systemUptime')}</div>
                 <div style={{ fontSize: '2rem', fontWeight: 700, color: 'var(--foreground)' }}>
-                  {systemStats.uptime} <span style={{ fontSize: '1rem', color: 'var(--muted-fg)', fontWeight: 500 }}>hrs</span>
+                  {systemStats.uptime} <span style={{ fontSize: '1rem', color: 'var(--muted-fg)', fontWeight: 500 }}>{t('dashboard.hrs')}</span>
                 </div>
               </div>
            </div>
