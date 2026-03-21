@@ -89,12 +89,14 @@ const en = {
   'dashboard.hrs': 'hrs',
 
   // Audit Logs
+  'audit.subtitle': 'Review system operations, tool executions, and security events',
   'audit.noLogs': 'No audit logs found.',
   'audit.time': 'Time',
   'audit.tool': 'Tool',
   'audit.arguments': 'Arguments',
   'audit.status': 'Status',
   'audit.refreshLogs': 'Refresh Logs',
+  'audit.errorDetails': 'Error Details',
 
   // Modal
   'modal.highRisk': 'High Risk Warning',

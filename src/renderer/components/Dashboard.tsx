@@ -88,43 +88,6 @@ export function Dashboard({ agents, systemStats }: DashboardProps) {
           margin-bottom: 0.5rem;
           box-shadow: inset 0 2px 4px rgba(255, 255, 255, 0.5), 0 4px 8px rgba(0,0,0,0.05);
         }
-        .dashboard-table-container {
-          background: rgba(255, 255, 255, 0.85);
-          border-radius: 20px;
-          border: 1px solid rgba(255, 255, 255, 0.8);
-          overflow: hidden;
-          box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), inset 0 1px 0 rgba(255, 255, 255, 1);
-        }
-        .dashboard-table {
-          width: 100%;
-          border-collapse: separate;
-          border-spacing: 0;
-          text-align: left;
-        }
-        .dashboard-table th {
-          background: rgba(255, 255, 255, 0.4);
-          padding: 1rem 1.25rem;
-          font-size: 0.75rem;
-          text-transform: uppercase;
-          letter-spacing: 0.05em;
-          color: var(--muted-fg, #6b7280);
-          font-weight: 600;
-          border-bottom: 1px solid rgba(226, 232, 240, 0.5);
-        }
-        .dashboard-table td {
-          padding: 1rem 1.25rem;
-          border-bottom: 1px solid rgba(226, 232, 240, 0.5);
-          vertical-align: middle;
-        }
-        .dashboard-table tbody tr {
-          transition: background-color 0.2s ease;
-        }
-        .dashboard-table tbody tr:hover {
-          background-color: rgba(255, 255, 255, 0.5);
-        }
-        .dashboard-table tbody tr:last-child td {
-          border-bottom: none;
-        }
         .progress-bar-bg {
           height: 8px;
           background: rgba(226, 232, 240, 0.5);
@@ -204,8 +167,8 @@ export function Dashboard({ agents, systemStats }: DashboardProps) {
         <h3 style={{ marginBottom: '1rem', fontSize: '1.25rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           {t('dashboard.agentActivity')}
         </h3>
-        <div className="dashboard-table-container">
-          <table className="dashboard-table">
+        <div className="data-table-container">
+          <table className="data-table">
             <thead>
               <tr>
                 <th>{t('dashboard.agentName')}</th>

@@ -89,12 +89,14 @@ const zh: Record<TranslationKey, string> = {
   'dashboard.hrs': '小时',
 
   // Audit Logs
+  'audit.subtitle': '审查系统操作、工具执行和安全事件',
   'audit.noLogs': '未找到任何审计日志。',
   'audit.time': '时间',
   'audit.tool': '调用工具',
   'audit.arguments': '参数',
   'audit.status': '状态',
   'audit.refreshLogs': '刷新日志',
+  'audit.errorDetails': '错误详情',
 
   // Modal
   'modal.highRisk': '高危操作警告 (High Risk)',
