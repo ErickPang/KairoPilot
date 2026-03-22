@@ -66,4 +66,5 @@ export interface AuditLogEntry {
   result?: unknown;
   error?: string;
   sessionId?: string;
+  policyTags?: string[];
 }

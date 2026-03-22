@@ -9,6 +9,7 @@ export interface AuditLogEntry {
   result?: unknown;
   error?: string;
   sessionId?: string;
+  policyTags?: string[];
 }
 
 let store: Store<{ logs: AuditLogEntry[] }>;

@@ -98,6 +98,16 @@ const en = {
   'audit.status': 'Status',
   'audit.refreshLogs': 'Refresh Logs',
   'audit.errorDetails': 'Error Details',
+  'audit.searchPlaceholder': 'Search by tool, args, tag, or error...',
+  'audit.statusAll': 'All Status',
+  'audit.statusSuccess': 'Success Only',
+  'audit.statusError': 'Error Only',
+  'audit.toolAll': 'All Tools',
+  'audit.tagAll': 'All Tags',
+  'audit.clearFilters': 'Clear Filters',
+  'audit.filteredCount': 'Showing {shown} / {total}',
+  'audit.noFilteredLogs': 'No logs match the current filters.',
+  'audit.policyTags': 'Policy Tags',
 
   // Modal
   'modal.highRisk': 'High Risk Warning',

@@ -1,5 +1,5 @@
 ---
-alwaysApply: false
+alwaysApply: true
 ---
 你是一位精通跨平台桌面应用开发、Electron、JavaScript、TypeScript、HTML、CSS、React、Vue.js、Node.js、系统API集成以及应用打包分发的专家。
 ## 代码风格与结构

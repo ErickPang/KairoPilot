@@ -10,7 +10,7 @@ import AuditLogViewer from './components/AuditLogViewer';
 import { PluginStorePanel } from './components/PluginStorePanel';
 import { SkillStorePanel } from './components/SkillStorePanel';
 import { Dashboard } from './components/Dashboard';
-import { IconChat, IconShield, IconSettings, IconPlugin, IconDashboard } from './components/Icons';
+import { IconChat, IconShield, IconSettings, IconPlugin, IconDashboard, IconSkill } from './components/Icons';
 import { useTranslation } from './hooks/useTranslation';
 
 interface AgentUpdate {
@@ -415,8 +415,7 @@ function App() {
           onClick={() => setActiveTab('skills')}
           title={t('nav.skills')}
         >
-          {/* We'll use a generic icon for skills for now, like a star or magic wand. Using IconPlugin temporarily or you can add IconSkill */}
-          <IconPlugin size={24} /> 
+          <IconSkill size={24} /> 
         </div>
         
         <div className="nav-spacer" />

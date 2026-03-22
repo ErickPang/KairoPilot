@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, protocol, net } from 'electron'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import os from 'node:os'
@@ -8,6 +8,11 @@ import fixPath from 'fix-path'
 
 app.name = 'KairoPilot'
 app.setName('KairoPilot')
+
+// Register custom protocol as privileged
+protocol.registerSchemesAsPrivileged([
+  { scheme: 'kairopilot', privileges: { bypassCSP: true, supportFetchAPI: true, corsEnabled: false } }
+])
 
 // Set userData path to ~/.kairopilot
 const userDataPath = path.join(os.homedir(), '.kairopilot')
@@ -98,6 +103,12 @@ app.on('activate', () => {
 })
 
 app.whenReady().then(() => {
+  protocol.handle('kairopilot', (request) => {
+    const url = request.url.replace('kairopilot://', '');
+    const decodedUrl = decodeURIComponent(url);
+    return net.fetch('file://' + decodedUrl);
+  });
+
   if (process.platform === 'darwin') {
     app.dock.setIcon(path.join(process.env.VITE_PUBLIC, 'icon.png'))
   }

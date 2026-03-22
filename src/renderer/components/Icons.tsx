@@ -18,7 +18,8 @@ import {
   Terminal,
   ChevronDown,
   Puzzle,
-  Activity
+  Activity,
+  Zap
 } from 'lucide-react';
 import { CSSProperties } from 'react';
 
@@ -107,4 +108,8 @@ export const IconFolder = ({ size = 24, className = '', ...props }: IconProps) =
 
 export const IconPlugin = ({ size = 24, className = '', ...props }: IconProps) => (
   <Puzzle size={size} className={className} strokeWidth={1.5} {...props} />
+);
+
+export const IconSkill = ({ size = 24, className = '', ...props }: IconProps) => (
+  <Zap size={size} className={className} strokeWidth={1.5} {...props} />
 );

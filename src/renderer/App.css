@@ -646,7 +646,6 @@ body, html {
   flex: 1;
   overflow-y: auto;
   padding: 1rem 2rem 2rem;
-  max-width: 1024px;
   width: 100%;
 }
 
@@ -941,4 +940,13 @@ textarea.form-control {
 .badge-primary {
   background-color: var(--primary);
   color: var(--primary-fg);
+}
+
+/* Markdown styles */
+.markdown-body img {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius-md);
+  margin: 1rem 0;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { IconPlugin, IconRefresh } from './Icons';
+import { IconRefresh, IconSkill } from './Icons';
 import './PluginStorePanel.css'; // Reusing plugin styles for now
 import { useTranslation } from '../hooks/useTranslation';
 import { AgentConfig } from '../../main/store/config';
@@ -58,7 +58,7 @@ export function SkillStorePanel() {
                 background: 'var(--primary)', display: 'flex', alignItems: 'center', 
                 justifyContent: 'center', color: 'var(--primary-fg)', marginRight: '0.75rem' 
               }}>
-                <IconPlugin size={20} />
+                <IconSkill size={20} />
               </div>
               {t('skills.title')}
             </div>

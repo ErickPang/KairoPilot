@@ -98,6 +98,16 @@ const zh: Record<TranslationKey, string> = {
   'audit.status': '状态',
   'audit.refreshLogs': '刷新日志',
   'audit.errorDetails': '错误详情',
+  'audit.searchPlaceholder': '按工具、参数、标签或错误信息搜索...',
+  'audit.statusAll': '全部状态',
+  'audit.statusSuccess': '仅成功',
+  'audit.statusError': '仅错误',
+  'audit.toolAll': '全部工具',
+  'audit.tagAll': '全部标签',
+  'audit.clearFilters': '清空筛选',
+  'audit.filteredCount': '显示 {shown} / {total}',
+  'audit.noFilteredLogs': '当前筛选条件下没有日志。',
+  'audit.policyTags': '策略标签',
 
   // Modal
   'modal.highRisk': '高危操作警告 (High Risk)',

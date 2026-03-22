@@ -8,14 +8,14 @@ export class AgentRuntime {
   private systemPrompt: string;
   private permissionGuard: PermissionGuard;
   private confirmAction?: (toolName: string, args: Record<string, unknown>) => Promise<boolean>;
-  private auditLog?: (entry: { tool: string, args: Record<string, unknown>, result?: unknown, error?: string }) => void;
+  private auditLog?: (entry: { tool: string, args: Record<string, unknown>, result?: unknown, error?: string, policyTags?: string[] }) => void;
 
   constructor(
     llm: LLMProvider, 
     permissionGuard: PermissionGuard,
     systemPrompt: string = "You are a helpful AI assistant.",
     confirmAction?: (toolName: string, args: Record<string, unknown>) => Promise<boolean>,
-    auditLog?: (entry: { tool: string, args: Record<string, unknown>, result?: unknown, error?: string }) => void
+    auditLog?: (entry: { tool: string, args: Record<string, unknown>, result?: unknown, error?: string, policyTags?: string[] }) => void
   ) {
     this.llm = llm;
     this.systemPrompt = systemPrompt;
@@ -81,6 +81,7 @@ export class AgentRuntime {
             const call = rawCall as { id: string; function: { name: string; arguments: string } };
             const toolName = call.function.name;
           const args = JSON.parse(call.function.arguments);
+          const policyTags = this.getPolicyTags(toolName, args);
           
           if (onUpdate) onUpdate({ type: 'tool-call', tool: toolName, args });
           console.log(`[Agent] Calling tool: ${toolName}`, args);
@@ -97,12 +98,12 @@ export class AgentRuntime {
               const output = await tool.execute(args);
               result = JSON.stringify(output);
               if (onUpdate) onUpdate({ type: 'tool-result', tool: toolName, result: output });
-              if (this.auditLog) this.auditLog({ tool: toolName, args, result: output });
+              if (this.auditLog) this.auditLog({ tool: toolName, args, result: output, policyTags });
             } catch (error) {
               const errorMessage = error instanceof Error ? error.message : 'Unknown error';
               result = `Error executing tool: ${errorMessage}`;
               if (onUpdate) onUpdate({ type: 'tool-error', tool: toolName, error: errorMessage });
-              if (this.auditLog) this.auditLog({ tool: toolName, args, error: errorMessage });
+              if (this.auditLog) this.auditLog({ tool: toolName, args, error: errorMessage, policyTags: [...policyTags, 'decision:error'] });
             }
           } else {
             result = `Tool ${toolName} not found.`;
@@ -172,5 +173,25 @@ export class AgentRuntime {
     }
 
     // Add more checks as needed
+  }
+
+  private getPolicyTags(toolName: string, args: Record<string, unknown>): string[] {
+    const tags = [`tool:${toolName}`];
+    if (toolName.startsWith('skill_')) {
+      tags.push('policy:skill_used');
+      tags.push('tool_category:skill');
+    }
+
+    const highRiskTools = ['execute_command', 'write_file', 'delete_file'];
+    if (highRiskTools.includes(toolName)) {
+      tags.push('risk:high');
+      tags.push('policy:confirmation_required');
+    }
+
+    if (toolName === 'execute_command' && typeof args.command === 'string') {
+      tags.push(`command:${(args.command as string).split(' ')[0]}`);
+    }
+
+    return tags;
   }
 }

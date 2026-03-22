@@ -121,12 +121,18 @@ export function ChatInterface({
     
     const files = Array.from(e.dataTransfer.files);
     if (files.length > 0) {
-      // Try to get path from File object
-      const filePaths = files.map(f => (f as File & { path?: string }).path).filter(p => p);
+      const addedText = files.map(f => {
+        const path = (f as File & { path?: string }).path;
+        if (!path) return '';
+        if (f.type.startsWith('image/')) {
+          return `![${f.name}](kairopilot://${path})`;
+        } else {
+          return `Context file: ${path}`;
+        }
+      }).filter(Boolean).join('\n');
       
-      if (filePaths.length > 0) {
-        const pathString = filePaths.map(p => `Context file: ${p}`).join('\n');
-        setInput(prev => prev ? `${prev}\n${pathString}` : pathString);
+      if (addedText) {
+        setInput(prev => prev ? `${prev}\n${addedText}` : addedText);
       }
     }
   };
