@@ -1,5 +1,6 @@
 {
   "name": "KairoPilot",
+  "productName": "KairoPilot",
   "description": "A user-friendly desktop AI Agent application based on OpenClaw architecture.",
   "author": "Trae",
   "private": true,

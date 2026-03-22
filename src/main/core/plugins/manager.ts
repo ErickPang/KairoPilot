@@ -21,93 +21,11 @@ export interface InstalledPlugin extends PluginManifest {
   scope: string; // 'public' or 'agent:{agentId}'
 }
 
-const MOCK_STORE: PluginManifest[] = [
-  {
-    id: 'kairo-weather-plugin',
-    name: 'Weather Forecaster',
-    description: 'Provides real-time weather information for any city.',
-    version: '1.0.0',
-    author: 'Kairo Team',
-    icon: '🌤️'
-  },
-  {
-    id: 'kairo-crypto-plugin',
-    name: 'Crypto Tracker',
-    description: 'Get real-time cryptocurrency prices and market data.',
-    version: '1.0.0',
-    author: 'Community',
-    icon: '₿'
-  },
-  {
-    id: 'kairo-github-plugin',
-    name: 'GitHub Integration',
-    description: 'Interact with GitHub repositories and issues.',
-    version: '1.2.0',
-    author: 'Kairo Team',
-    icon: '🐙'
-  }
-];
+const MOCK_STORE: PluginManifest[] = [];
 
-// Mock Plugin Code Generators
-// These plugins use the injected `z` from context
-const getPluginCode = (id: string) => {
-  if (id === 'kairo-weather-plugin') {
-    return `
-      module.exports = {
-        tools: [
-          {
-            name: 'get_weather',
-            description: 'Get the current weather for a specific city.',
-            parameters: z.object({
-              city: z.string().describe('The name of the city, e.g., London, Tokyo')
-            }),
-            execute: async ({ city }) => {
-              const temps = { 'London': '15°C, Rainy', 'Tokyo': '22°C, Sunny', 'New York': '18°C, Cloudy', 'Beijing': '25°C, Clear' };
-              return "The current weather in " + city + " is " + (temps[city] || '20°C, Clear') + ".";
-            }
-          }
-        ]
-      };
-    `;
-  }
-  if (id === 'kairo-crypto-plugin') {
-     return `
-      module.exports = {
-        tools: [
-          {
-            name: 'get_crypto_price',
-            description: 'Get the current price of a cryptocurrency.',
-            parameters: z.object({
-              symbol: z.string().describe('The cryptocurrency symbol, e.g., BTC, ETH')
-            }),
-            execute: async ({ symbol }) => {
-              const prices = { 'BTC': '$65,000', 'ETH': '$3,500', 'SOL': '$150' };
-              return "The current price of " + symbol.toUpperCase() + " is " + (prices[symbol.toUpperCase()] || 'unknown') + ".";
-            }
-          }
-        ]
-      };
-     `;
-  }
-  if (id === 'kairo-github-plugin') {
-      return `
-      module.exports = {
-        tools: [
-          {
-            name: 'github_search',
-            description: 'Search GitHub repositories.',
-            parameters: z.object({
-              query: z.string().describe('The search query')
-            }),
-            execute: async ({ query }) => {
-              return "GitHub Search results for " + query + ":\\n1. Found some popular repos...\\n2. React, Vue, etc.";
-            }
-          }
-        ]
-      };
-     `;
-  }
-  return `module.exports = { tools: [] };`;
+// Real Plugin Code Fetcher placeholder
+const getPluginCode = async () => {
+  throw new Error('Plugin store API not implemented yet.');
 };
 
 export interface AgentSkill {
@@ -120,12 +38,14 @@ export interface AgentSkill {
 
 export class PluginManager {
   private publicSkillsDir: string;
+  private pluginsDir: string;
   private registryPath: string;
 
   constructor() {
     const homeDir = app.getPath('home');
     this.publicSkillsDir = path.join(homeDir, '.kairopilot', 'skills');
-    this.registryPath = path.join(homeDir, '.kairopilot', 'skills_registry.json');
+    this.pluginsDir = path.join(homeDir, '.kairopilot', 'plugins');
+    this.registryPath = path.join(homeDir, '.kairopilot', 'plugins_registry.json');
   }
 
   async init() {
@@ -138,6 +58,10 @@ export class PluginManager {
 
     try {
       await fs.mkdir(this.publicSkillsDir, { recursive: true });
+    } catch (e) { /* ignore */ }
+    
+    try {
+      await fs.mkdir(this.pluginsDir, { recursive: true });
     } catch (e) { /* ignore */ }
     
     try {
@@ -267,8 +191,7 @@ export class PluginManager {
   }
 
   async getStorePlugins(): Promise<PluginManifest[]> {
-    // Simulate network delay
-    await new Promise(r => setTimeout(r, 500));
+    // Return empty store for now since API is not implemented
     return MOCK_STORE;
   }
 
@@ -277,7 +200,28 @@ export class PluginManager {
     let registryPlugins: InstalledPlugin[] = [];
     try {
       const data = await fs.readFile(this.registryPath, 'utf-8');
-      registryPlugins = JSON.parse(data) as InstalledPlugin[];
+      const parsed = JSON.parse(data) as InstalledPlugin[];
+      
+      // Verify real installation by checking if filePath exists
+      const validPlugins: InstalledPlugin[] = [];
+      let registryModified = false;
+      
+      for (const plugin of parsed) {
+        try {
+          await fs.access(plugin.filePath);
+          validPlugins.push(plugin);
+        } catch {
+          // File doesn't exist, skip this plugin and mark registry as modified
+          console.warn(`[PluginManager] Plugin ${plugin.id} file not found at ${plugin.filePath}, removing from registry.`);
+          registryModified = true;
+        }
+      }
+
+      if (registryModified) {
+        await fs.writeFile(this.registryPath, JSON.stringify(validPlugins, null, 2), 'utf-8');
+      }
+      
+      registryPlugins = validPlugins;
     } catch (e) {
       console.error('Failed to read plugin registry', e);
     }
@@ -294,15 +238,17 @@ export class PluginManager {
     if (installed.find(p => p.id === id && p.scope === scope)) return true;
 
     // "Download" code
-    const code = getPluginCode(id);
-    const targetDir = this.getWorkspaceDir(scope);
+    const code = await getPluginCode();
+    const targetDir = this.pluginsDir;
     
     // Ensure target directory exists
     try {
       await fs.mkdir(targetDir, { recursive: true });
     } catch (e) { /* ignore */ }
 
-    const filePath = path.join(targetDir, `${id}.js`);
+    // Differentiate filename if scope is agent specific, or just use ID since pluginsDir is flat
+    const safeScope = scope.replace(':', '_');
+    const filePath = path.join(targetDir, `${id}_${safeScope}.js`);
     await fs.writeFile(filePath, code, 'utf-8');
 
     const newPlugin: InstalledPlugin = {

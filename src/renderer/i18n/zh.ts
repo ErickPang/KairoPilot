@@ -111,9 +111,10 @@ const zh: Record<TranslationKey, string> = {
   'modal.allow': '允许执行 (Allow)',
 
   // Skills & Plugins
-  'plugins.subtitle': '管理本地与市场的底层能力扩展',
-  'plugins.installedTab': '已安装',
-  'plugins.uninstalledTab': '未安装 (市场)',
+  'plugins.subtitle': '管理本地与插件市场的核心能力',
+  'plugins.installedTab': '已安装插件',
+  'plugins.uninstalledTab': '插件市场',
+  'plugins.marketplace': '插件市场',
   'plugins.installedTitle': '已安装插件',
   'plugins.noInstalled': '暂无已安装插件',
 

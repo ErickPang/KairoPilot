@@ -8,7 +8,7 @@ import { ChatInterface } from './components/ChatInterface';
 import { ConfirmationModal } from './components/ConfirmationModal';
 import AuditLogViewer from './components/AuditLogViewer';
 import { PluginStorePanel } from './components/PluginStorePanel';
-import { SkillStorePanel } from './components/SkillStorePanel'; // Added skill store panel
+import { SkillStorePanel } from './components/SkillStorePanel';
 import { Dashboard } from './components/Dashboard';
 import { IconChat, IconShield, IconSettings, IconPlugin, IconDashboard } from './components/Icons';
 import { useTranslation } from './hooks/useTranslation';

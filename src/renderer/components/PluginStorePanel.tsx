@@ -171,7 +171,7 @@ export function PluginStorePanel() {
             {publicPlugins.length === 0 ? (
               <div className="empty-state">{t('plugins.noInstalled')}</div>
             ) : (
-              <div className="skill-list">
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '1rem' }}>
                 {publicPlugins.map(plugin => (
                   <InstalledSkillItem 
                     key={`${plugin.id}-${plugin.scope}`} 
@@ -189,7 +189,11 @@ export function PluginStorePanel() {
         {!loading && activeTab === 'store' && (
           <div>
             {uninstalledPlugins.length === 0 ? (
-              <div className="empty-state">{t('skills.allInstalled')}</div>
+              <div className="empty-state" style={{ marginTop: '4rem', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center' }}>
+                <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>🛒</div>
+                <h3 style={{ margin: '0 0 0.5rem 0' }}>{t('plugins.marketplace')}</h3>
+                <p style={{ margin: 0, color: 'var(--muted-fg)' }}>{t('skills.allInstalled')}</p>
+              </div>
             ) : (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '1rem' }}>
                 {uninstalledPlugins.map(plugin => (
@@ -265,44 +269,50 @@ export function PluginStorePanel() {
 }
 
 function InstalledSkillItem({ plugin, onUninstall, isWorking, isNative }: { plugin: InstalledPlugin, onUninstall: () => void, isWorking: boolean, isNative?: boolean }) {
-  const [expanded, setExpanded] = useState(false);
   const { t } = useTranslation();
   
   return (
-    <div className="skill-list-item" onClick={() => setExpanded(!expanded)}>
-      <div className="skill-item-header">
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-          <span style={{ fontSize: '1.5rem' }}>{plugin.icon || '🧩'}</span>
-          <div>
-            <div style={{ fontWeight: 500, color: 'var(--foreground)' }}>{plugin.name}</div>
-            <div style={{ fontSize: '0.8rem', color: 'var(--muted-fg)' }}>v{plugin.version}</div>
+    <div className="config-card" style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', height: '100%' }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '1rem' }}>
+        <div style={{ 
+          fontSize: '2rem', width: '48px', height: '48px', 
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          background: 'var(--sidebar-bg)', borderRadius: 'var(--radius-md)'
+        }}>
+          {plugin.icon || '🧩'}
+        </div>
+        <div style={{ flex: 1 }}>
+          <h4 style={{ margin: '0 0 0.25rem 0' }}>{plugin.name}</h4>
+          <div style={{ fontSize: '0.8rem', color: 'var(--muted-fg)' }}>
+            v{plugin.version} • {t('skills.by', { author: plugin.author })}
           </div>
         </div>
-        {!isNative && (
-          <button 
-            className="btn btn-secondary btn-sm btn-danger"
-            onClick={(e) => {
-              e.stopPropagation();
-              if(confirm(t('common.confirm') + ' ' + t('skills.uninstall') + '?')) {
-                onUninstall();
-              }
-            }}
-            disabled={isWorking}
-          >
-            {isWorking ? <IconRefresh size={14} className="spinning" /> : <IconTrash size={14} />}
-            <span style={{ marginLeft: '4px' }}>{t('skills.uninstall')}</span>
-          </button>
-        )}
       </div>
-      {expanded && (
-        <div className="skill-item-details" onClick={(e) => e.stopPropagation()}>
-          <p>{plugin.description}</p>
-          <div className="skill-meta">
-            <span><strong>{t('skills.author')}:</strong> {plugin.author}</span>
-            <span><strong>{t('skills.installedAt')}:</strong> {new Date(plugin.installedAt).toLocaleString()}</span>
-          </div>
-        </div>
-      )}
+      
+      <p style={{ margin: 0, fontSize: '0.9rem', color: 'var(--foreground)', flex: 1 }}>
+        {plugin.description}
+      </p>
+
+      <div style={{ fontSize: '0.8rem', color: 'var(--muted-fg)', marginTop: '0.5rem' }}>
+        <strong>{t('skills.installedAt')}:</strong> {new Date(plugin.installedAt).toLocaleString()}
+      </div>
+
+      <div className="skill-card-actions" style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '0.5rem' }}>
+        <button 
+          className="btn btn-secondary btn-sm btn-danger"
+          onClick={(e) => {
+            e.stopPropagation();
+            if(confirm(t('common.confirm') + ' ' + t('skills.uninstall') + '?')) {
+              onUninstall();
+            }
+          }}
+          disabled={isWorking || isNative}
+          style={{ opacity: isNative ? 0.5 : 1, cursor: isNative ? 'not-allowed' : 'pointer' }}
+        >
+          {isWorking ? <IconRefresh size={14} className="spinning" /> : <IconTrash size={14} />}
+          <span style={{ marginLeft: '4px' }}>{isNative ? t('skills.installed') : t('skills.uninstall')}</span>
+        </button>
+      </div>
     </div>
   );
 }

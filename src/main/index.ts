@@ -6,6 +6,9 @@ import fs from 'node:fs'
 import { setupHandlers } from './ipc/handlers'
 import fixPath from 'fix-path'
 
+app.name = 'KairoPilot'
+app.setName('KairoPilot')
+
 // Set userData path to ~/.kairopilot
 const userDataPath = path.join(os.homedir(), '.kairopilot')
 if (!fs.existsSync(userDataPath)) {
@@ -17,6 +20,12 @@ app.setPath('userData', userDataPath)
 const defaultWorkspacePath = path.join(userDataPath, 'workspace')
 if (!fs.existsSync(defaultWorkspacePath)) {
   fs.mkdirSync(defaultWorkspacePath, { recursive: true })
+}
+
+// Ensure default plugins directory exists
+const defaultPluginsPath = path.join(userDataPath, 'plugins')
+if (!fs.existsSync(defaultPluginsPath)) {
+  fs.mkdirSync(defaultPluginsPath, { recursive: true })
 }
 
 fixPath()
@@ -49,7 +58,9 @@ let win: BrowserWindow | null
 
 function createWindow() {
   win = new BrowserWindow({
-    icon: path.join(process.env.VITE_PUBLIC, 'electron-vite.svg'),
+    width: 1200,
+    height: 900,
+    icon: path.join(process.env.VITE_PUBLIC, 'icon.png'),
     titleBarStyle: 'hidden',
     trafficLightPosition: { x: 10, y: 12 },
     webPreferences: {
@@ -74,10 +85,8 @@ function createWindow() {
 // for applications and their menu bar to stay active until the user quits
 // explicitly with Cmd + Q.
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    app.quit()
-    win = null
-  }
+  app.quit()
+  win = null
 })
 
 app.on('activate', () => {
@@ -89,6 +98,9 @@ app.on('activate', () => {
 })
 
 app.whenReady().then(() => {
+  if (process.platform === 'darwin') {
+    app.dock.setIcon(path.join(process.env.VITE_PUBLIC, 'icon.png'))
+  }
   setupHandlers()
   createWindow()
 })

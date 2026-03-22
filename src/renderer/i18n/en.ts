@@ -112,8 +112,9 @@ const en = {
 
   // Skills & Plugins
   'plugins.subtitle': 'Manage local and marketplace core capabilities',
-  'plugins.installedTab': 'Installed',
-  'plugins.uninstalledTab': 'Not Installed (Market)',
+  'plugins.installedTab': 'Installed Plugins',
+  'plugins.uninstalledTab': 'Plugin Market',
+  'plugins.marketplace': 'Plugin Market',
   'plugins.installedTitle': 'Installed Plugins',
   'plugins.noInstalled': 'No installed plugins.',
 
