@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { ModelConfig, AgentConfig } from '../types';
+import { ModelConfig, AgentConfig, FetchModelsResult } from '../types';
 import { IconSettings } from './Icons';
 import { useTranslation } from '../hooks/useTranslation';
 import { ModelList } from './config/ModelList';
@@ -17,7 +17,7 @@ interface ConfigPanelProps {
   onSaveAgent: (agent: AgentConfig) => void;
   onDeleteAgent: (id: string) => void;
   onSetActiveAgent: (id: string) => void;
-  onFetchModels: (config: ModelConfig) => void;
+  onFetchModels: (config: ModelConfig) => Promise<FetchModelsResult>;
   availableModels: string[];
   activeSection?: string;
 }
@@ -68,7 +68,7 @@ export function ConfigPanel({
     setIsEditingExistingModel(true);
     setView('edit-model');
     // Auto-fetch models when opening edit
-    onFetchModels(model);
+    void onFetchModels(model);
   }, [onFetchModels]);
 
   const handleCreateModel = useCallback(() => {

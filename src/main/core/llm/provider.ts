@@ -1,4 +1,6 @@
 import { OpenAI } from 'openai';
+import { zodToJsonSchema } from 'zod-to-json-schema';
+import type { ZodSchema } from 'zod/v3';
 import { LLMProvider, ChatMessage, ToolDefinition, LLMConfig } from './types';
 
 export class OpenAIProvider implements LLMProvider {
@@ -9,6 +11,9 @@ export class OpenAIProvider implements LLMProvider {
   constructor(config: LLMConfig) {
     this.providerName = config.provider;
     let baseURL = config.baseUrl;
+    if (baseURL) {
+      baseURL = this.normalizeBaseUrl(baseURL);
+    }
     if (!baseURL) {
       switch (config.provider) {
         case 'ollama': 
@@ -44,13 +49,25 @@ export class OpenAIProvider implements LLMProvider {
     this.model = config.model;
   }
 
+  private normalizeBaseUrl(baseUrl: string): string {
+    const trimmed = baseUrl.trim().replace(/\/+$/, '');
+    if (!trimmed) {
+      return trimmed;
+    }
+    const lower = trimmed.toLowerCase();
+    if (lower.endsWith('/chat/completions')) {
+      return trimmed.slice(0, -('/chat/completions'.length));
+    }
+    return trimmed;
+  }
+
   async chat(messages: ChatMessage[], tools?: ToolDefinition[]): Promise<ChatMessage> {
     const openaiTools = tools?.map(tool => ({
       type: 'function' as const,
       function: {
         name: tool.name,
         description: tool.description,
-        parameters: tool.parameters as unknown as Record<string, unknown> 
+        parameters: this.toJsonSchema(tool.parameters)
       }
     }));
 
@@ -79,7 +96,6 @@ export class OpenAIProvider implements LLMProvider {
         return {
           role: msg.role,
           content: msg.content,
-          name: msg.name,
           // Fallback to a generated ID to prevent API serialization errors
           tool_call_id: callId || `call_${Math.random().toString(36).substring(2)}`
         };
@@ -93,19 +109,36 @@ export class OpenAIProvider implements LLMProvider {
       tools: openaiTools && openaiTools.length > 0 ? openaiTools : undefined,
     });
 
-    const choice = response.choices[0];
-    const message = choice.message;
+    const choice = Array.isArray(response.choices) ? response.choices[0] : undefined;
+    const message = choice?.message;
+    if (!message) {
+      throw new Error('Invalid OpenAI chat response: missing choices[0].message');
+    }
 
     return {
-      role: message.role,
+      role: message.role || 'assistant',
       content: message.content || '',
-      tool_calls: message.tool_calls as unknown as Record<string, unknown>[],
+      tool_calls: Array.isArray(message.tool_calls) ? message.tool_calls as unknown as Record<string, unknown>[] : undefined,
       usage: response.usage ? {
         prompt_tokens: response.usage.prompt_tokens,
         completion_tokens: response.usage.completion_tokens,
         total_tokens: response.usage.total_tokens
       } : undefined
     };
+  }
+
+  private toJsonSchema(parameters: ToolDefinition['parameters']): Record<string, unknown> {
+    const schema = zodToJsonSchema(parameters as unknown as ZodSchema, {
+      target: 'openAi',
+      $refStrategy: 'none'
+    }) as Record<string, unknown>;
+    const jsonSchema = { ...schema };
+    delete jsonSchema.$schema;
+    delete jsonSchema.definitions;
+    if (typeof jsonSchema.type !== 'string') {
+      return { type: 'object', properties: {}, additionalProperties: true };
+    }
+    return jsonSchema;
   }
 
   async listModels(): Promise<string[]> {

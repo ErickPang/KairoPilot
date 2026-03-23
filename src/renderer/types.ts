@@ -29,6 +29,12 @@ export interface ModelConfig {
   availableModels?: Array<{ id: string; name: string }>;
 }
 
+export interface FetchModelsResult {
+  success: boolean;
+  models: string[];
+  error?: string;
+}
+
 export interface ProviderConfig {
   provider: 'openai' | 'ollama' | 'anthropic' | 'deepseek' | 'zhipu' | 'kimi' | 'qianwen' | 'custom';
   baseUrl: string;

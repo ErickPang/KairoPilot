@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react';
-import { ModelConfig } from '../../types';
+import { FetchModelsResult, ModelConfig } from '../../types';
 import { IconCpu } from '../Icons';
 import { useTranslation } from '../../hooks/useTranslation';
 
 interface OllamaManagerProps {
   editingModel: ModelConfig;
-  onFetchModels: (model: ModelConfig) => void;
+  onFetchModels: (model: ModelConfig) => Promise<FetchModelsResult>;
 }
 
 export function OllamaManager({ editingModel, onFetchModels }: OllamaManagerProps) {
@@ -54,7 +54,7 @@ export function OllamaManager({ editingModel, onFetchModels }: OllamaManagerProp
       
       if (res.success) {
         setPullProgress({ status: 'Success! Model pulled.' });
-        onFetchModels(editingModel); // Refresh model list
+        void onFetchModels(editingModel);
         setModelToPull('');
       } else {
         setPullProgress({ status: `Error: ${res.error}` });

@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
-import { ModelConfig } from '../../types';
+import { FetchModelsResult, ModelConfig } from '../../types';
 import { IconArrowLeft, IconRefresh, IconChevronDown, IconCheck } from '../Icons';
 import { Select, type SelectOption } from '../Select';
 import { OllamaManager } from './OllamaManager';
@@ -10,7 +10,7 @@ interface ModelEditorProps {
   setEditingModel: (model: ModelConfig) => void;
   isEditingExisting: boolean;
   availableModels: string[];
-  onFetchModels: (model: ModelConfig) => void;
+  onFetchModels: (model: ModelConfig) => Promise<FetchModelsResult>;
   onSave: () => void;
   onCancel: () => void;
 }
@@ -29,6 +29,8 @@ export const ModelEditor = memo(function ModelEditor({
   const [isModelDropdownOpen, setIsModelDropdownOpen] = useState(false);
   const [activeModelIndex, setActiveModelIndex] = useState(-1);
   const [modelDropdownPlacement, setModelDropdownPlacement] = useState<'top' | 'bottom'>('bottom');
+  const [manualModelId, setManualModelId] = useState('');
+  const [showManualInput, setShowManualInput] = useState(false);
   const modelDropdownRef = useRef<HTMLDivElement>(null);
   const modelTriggerRef = useRef<HTMLButtonElement>(null);
   const selectedModelIds = useMemo(
@@ -126,6 +128,33 @@ export const ModelEditor = memo(function ModelEditor({
       availableModels: nextSelected.map(item => ({ id: item, name: item })),
       model: nextSelected.includes(editingModel.model) ? editingModel.model : (nextSelected[0] || '')
     });
+  };
+
+  const addManualModelId = () => {
+    const trimmed = manualModelId.trim();
+    if (!trimmed) {
+      return;
+    }
+    const nextSelected = selectedModelIds.includes(trimmed)
+      ? selectedModelIds
+      : [...selectedModelIds, trimmed];
+    setEditingModel({
+      ...editingModel,
+      availableModels: nextSelected.map(item => ({ id: item, name: item })),
+      model: editingModel.model || trimmed
+    });
+    setManualModelId('');
+  };
+
+  const handleFetchModels = async () => {
+    const result = await onFetchModels(editingModel);
+    if (result.success) {
+      setShowManualInput(false);
+      alert(t('config.fetchModelsSuccess', { count: String(result.models.length) }));
+      return;
+    }
+    setShowManualInput(true);
+    alert(t('config.fetchModelsFailed', { error: result.error || t('common.error') }));
   };
 
   return (
@@ -320,7 +349,7 @@ export const ModelEditor = memo(function ModelEditor({
               )}
             </div>
             <button 
-              onClick={() => onFetchModels(editingModel)}
+              onClick={handleFetchModels}
               className="btn btn-secondary"
               title={t('config.fetchModels')}
               disabled={!canFetchModels}
@@ -328,7 +357,27 @@ export const ModelEditor = memo(function ModelEditor({
               <IconRefresh size={18} /> {t('config.fetchModels')}
             </button>
           </div>
+          {showManualInput && (
+            <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.5rem' }}>
+              <input
+                className="form-control"
+                value={manualModelId}
+                onChange={e => setManualModelId(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    addManualModelId();
+                  }
+                }}
+                placeholder={t('config.placeholder.manualModelId')}
+              />
+              <button type="button" className="btn btn-secondary" onClick={addManualModelId}>
+                {t('config.addModelId')}
+              </button>
+            </div>
+          )}
           <div className="form-help">{t('config.modelIdHelp')}</div>
+          {showManualInput && <div className="form-help">{t('config.manualModelIdHelp')}</div>}
         </div>
 
         {editingModel.provider === 'ollama' && (

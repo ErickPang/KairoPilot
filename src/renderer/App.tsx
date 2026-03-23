@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import './App.css'
-import { ModelConfig, AgentConfig, Message, Session, SystemStats, KairoPilotConfig, ProviderConfig } from './types';
+import { ModelConfig, AgentConfig, Message, Session, SystemStats, KairoPilotConfig, ProviderConfig, FetchModelsResult } from './types';
 import { ConfigPanel } from './components/ConfigPanel';
 import { Sidebar } from './components/Sidebar';
 import { SettingsSidebar } from './components/SettingsSidebar';
@@ -84,14 +84,18 @@ function App() {
     setActiveAgentId(fullConfig.agents.activeAgentId || null);
   }, [toModelList]);
 
-  const fetchModels = async (config: ModelConfig) => {
+  const fetchModels = async (config: ModelConfig): Promise<FetchModelsResult> => {
     try {
       const modelList = await window.ipcRenderer.invoke('llm:listModels', config) as string[];
-      if (modelList && modelList.length > 0) {
-        setAvailableModels(modelList);
+      const normalizedList = Array.isArray(modelList) ? modelList : [];
+      setAvailableModels(normalizedList);
+      if (normalizedList.length > 0) {
+        return { success: true, models: normalizedList };
       }
+      return { success: false, models: [], error: 'No models returned from provider' };
     } catch (error) {
       console.error('Failed to fetch models:', error);
+      return { success: false, models: [], error: error instanceof Error ? error.message : 'Unknown error' };
     }
   };
 
