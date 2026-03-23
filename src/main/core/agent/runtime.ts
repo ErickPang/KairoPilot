@@ -77,37 +77,85 @@ export class AgentRuntime {
       // 6. Check if LLM wants to use a tool
       if (response.tool_calls && response.tool_calls.length > 0) {
         for (const rawCall of response.tool_calls) {
-            // Need to type cast safely
-            const call = rawCall as { id: string; function: { name: string; arguments: string } };
-            const toolName = call.function.name;
-          const args = JSON.parse(call.function.arguments);
-          const policyTags = this.getPolicyTags(toolName, args);
-          
-          if (onUpdate) onUpdate({ type: 'tool-call', tool: toolName, args });
-          console.log(`[Agent] Calling tool: ${toolName}`, args);
-          
+          const call = rawCall as { id: string; function: { name: string; arguments: string } };
+          const toolName = call.function.name;
           const tool = this.tools.get(toolName);
+          let args: Record<string, unknown> = {};
           let result = "";
 
-          if (tool) {
-            try {
-              // --- SECURITY CHECK ---
-              await this.checkPermission(toolName, args);
-              // ----------------------
-
-              const output = await tool.execute(args);
-              result = JSON.stringify(output);
-              if (onUpdate) onUpdate({ type: 'tool-result', tool: toolName, result: output });
-              if (this.auditLog) this.auditLog({ tool: toolName, args, result: output, policyTags });
-            } catch (error) {
-              const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-              result = `Error executing tool: ${errorMessage}`;
-              if (onUpdate) onUpdate({ type: 'tool-error', tool: toolName, error: errorMessage });
-              if (this.auditLog) this.auditLog({ tool: toolName, args, error: errorMessage, policyTags: [...policyTags, 'decision:error'] });
+          try {
+            const rawArgs = call.function.arguments;
+            if (typeof rawArgs === 'string' && rawArgs.trim().length > 0) {
+              const parsedArgs = JSON.parse(rawArgs);
+              args = parsedArgs && typeof parsedArgs === 'object' ? parsedArgs as Record<string, unknown> : {};
             }
-          } else {
+          } catch (error) {
+            const errorMessage = `Invalid JSON arguments for ${toolName}: ${error instanceof Error ? error.message : 'Unknown error'}`;
+            result = `Error executing tool: ${errorMessage}`;
+            if (onUpdate) onUpdate({ type: 'tool-error', tool: toolName, error: errorMessage });
+            if (this.auditLog) this.auditLog({ tool: toolName, args, error: errorMessage, policyTags: [`tool:${toolName}`, 'decision:error'] });
+            const toolMessage: ChatMessage = {
+              role: 'tool',
+              content: result,
+              name: toolName,
+              tool_call_id: call.id
+            };
+            this.history.push(toolMessage);
+            context.push(toolMessage);
+            continue;
+          }
+
+          if (!tool) {
             result = `Tool ${toolName} not found.`;
             if (onUpdate) onUpdate({ type: 'tool-error', tool: toolName, error: 'Tool not found' });
+            const toolMessage: ChatMessage = {
+              role: 'tool',
+              content: result,
+              name: toolName,
+              tool_call_id: call.id
+            };
+            this.history.push(toolMessage);
+            context.push(toolMessage);
+            continue;
+          }
+
+          args = this.repairToolArgs(toolName, args, context);
+          const validation = tool.parameters.safeParse(args);
+          if (!validation.success) {
+            const issueText = validation.error.issues
+              .map(issue => `${issue.path.join('.') || 'root'}: ${issue.message}`)
+              .join('; ');
+            const errorMessage = `Invalid arguments for ${toolName}: ${issueText}`;
+            result = `Error executing tool: ${errorMessage}`;
+            if (onUpdate) onUpdate({ type: 'tool-error', tool: toolName, error: errorMessage });
+            if (this.auditLog) this.auditLog({ tool: toolName, args, error: errorMessage, policyTags: [`tool:${toolName}`, 'decision:error'] });
+            const toolMessage: ChatMessage = {
+              role: 'tool',
+              content: result,
+              name: toolName,
+              tool_call_id: call.id
+            };
+            this.history.push(toolMessage);
+            context.push(toolMessage);
+            continue;
+          }
+
+          args = validation.data as Record<string, unknown>;
+          const policyTags = this.getPolicyTags(toolName, args);
+          if (onUpdate) onUpdate({ type: 'tool-call', tool: toolName, args });
+          console.log(`[Agent] Calling tool: ${toolName}`, args);
+
+          try {
+            await this.checkPermission(toolName, args);
+            const output = await tool.execute(args);
+            result = JSON.stringify(output);
+            if (onUpdate) onUpdate({ type: 'tool-result', tool: toolName, result: output });
+            if (this.auditLog) this.auditLog({ tool: toolName, args, result: output, policyTags });
+          } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+            result = `Error executing tool: ${errorMessage}`;
+            if (onUpdate) onUpdate({ type: 'tool-error', tool: toolName, error: errorMessage });
+            if (this.auditLog) this.auditLog({ tool: toolName, args, error: errorMessage, policyTags: [...policyTags, 'decision:error'] });
           }
 
           // 7. Feed tool result back to LLM
@@ -173,6 +221,36 @@ export class AgentRuntime {
     }
 
     // Add more checks as needed
+  }
+
+  private repairToolArgs(toolName: string, args: Record<string, unknown>, context: ChatMessage[]): Record<string, unknown> {
+    if (toolName !== 'web_search') {
+      return args;
+    }
+    if (typeof args.query === 'string' && args.query.trim().length > 0) {
+      return args;
+    }
+    const latestUserQuery = this.getLatestUserQuery(context);
+    if (!latestUserQuery) {
+      return args;
+    }
+    return {
+      ...args,
+      query: latestUserQuery
+    };
+  }
+
+  private getLatestUserQuery(context: ChatMessage[]): string {
+    for (let i = context.length - 1; i >= 0; i -= 1) {
+      const message = context[i];
+      if (message.role === 'user') {
+        const text = typeof message.content === 'string' ? message.content.trim() : '';
+        if (text) {
+          return text;
+        }
+      }
+    }
+    return '';
   }
 
   private getPolicyTags(toolName: string, args: Record<string, unknown>): string[] {

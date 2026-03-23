@@ -1,6 +1,5 @@
 import { OpenAI } from 'openai';
-import { zodToJsonSchema } from 'zod-to-json-schema';
-import type { ZodSchema } from 'zod/v3';
+import { z } from 'zod';
 import { LLMProvider, ChatMessage, ToolDefinition, LLMConfig } from './types';
 
 export class OpenAIProvider implements LLMProvider {
@@ -128,17 +127,17 @@ export class OpenAIProvider implements LLMProvider {
   }
 
   private toJsonSchema(parameters: ToolDefinition['parameters']): Record<string, unknown> {
-    const schema = zodToJsonSchema(parameters as unknown as ZodSchema, {
-      target: 'openAi',
-      $refStrategy: 'none'
-    }) as Record<string, unknown>;
-    const jsonSchema = { ...schema };
-    delete jsonSchema.$schema;
-    delete jsonSchema.definitions;
-    if (typeof jsonSchema.type !== 'string') {
+    try {
+      const schema = z.toJSONSchema(parameters) as Record<string, unknown>;
+      const jsonSchema = { ...schema };
+      delete jsonSchema.$schema;
+      if (typeof jsonSchema.type !== 'string') {
+        return { type: 'object', properties: {}, additionalProperties: true };
+      }
+      return jsonSchema;
+    } catch {
       return { type: 'object', properties: {}, additionalProperties: true };
     }
-    return jsonSchema;
   }
 
   async listModels(): Promise<string[]> {

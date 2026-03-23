@@ -6,14 +6,28 @@ export const WebSearchTool: ToolDefinition = {
   description: 'Search the internet for real-time information using DuckDuckGo. Returns titles, snippets, and URLs of the top search results.',
   parameters: z.object({
     query: z.string().describe('The search query'),
-    maxResults: z.number().optional().describe('Maximum number of results to return (default: 5, max: 10)')
+    maxResults: z.number().optional().describe('Maximum number of results to return (default: 5, max: 10)'),
+    num: z.number().optional().describe('Alias of maxResults. Maximum number of results to return (default: 5, max: 10)'),
+    lr: z.string().optional().describe('Optional language hint for query filtering, such as lang_en')
   }),
   execute: async (args: Record<string, unknown>) => {
     try {
-      const query = args.query as string;
-      const maxResults = args.maxResults as number | undefined;
-      const limit = Math.min(maxResults || 5, 10);
-      const searchUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
+      const query = typeof args.query === 'string' ? args.query.trim() : '';
+      if (!query) {
+        return { error: 'Invalid arguments: query is required' };
+      }
+      const preferredMaxResults = typeof args.maxResults === 'number' && Number.isFinite(args.maxResults)
+        ? args.maxResults
+        : typeof args.num === 'number' && Number.isFinite(args.num)
+          ? args.num
+          : undefined;
+      const languageHint = typeof args.lr === 'string' ? args.lr.trim() : '';
+      const maxResults = typeof preferredMaxResults === 'number'
+        ? preferredMaxResults
+        : undefined;
+      const limit = Math.max(1, Math.min(maxResults || 5, 10));
+      const effectiveQuery = languageHint ? `${query} ${languageHint}` : query;
+      const searchUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(effectiveQuery)}`;
       
       const response = await fetch(searchUrl, {
         headers: {
