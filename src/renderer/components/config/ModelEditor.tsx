@@ -14,6 +14,17 @@ interface ModelEditorProps {
   onCancel: () => void;
 }
 
+const PROVIDER_BASE_URLS: Partial<Record<ModelConfig['provider'], string>> = {
+  openai: 'https://api.openai.com/v1',
+  deepseek: 'https://api.deepseek.com/v1',
+  zhipu: 'https://open.bigmodel.cn/api/paas/v4',
+  kimi: 'https://api.moonshot.cn/v1',
+  qianwen: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+  ollama: 'http://localhost:11434/v1',
+  anthropic: 'https://api.anthropic.com/v1',
+  custom: ''
+};
+
 export const ModelEditor = memo(function ModelEditor({ 
   editingModel, 
   setEditingModel, 
@@ -23,32 +34,16 @@ export const ModelEditor = memo(function ModelEditor({
   onCancel 
 }: ModelEditorProps) {
   const { t } = useTranslation();
+  const canFetchModels = editingModel.baseUrl.trim().length > 0;
 
   const handleProviderChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const provider = e.target.value as ModelConfig['provider'];
-    const newConfig = { ...editingModel, provider };
-    
-    switch (provider) {
-      case 'ollama':
-        newConfig.baseUrl = 'http://localhost:11434/v1';
-        break;
-      case 'deepseek':
-        newConfig.baseUrl = 'https://api.deepseek.com/v1';
-        break;
-      case 'zhipu':
-        newConfig.baseUrl = 'https://open.bigmodel.cn/api/paas/v4';
-        break;
-      case 'kimi':
-        newConfig.baseUrl = 'https://api.moonshot.cn/v1';
-        break;
-      case 'qianwen':
-        newConfig.baseUrl = 'https://dashscope.aliyuncs.com/compatible-mode/v1';
-        break;
-      case 'openai':
-      default:
-        newConfig.baseUrl = 'https://api.openai.com/v1';
-        break;
-    }
+    const nextBaseUrl = PROVIDER_BASE_URLS[provider];
+    const newConfig = {
+      ...editingModel,
+      provider,
+      baseUrl: nextBaseUrl !== undefined ? nextBaseUrl : editingModel.baseUrl
+    };
     setEditingModel(newConfig);
   };
 
@@ -91,8 +86,12 @@ export const ModelEditor = memo(function ModelEditor({
                 { value: 'kimi', label: 'Kimi (Moonshot)' },
                 { value: 'qianwen', label: '通义千问 (Qianwen)' },
                 { value: 'ollama', label: 'Ollama (Local)' },
+                { value: 'custom', label: t('config.providerCustom') },
               ]}
             />
+            {editingModel.provider === 'custom' && (
+              <div className="form-help">{t('config.providerCustomHelp')}</div>
+            )}
           </div>
         </div>
 
@@ -104,9 +103,11 @@ export const ModelEditor = memo(function ModelEditor({
               className="form-control"
               value={editingModel.baseUrl || ''} 
               onChange={e => setEditingModel({...editingModel, baseUrl: e.target.value})}
-              placeholder={t('config.placeholder.baseUrl')}
+              placeholder={editingModel.provider === 'custom' ? t('config.placeholder.customBaseUrl') : t('config.placeholder.baseUrl')}
             />
-          <div className="form-help">{t('config.baseUrlHelp')}</div>
+          <div className="form-help">
+            {editingModel.provider === 'custom' ? t('config.baseUrlHelpCustom') : t('config.baseUrlHelp')}
+          </div>
         </div>
 
         <div className="form-group">
@@ -116,7 +117,7 @@ export const ModelEditor = memo(function ModelEditor({
             type="password" 
             value={editingModel.apiKey} 
             onChange={e => setEditingModel({...editingModel, apiKey: e.target.value})}
-            placeholder="sk-..." 
+            placeholder={t('config.placeholder.apiKey')} 
           />
           <div className="form-help">{t('config.apiKeyHelp')}</div>
         </div>
@@ -129,7 +130,7 @@ export const ModelEditor = memo(function ModelEditor({
                 className="form-control"
                 value={editingModel.model} 
                 onChange={e => setEditingModel({...editingModel, model: e.target.value})}
-                placeholder={t('config.placeholder.modelId')}
+                placeholder={editingModel.provider === 'custom' ? t('config.placeholder.customModelId') : t('config.placeholder.modelId')}
                 list="available-models"
               />
               <datalist id="available-models">
@@ -140,6 +141,7 @@ export const ModelEditor = memo(function ModelEditor({
               onClick={() => onFetchModels(editingModel)}
               className="btn btn-secondary"
               title={t('config.fetchModels')}
+              disabled={!canFetchModels}
             >
               <IconRefresh size={18} /> {t('config.fetchModels')}
             </button>

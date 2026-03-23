@@ -26,6 +26,9 @@ export class OpenAIProvider implements LLMProvider {
         case 'qianwen': 
           baseURL = 'https://dashscope.aliyuncs.com/compatible-mode/v1'; 
           break;
+        case 'custom':
+          baseURL = 'https://api.openai.com/v1';
+          break;
         case 'openai':
         default: 
           baseURL = 'https://api.openai.com/v1'; 

@@ -10,7 +10,7 @@ import os from 'os';
 export interface ModelConfig {
   id: string;
   name: string; // User-friendly name (e.g., "My GPT-4o", "Local Llama 3")
-  provider: 'openai' | 'ollama' | 'anthropic' | 'deepseek' | 'zhipu' | 'kimi' | 'qianwen';
+  provider: 'openai' | 'ollama' | 'anthropic' | 'deepseek' | 'zhipu' | 'kimi' | 'qianwen' | 'custom';
   baseUrl: string;
   apiKey: string;
   model: string; // The actual model identifier string (e.g., "gpt-4o", "llama3")
@@ -33,6 +33,24 @@ export interface KairoPilotConfig {
   models: ModelConfig[];
   agents: AgentConfig[];
   activeAgentId: string;
+  pluginRegistry: PluginRegistryEntry[];
+  skillsRegistry: SkillsRegistryEntry[];
+}
+
+export interface PluginRegistryEntry {
+  id: string;
+  name: string;
+  description: string;
+  version: string;
+  author: string;
+  icon?: string;
+  installedAt: number;
+  filePath: string;
+  scope: string;
+}
+
+export interface SkillsRegistryEntry {
+  [key: string]: unknown;
 }
 
 // --- Default Values ---
@@ -61,7 +79,9 @@ const DEFAULT_CONFIG: KairoPilotConfig = {
   version: '2.0.0',
   models: [DEFAULT_MODEL],
   agents: [DEFAULT_AGENT],
-  activeAgentId: 'mainAgent'
+  activeAgentId: 'mainAgent',
+  pluginRegistry: [],
+  skillsRegistry: []
 };
 
 // --- Legacy Types for Migration ---
@@ -88,6 +108,77 @@ interface LegacyConfig {
 
 function getConfigPath(): string {
   return path.join(app.getPath('userData'), 'kairopilot.json');
+}
+
+function getLegacyRegistryPath(fileName: string): string {
+  return path.join(app.getPath('userData'), fileName);
+}
+
+function isPluginRegistryEntry(value: unknown): value is PluginRegistryEntry {
+  if (!value || typeof value !== 'object') return false;
+  const item = value as Record<string, unknown>;
+  return typeof item.id === 'string'
+    && typeof item.name === 'string'
+    && typeof item.description === 'string'
+    && typeof item.version === 'string'
+    && typeof item.author === 'string'
+    && typeof item.installedAt === 'number'
+    && typeof item.filePath === 'string'
+    && typeof item.scope === 'string';
+}
+
+function readLegacyJsonArray(fileName: string): unknown[] {
+  const legacyPath = getLegacyRegistryPath(fileName);
+  if (!fs.existsSync(legacyPath)) return [];
+  try {
+    const data = fs.readFileSync(legacyPath, 'utf-8');
+    const parsed = JSON.parse(data);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function removeLegacyRegistry(fileName: string) {
+  const legacyPath = getLegacyRegistryPath(fileName);
+  if (!fs.existsSync(legacyPath)) return;
+  try {
+    fs.unlinkSync(legacyPath);
+  } catch (error) {
+    console.warn(`Failed to remove legacy registry ${fileName}:`, error);
+  }
+}
+
+function normalizeConfig(rawConfig: unknown): KairoPilotConfig {
+  const merged = {
+    ...DEFAULT_CONFIG,
+    ...(rawConfig as Partial<KairoPilotConfig>)
+  } as KairoPilotConfig;
+
+  if (!Array.isArray(merged.pluginRegistry)) {
+    merged.pluginRegistry = [];
+  }
+  if (!Array.isArray(merged.skillsRegistry)) {
+    merged.skillsRegistry = [];
+  }
+
+  if (merged.pluginRegistry.length === 0) {
+    const legacyPlugins = readLegacyJsonArray('plugins_registry.json').filter(isPluginRegistryEntry);
+    if (legacyPlugins.length > 0) {
+      merged.pluginRegistry = legacyPlugins;
+      removeLegacyRegistry('plugins_registry.json');
+    }
+  }
+
+  if (merged.skillsRegistry.length === 0) {
+    const legacySkills = readLegacyJsonArray('skills_registry.json') as SkillsRegistryEntry[];
+    if (legacySkills.length > 0) {
+      merged.skillsRegistry = legacySkills;
+      removeLegacyRegistry('skills_registry.json');
+    }
+  }
+
+  return merged;
 }
 
 function ensureAgentWorkspaceAndPrompt(agent: AgentConfig) {
@@ -121,12 +212,9 @@ export function getKairoPilotConfig(): KairoPilotConfig {
         return migrated;
       }
 
-      // Ensure defaults for new fields
-      const finalConfig = {
-        ...DEFAULT_CONFIG,
-        ...rawConfig
-      };
+      const finalConfig = normalizeConfig(rawConfig);
       finalConfig.agents.forEach(ensureAgentWorkspaceAndPrompt);
+      saveKairoPilotConfig(finalConfig);
       return finalConfig;
     }
   } catch (error) {
@@ -166,7 +254,9 @@ function migrateLegacyConfig(legacy: LegacyConfig): KairoPilotConfig {
     version: '2.0.0',
     models: [newModel],
     agents: [newAgent],
-    activeAgentId: 'mainAgent'
+    activeAgentId: 'mainAgent',
+    pluginRegistry: [],
+    skillsRegistry: []
   };
 
   saveKairoPilotConfig(newConfig);
@@ -180,10 +270,21 @@ export function saveKairoPilotConfig(config: KairoPilotConfig) {
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
     }
-    fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
+    const normalized = normalizeConfig(config);
+    fs.writeFileSync(configPath, JSON.stringify(normalized, null, 2), 'utf-8');
   } catch (error) {
     console.error('Failed to save config:', error);
   }
+}
+
+export function getPluginRegistry(): PluginRegistryEntry[] {
+  return getKairoPilotConfig().pluginRegistry;
+}
+
+export function savePluginRegistry(registry: PluginRegistryEntry[]) {
+  const config = getKairoPilotConfig();
+  config.pluginRegistry = registry;
+  saveKairoPilotConfig(config);
 }
 
 // --- CRUD Operations ---
@@ -304,7 +405,7 @@ export function setActiveAgentId(id: string) {
 // These are kept to minimize immediate breakage, but their logic is adapted.
 
 export interface LegacyAgentConfig {
-  provider: 'openai' | 'ollama' | 'anthropic' | 'deepseek' | 'zhipu' | 'kimi' | 'qianwen';
+  provider: 'openai' | 'ollama' | 'anthropic' | 'deepseek' | 'zhipu' | 'kimi' | 'qianwen' | 'custom';
   apiKey: string;
   baseUrl: string;
   model: string;

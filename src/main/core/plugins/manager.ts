@@ -4,7 +4,7 @@ import path from 'path';
 import vm from 'vm';
 import { z } from 'zod';
 import { ToolDefinition } from '../llm/types';
-import { getAgent } from '../../store/config';
+import { getAgent, getPluginRegistry, savePluginRegistry } from '../../store/config';
 
 export interface PluginManifest {
   id: string;
@@ -39,18 +39,15 @@ export interface AgentSkill {
 export class PluginManager {
   private publicSkillsDir: string;
   private pluginsDir: string;
-  private registryPath: string;
 
   constructor() {
-    const homeDir = app.getPath('home');
-    this.publicSkillsDir = path.join(homeDir, '.kairopilot', 'skills');
-    this.pluginsDir = path.join(homeDir, '.kairopilot', 'plugins');
-    this.registryPath = path.join(homeDir, '.kairopilot', 'plugins_registry.json');
+    const userDataDir = app.getPath('userData');
+    this.publicSkillsDir = path.join(userDataDir, 'skills');
+    this.pluginsDir = path.join(userDataDir, 'plugins');
   }
 
   async init() {
-    const homeDir = app.getPath('home');
-    const baseDir = path.join(homeDir, '.kairopilot');
+    const baseDir = app.getPath('userData');
     
     try {
       await fs.mkdir(baseDir, { recursive: true });
@@ -63,12 +60,6 @@ export class PluginManager {
     try {
       await fs.mkdir(this.pluginsDir, { recursive: true });
     } catch (e) { /* ignore */ }
-    
-    try {
-      await fs.access(this.registryPath);
-    } catch {
-      await fs.writeFile(this.registryPath, JSON.stringify([]), 'utf-8');
-    }
   }
 
   private getWorkspaceDir(scope: string): string {
@@ -82,14 +73,11 @@ export class PluginManager {
       }
 
       // Fallback
-      const homeDir = app.getPath('home');
       const workspaceName = agentId === 'mainAgent' ? 'workspace' : `workspace-${agentId}`;
-      return path.join(homeDir, '.kairopilot', workspaceName, 'skills');
+      return path.join(app.getPath('userData'), workspaceName, 'skills');
     }
     
-    // Fallback for any legacy 'workspace' scope
-    const homeDir = app.getPath('home');
-    return path.join(homeDir, '.kairopilot', 'workspace', 'skills');
+    return path.join(app.getPath('userData'), 'workspace', 'skills');
   }
 
   private async parseSkillFile(dirPath: string, folderName: string): Promise<AgentSkill | null> {
@@ -197,35 +185,27 @@ export class PluginManager {
 
   async getInstalledPlugins(): Promise<InstalledPlugin[]> {
     await this.init();
-    let registryPlugins: InstalledPlugin[] = [];
+    const registryPlugins = getPluginRegistry() as InstalledPlugin[];
+    const validPlugins: InstalledPlugin[] = [];
+    let registryModified = false;
     try {
-      const data = await fs.readFile(this.registryPath, 'utf-8');
-      const parsed = JSON.parse(data) as InstalledPlugin[];
-      
-      // Verify real installation by checking if filePath exists
-      const validPlugins: InstalledPlugin[] = [];
-      let registryModified = false;
-      
-      for (const plugin of parsed) {
+      for (const plugin of registryPlugins) {
         try {
           await fs.access(plugin.filePath);
           validPlugins.push(plugin);
         } catch {
-          // File doesn't exist, skip this plugin and mark registry as modified
           console.warn(`[PluginManager] Plugin ${plugin.id} file not found at ${plugin.filePath}, removing from registry.`);
           registryModified = true;
         }
       }
-
-      if (registryModified) {
-        await fs.writeFile(this.registryPath, JSON.stringify(validPlugins, null, 2), 'utf-8');
-      }
-      
-      registryPlugins = validPlugins;
     } catch (e) {
       console.error('Failed to read plugin registry', e);
+      return [];
     }
-    return registryPlugins;
+    if (registryModified) {
+      savePluginRegistry(validPlugins);
+    }
+    return validPlugins;
   }
 
   async installPlugin(id: string, scope: string = 'public'): Promise<boolean> {
@@ -258,16 +238,9 @@ export class PluginManager {
       scope
     };
 
-    // Update registry by reading it directly to avoid writing local-only plugins back
-    try {
-      const data = await fs.readFile(this.registryPath, 'utf-8');
-      const registryPlugins = JSON.parse(data) as InstalledPlugin[];
-      registryPlugins.push(newPlugin);
-      await fs.writeFile(this.registryPath, JSON.stringify(registryPlugins, null, 2), 'utf-8');
-    } catch (e) {
-      // If registry read fails, just write the new plugin as an array
-      await fs.writeFile(this.registryPath, JSON.stringify([newPlugin], null, 2), 'utf-8');
-    }
+    const registryPlugins = getPluginRegistry() as InstalledPlugin[];
+    registryPlugins.push(newPlugin);
+    savePluginRegistry(registryPlugins);
 
     return true;
   }
@@ -290,15 +263,9 @@ export class PluginManager {
       console.warn('Failed to delete plugin file/directory:', e);
     }
 
-    // Update registry by reading it directly to avoid writing local-only plugins back
-    try {
-      const data = await fs.readFile(this.registryPath, 'utf-8');
-      let registryPlugins = JSON.parse(data) as InstalledPlugin[];
-      registryPlugins = registryPlugins.filter(p => !(p.id === id && p.scope === scope));
-      await fs.writeFile(this.registryPath, JSON.stringify(registryPlugins, null, 2), 'utf-8');
-    } catch (e) {
-      console.error('Failed to update plugin registry during uninstall', e);
-    }
+    const registryPlugins = (getPluginRegistry() as InstalledPlugin[])
+      .filter(p => !(p.id === id && p.scope === scope));
+    savePluginRegistry(registryPlugins);
 
     return true;
   }

@@ -8,7 +8,7 @@ export interface Message {
 }
 
 export interface LegacyAgentConfig {
-  provider: 'openai' | 'ollama' | 'anthropic' | 'deepseek' | 'zhipu' | 'kimi' | 'qianwen';
+  provider: 'openai' | 'ollama' | 'anthropic' | 'deepseek' | 'zhipu' | 'kimi' | 'qianwen' | 'custom';
   apiKey: string;
   baseUrl: string;
   model: string;
@@ -22,7 +22,7 @@ export interface LegacyAgentConfig {
 export interface ModelConfig {
   id: string;
   name: string;
-  provider: 'openai' | 'ollama' | 'anthropic' | 'deepseek' | 'zhipu' | 'kimi' | 'qianwen';
+  provider: 'openai' | 'ollama' | 'anthropic' | 'deepseek' | 'zhipu' | 'kimi' | 'qianwen' | 'custom';
   baseUrl: string;
   apiKey: string;
   model: string;

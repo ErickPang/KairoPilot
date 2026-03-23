@@ -35,7 +35,110 @@ export function ChatInterface({
 }: ChatInterfaceProps) {
   const { t } = useTranslation();
   const [isDragging, setIsDragging] = useState(false);
+  const [previewImageSrc, setPreviewImageSrc] = useState<string | null>(null);
+  const [previewZoom, setPreviewZoom] = useState(1);
   const dragCounter = React.useRef(0);
+
+  const isImageResource = React.useCallback((value: string) => {
+    const normalized = value.trim().split('?')[0].split('#')[0];
+    return /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(normalized);
+  }, []);
+
+  const toRenderableUri = React.useCallback((rawUri: string) => {
+    const uri = rawUri.trim();
+    if (uri.startsWith('kairopilot://')) {
+      const localPath = uri.slice('kairopilot://'.length);
+      if (!localPath) {
+        return uri;
+      }
+      const normalizedPath = localPath.startsWith('/') ? localPath : `/${localPath}`;
+      return `file://${encodeURI(normalizedPath)}`;
+    }
+    if (uri.startsWith('/')) {
+      return `file://${encodeURI(uri)}`;
+    }
+    return uri;
+  }, []);
+
+  const toRenderableMarkdown = React.useCallback((content?: string) => {
+    const text = content || '';
+    const lines = text.split('\n');
+    return lines
+      .map((line) => {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.includes('![')) {
+          return line;
+        }
+        if (
+          (trimmed.startsWith('kairopilot://') || trimmed.startsWith('file://') || trimmed.startsWith('/')) &&
+          isImageResource(trimmed)
+        ) {
+          return `![image](${trimmed})`;
+        }
+        return line;
+      })
+      .join('\n');
+  }, [isImageResource]);
+
+  const markdownComponents = React.useMemo(() => {
+    return {
+      img: ({ src, alt }: { src?: string; alt?: string }) => {
+        if (!src) {
+          return null;
+        }
+        const imageSrc = toRenderableUri(src);
+        return (
+          <button
+            type="button"
+            className="chat-image-trigger"
+            onClick={() => {
+              setPreviewImageSrc(imageSrc);
+              setPreviewZoom(1);
+            }}
+            title={t('chat.openImagePreview')}
+          >
+            <img src={imageSrc} alt={alt || 'image'} className="chat-message-image" loading="lazy" />
+          </button>
+        );
+      },
+      a: ({ href, children }: { href?: string; children?: React.ReactNode }) => {
+        if (!href) {
+          return <>{children}</>;
+        }
+        const linkHref = href.startsWith('kairopilot://') ? toRenderableUri(href) : href;
+        return (
+          <a href={linkHref} target="_blank" rel="noreferrer">
+            {children}
+          </a>
+        );
+      }
+    };
+  }, [t, toRenderableUri]);
+
+  const adjustPreviewZoom = React.useCallback((delta: number) => {
+    setPreviewZoom((prev) => {
+      const next = prev + delta;
+      return Math.min(4, Math.max(0.25, Number(next.toFixed(2))));
+    });
+  }, []);
+
+  const closePreview = React.useCallback(() => {
+    setPreviewImageSrc(null);
+    setPreviewZoom(1);
+  }, []);
+
+  const resetPreviewZoom = React.useCallback(() => {
+    setPreviewZoom(1);
+  }, []);
+
+  const handlePreviewWheel = React.useCallback((e: React.WheelEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    if (e.deltaY < 0) {
+      adjustPreviewZoom(0.1);
+      return;
+    }
+    adjustPreviewZoom(-0.1);
+  }, [adjustPreviewZoom]);
 
   // Group messages to hide intermediate process steps
   const groupedMessages = React.useMemo(() => {
@@ -93,6 +196,21 @@ export function ChatInterface({
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, loading, messagesEndRef]);
+
+  useEffect(() => {
+    if (!previewImageSrc) {
+      return;
+    }
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        closePreview();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [closePreview, previewImageSrc]);
 
   const handleDragEnter = (e: React.DragEvent) => {
     e.preventDefault();
@@ -209,8 +327,10 @@ export function ChatInterface({
                           </div>
                           <div className="message-content" style={{ padding: '0.25rem 0.5rem' }}>
                             {msg.role === 'tool' ? (
-                              <div style={{ whiteSpace: 'pre-wrap' }}>
-                                {msg.content}
+                              <div className="markdown-body">
+                                <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                                  {toRenderableMarkdown(msg.content)}
+                                </ReactMarkdown>
                                 {msg.details && (
                                   <details className="message-details">
                                     <summary className="message-summary">{t('chat.details')}</summary>
@@ -220,8 +340,8 @@ export function ChatInterface({
                               </div>
                             ) : (
                               <div className="markdown-body">
-                                <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                                  {msg.content}
+                                <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                                  {toRenderableMarkdown(msg.content)}
                                 </ReactMarkdown>
                               </div>
                             )}
@@ -253,8 +373,8 @@ export function ChatInterface({
                   </div>
                 ) : (
                   <div className="markdown-body">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                      {msg.content}
+                    <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                      {toRenderableMarkdown(msg.content)}
                     </ReactMarkdown>
                   </div>
                 )}
@@ -316,6 +436,56 @@ export function ChatInterface({
           </div>
         </div>
       </div>
+
+      {previewImageSrc && (
+        <div className="image-preview-overlay" onClick={closePreview}>
+          <div className="image-preview-dialog" onClick={(e) => e.stopPropagation()}>
+            <div className="image-preview-toolbar">
+              <button
+                type="button"
+                className="image-preview-btn"
+                onClick={() => adjustPreviewZoom(-0.1)}
+                title={t('chat.imagePreviewZoomOut')}
+              >
+                −
+              </button>
+              <button
+                type="button"
+                className="image-preview-btn"
+                onClick={() => adjustPreviewZoom(0.1)}
+                title={t('chat.imagePreviewZoomIn')}
+              >
+                +
+              </button>
+              <button
+                type="button"
+                className="image-preview-btn"
+                onClick={resetPreviewZoom}
+                title={t('chat.imagePreviewReset')}
+              >
+                100%
+              </button>
+              <span className="image-preview-zoom-text">{Math.round(previewZoom * 100)}%</span>
+              <button
+                type="button"
+                className="image-preview-btn image-preview-close"
+                onClick={closePreview}
+                title={t('chat.imagePreviewClose')}
+              >
+                {t('common.close')}
+              </button>
+            </div>
+            <div className="image-preview-canvas" onWheel={handlePreviewWheel}>
+              <img
+                src={previewImageSrc}
+                alt="preview"
+                className="image-preview-content"
+                style={{ transform: `scale(${previewZoom})` }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

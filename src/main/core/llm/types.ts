@@ -15,7 +15,7 @@ export interface ChatMessage {
 }
 
 export interface LLMConfig {
-  provider: 'openai' | 'ollama' | 'anthropic' | 'deepseek' | 'zhipu' | 'kimi' | 'qianwen';
+  provider: 'openai' | 'ollama' | 'anthropic' | 'deepseek' | 'zhipu' | 'kimi' | 'qianwen' | 'custom';
   apiKey?: string;
   baseUrl?: string; // Essential for Ollama (e.g., http://localhost:11434)
   model: string;

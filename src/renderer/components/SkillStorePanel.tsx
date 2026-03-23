@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, type ReactNode } from 'react';
 import { IconRefresh, IconSkill } from './Icons';
 import './PluginStorePanel.css'; // Reusing plugin styles for now
 import { useTranslation } from '../hooks/useTranslation';
@@ -103,25 +103,30 @@ export function SkillStorePanel() {
 
         {!loading && activeTab === 'installed' && (
           <div className="installed-skills-container">
-            {/* Show Public Skills First */}
-            <h3 className="skill-category-title">{getCategoryTitle('public')}</h3>
-            {(!skills['public'] || skills['public'].length === 0) ? (
-              <div className="empty-state">{t('skills.noPublic')}</div>
-            ) : (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '1rem' }}>
-                {skills['public'].map(skill => (
-                  <SkillItem key={skill.id} skill={skill} />
-                ))}
-              </div>
-            )}
+            <SkillSectionPanel
+              title={getCategoryTitle('public')}
+              count={skills['public']?.length || 0}
+              defaultOpen={true}
+            >
+              {(!skills['public'] || skills['public'].length === 0) ? (
+                <div className="empty-state">{t('skills.noPublic')}</div>
+              ) : (
+                <div className="skills-grid">
+                  {skills['public'].map(skill => (
+                    <SkillItem key={skill.id} skill={skill} />
+                  ))}
+                </div>
+              )}
+            </SkillSectionPanel>
 
-            {/* Show Agent Skills */}
             {Object.entries(skills).filter(([key]) => key !== 'public').map(([agentId, agentSkills]) => (
-              <div key={agentId}>
-                <h3 className="skill-category-title" style={{ marginTop: '2rem' }}>
-                  {getCategoryTitle(agentId)}
-                </h3>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '1rem' }}>
+              <SkillSectionPanel
+                key={agentId}
+                title={getCategoryTitle(agentId)}
+                count={agentSkills.length}
+                defaultOpen={false}
+              >
+                <div className="skills-grid">
                   {agentSkills.length === 0 ? (
                     <div className="empty-state">{t('skills.noAgent')}</div>
                   ) : (
@@ -130,7 +135,7 @@ export function SkillStorePanel() {
                     ))
                   )}
                 </div>
-              </div>
+              </SkillSectionPanel>
             ))}
           </div>
         )}
@@ -149,37 +154,57 @@ export function SkillStorePanel() {
   );
 }
 
+function SkillSectionPanel({
+  title,
+  count,
+  defaultOpen,
+  children
+}: {
+  title: string;
+  count: number;
+  defaultOpen: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <details className="skill-section-panel" open={defaultOpen}>
+      <summary className="skill-section-summary">
+        <span className="skill-section-title">{title}</span>
+        <span className="skill-section-count">{count}</span>
+      </summary>
+      <div className="skill-section-body">
+        {children}
+      </div>
+    </details>
+  );
+}
+
 function SkillItem({ skill }: { skill: AgentSkill }) {
   const [expanded, setExpanded] = useState(false);
   const { t } = useTranslation();
   
   return (
-    <div className="config-card" style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', height: '100%', cursor: 'pointer' }} onClick={() => setExpanded(!expanded)}>
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '1rem' }}>
-        <div style={{ 
-          fontSize: '2rem', width: '48px', height: '48px', 
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          background: 'var(--sidebar-bg)', borderRadius: 'var(--radius-md)'
-        }}>
+    <div className={`config-card skill-card ${expanded ? 'expanded' : ''}`} onClick={() => setExpanded(!expanded)}>
+      <div className="skill-card-header">
+        <div className="skill-card-icon">
           📄
         </div>
-        <div style={{ flex: 1 }}>
-          <h4 style={{ margin: '0 0 0.25rem 0' }}>{skill.name}</h4>
-          <div style={{ fontSize: '0.8rem', color: 'var(--muted-fg)' }}>
+        <div className="skill-card-main">
+          <h4 className="skill-card-title">{skill.name}</h4>
+          <div className="skill-card-id">
             ID: {skill.id}
           </div>
         </div>
       </div>
       
-      <p style={{ margin: 0, fontSize: '0.9rem', color: 'var(--foreground)', flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+      <p className="skill-card-description">
         {skill.description}
       </p>
 
       {expanded && (
-        <div style={{ marginTop: '0.5rem', paddingTop: '0.5rem', borderTop: '1px solid var(--border)' }} onClick={(e) => e.stopPropagation()}>
-          <p style={{ fontSize: '0.9rem', marginBottom: '0.5rem' }}><strong>{t('skills.description')}:</strong> {skill.description}</p>
-          <div style={{ maxHeight: '150px', overflowY: 'auto', background: 'var(--sidebar-bg)', padding: '0.5rem', borderRadius: 'var(--radius-sm)' }}>
-            <pre style={{ margin: 0, whiteSpace: 'pre-wrap', fontFamily: 'monospace', fontSize: '0.85rem', color: 'var(--muted-fg)' }}>
+        <div className="skill-card-details" onClick={(e) => e.stopPropagation()}>
+          <p className="skill-card-detail-description"><strong>{t('skills.description')}:</strong> {skill.description}</p>
+          <div className="skill-card-code-wrap">
+            <pre className="skill-card-code">
               {skill.content}
             </pre>
           </div>
