@@ -52,8 +52,9 @@ const zh: Record<TranslationKey, string> = {
   'chat.send': '发送',
   'chat.thinking': '思考中...',
   'chat.agentName': 'KairoPilot Agent',
+  'chat.currentAgentLabel': '当前Agent：',
   'chat.welcome': '欢迎使用 KairoPilot',
-  'chat.welcomeDesc': '开始对话或拖拽文件以开始。',
+  'chat.welcomeDesc': '开始对话。',
   'chat.dropFiles': '拖拽文件以添加上下文',
   'chat.working': '处理中...',
   'chat.viewProcess': '查看过程 ({count} 步)',
@@ -160,7 +161,7 @@ const zh: Record<TranslationKey, string> = {
   'skills.description': '描述',
   
   // Agents
-  'agent.defaultName': '主 Agent',
+  'agent.defaultName': 'main',
   // Config Panel
   'config.models': '模型配置',
   'config.addModel': '添加模型',
@@ -176,6 +177,7 @@ const zh: Record<TranslationKey, string> = {
   'config.configName': '配置名称',
   'config.configNameHelp': '用于识别此配置的友好名称。',
   'config.provider': '提供商',
+  'config.selectProvider': '请选择提供商',
   'config.providerCustom': '自定义提供商',
   'config.providerCustomHelp': '使用自定义 OpenAI 兼容接口和模型。',
   'config.connectionDetails': '连接详细信息',
@@ -205,6 +207,7 @@ const zh: Record<TranslationKey, string> = {
   'config.allowedPaths': '允许的路径',
   'config.allowedPathsHelp': 'Agent 可以读写的其他绝对路径。',
   'config.selectModel': '选择模型配置...',
+  'config.selectModelIds': '请选择模型',
   'config.workspaceName': '工作区名称',
   'config.workspaceNameHelp': '仅允许使用字母、数字、破折号和下划线。留空则使用默认工作区。',
   'config.workspaceNameHelpMain': '主 Agent 始终使用默认工作区目录。',

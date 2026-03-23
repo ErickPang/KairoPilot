@@ -71,7 +71,7 @@ export function Select({
     left: 0,
     width: 'max-content',
     minWidth: '100%',
-    background: 'var(--sidebar-bg)',
+    background: 'var(--background)',
     border: '1px solid var(--border)',
     borderRadius: 'var(--radius-md)',
     boxShadow: 'var(--shadow-lg)',
@@ -118,7 +118,7 @@ export function Select({
         <div style={{ display: 'flex', alignItems: 'center', overflow: 'hidden' }}>
           {icon && <span style={{ marginRight: '8px', display: 'flex', alignItems: 'center' }}>{icon}</span>}
           {selectedOption?.icon && !icon && <span style={{ marginRight: '8px', display: 'flex', alignItems: 'center' }}>{selectedOption.icon}</span>}
-          <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: selectedOption ? 'var(--foreground)' : 'var(--muted-fg)' }}>
             {selectedOption ? selectedOption.label : placeholder}
           </span>
         </div>

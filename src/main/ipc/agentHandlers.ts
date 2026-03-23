@@ -22,8 +22,11 @@ function registerAgentHandlers() {
       await initializeAgent(config, event.sender);
       return { success: true };
     } catch (error) {
-      console.error('Failed to init agent:', error);
-      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      if (!message.startsWith('Model not found for agent model:')) {
+        console.error('Failed to init agent:', error);
+      }
+      return { success: false, error: message };
     }
   });
 

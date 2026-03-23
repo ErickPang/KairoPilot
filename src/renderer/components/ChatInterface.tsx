@@ -2,9 +2,8 @@ import React, { useState, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Message, SystemStats, ModelConfig } from '../types';
-import { IconUser, IconBot, IconTool, IconSend, IconTrash, IconCpu } from './Icons';
+import { IconUser, IconBot, IconTool, IconSend, IconTrash, IconCpu, IconChevronDown, IconCheck } from './Icons';
 import { useTranslation } from '../hooks/useTranslation';
-import { Select } from './Select';
 
 interface ChatInterfaceProps {
   messages: Message[];
@@ -17,6 +16,7 @@ interface ChatInterfaceProps {
   messagesEndRef: React.RefObject<HTMLDivElement>;
   models: ModelConfig[];
   activeModelId: string | null;
+  activeAgentName: string;
   onModelChange: (modelId: string) => void;
 }
 
@@ -31,6 +31,7 @@ export function ChatInterface({
   messagesEndRef,
   models,
   activeModelId,
+  activeAgentName,
   onModelChange
 }: ChatInterfaceProps) {
   const { t } = useTranslation();
@@ -38,6 +39,86 @@ export function ChatInterface({
   const [previewImageSrc, setPreviewImageSrc] = useState<string | null>(null);
   const [previewZoom, setPreviewZoom] = useState(1);
   const dragCounter = React.useRef(0);
+  const [isModelDropdownOpen, setIsModelDropdownOpen] = useState(false);
+  const [activeModelIndex, setActiveModelIndex] = useState(-1);
+  const [modelDropdownPlacement, setModelDropdownPlacement] = useState<'top' | 'bottom'>('top');
+  const modelDropdownRef = React.useRef<HTMLDivElement>(null);
+  const modelTriggerRef = React.useRef<HTMLButtonElement>(null);
+  const modelGroups = models.map(model => {
+    const options = model.availableModels && model.availableModels.length > 0
+      ? model.availableModels
+      : [{ id: model.model, name: model.model }];
+    return {
+      providerId: model.id,
+      providerName: model.name,
+      models: options
+    };
+  });
+  const activeProviderId = activeModelId?.split('/')[0] || '';
+  const activeModelName = activeModelId?.split('/')[1] || '';
+  const activeProvider = modelGroups.find(group => group.providerId === activeProviderId);
+  const activeModelDisplay = activeProvider
+    ? `${activeProvider.providerName} (${activeModelName})`
+    : (activeModelId || t('chat.selectModel'));
+  const flatModelOptions = modelGroups.flatMap(group =>
+    group.models.map(model => ({
+      value: `${group.providerId}/${model.id}`,
+      modelId: model.id
+    }))
+  );
+  const modelIndexMap = new Map(flatModelOptions.map((item, index) => [item.value, index]));
+
+  useEffect(() => {
+    if (!isModelDropdownOpen) {
+      return;
+    }
+    const handleClickOutside = (event: MouseEvent) => {
+      if (modelDropdownRef.current && !modelDropdownRef.current.contains(event.target as Node)) {
+        setIsModelDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isModelDropdownOpen]);
+
+  useEffect(() => {
+    if (!isModelDropdownOpen) {
+      return;
+    }
+    const updatePlacement = () => {
+      const trigger = modelTriggerRef.current;
+      if (!trigger) {
+        return;
+      }
+      const rect = trigger.getBoundingClientRect();
+      const spaceAbove = rect.top;
+      const spaceBelow = window.innerHeight - rect.bottom;
+      const requiredSpace = 320;
+      if (spaceBelow >= requiredSpace || spaceBelow > spaceAbove) {
+        setModelDropdownPlacement('bottom');
+        return;
+      }
+      setModelDropdownPlacement('top');
+    };
+    updatePlacement();
+    window.addEventListener('resize', updatePlacement);
+    window.addEventListener('scroll', updatePlacement, true);
+    return () => {
+      window.removeEventListener('resize', updatePlacement);
+      window.removeEventListener('scroll', updatePlacement, true);
+    };
+  }, [isModelDropdownOpen]);
+
+  useEffect(() => {
+    if (!isModelDropdownOpen) {
+      setActiveModelIndex(-1);
+      return;
+    }
+    const selectedIndex = activeModelId ? flatModelOptions.findIndex(item => item.value === activeModelId) : -1;
+    setActiveModelIndex(selectedIndex >= 0 ? selectedIndex : (flatModelOptions.length > 0 ? 0 : -1));
+  }, [activeModelId, flatModelOptions, isModelDropdownOpen]);
 
   const isImageResource = React.useCallback((value: string) => {
     const normalized = value.trim().split('?')[0].split('#')[0];
@@ -271,7 +352,7 @@ export function ChatInterface({
 
       <div className="chat-header">
         <div className="header-title">
-          {loading ? t('chat.thinking') : t('chat.agentName')}
+          {`${t('chat.currentAgentLabel')}${activeAgentName}${loading ? ` · ${t('chat.thinking')}` : ''}`}
         </div>
         <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
           {systemStats && (
@@ -409,21 +490,140 @@ export function ChatInterface({
           />
           <div className="input-actions">
             <div className="input-tools" style={{ display: 'flex', alignItems: 'center' }}>
-              <Select 
-                value={activeModelId || ''}
-                onChange={onModelChange}
-                options={models.map(m => ({ 
-                  value: m.id, 
-                  label: m.name, 
-                  description: m.model 
-                }))}
-                placeholder={t('chat.selectModel')}
-                disabled={loading}
-                placement="top"
-                size="sm"
-                icon={<IconCpu size={14} style={{ color: 'var(--muted-fg)' }} />}
-                dropdownTitle={t('chat.selectModelTitle')}
-              />
+              <div ref={modelDropdownRef} style={{ position: 'relative' }}>
+                <button
+                  ref={modelTriggerRef}
+                  type="button"
+                  disabled={loading}
+                  onClick={() => setIsModelDropdownOpen(prev => !prev)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'ArrowDown') {
+                      e.preventDefault();
+                      if (!isModelDropdownOpen) {
+                        setIsModelDropdownOpen(true);
+                        return;
+                      }
+                      if (flatModelOptions.length > 0) {
+                        setActiveModelIndex(prev => (prev + 1 + flatModelOptions.length) % flatModelOptions.length);
+                      }
+                      return;
+                    }
+                    if (e.key === 'ArrowUp') {
+                      e.preventDefault();
+                      if (!isModelDropdownOpen) {
+                        setIsModelDropdownOpen(true);
+                        return;
+                      }
+                      if (flatModelOptions.length > 0) {
+                        setActiveModelIndex(prev => (prev - 1 + flatModelOptions.length) % flatModelOptions.length);
+                      }
+                      return;
+                    }
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      if (!isModelDropdownOpen) {
+                        setIsModelDropdownOpen(true);
+                        return;
+                      }
+                      if (activeModelIndex >= 0 && flatModelOptions[activeModelIndex]) {
+                        onModelChange(flatModelOptions[activeModelIndex].value);
+                        setIsModelDropdownOpen(false);
+                      }
+                      return;
+                    }
+                    if (e.key === 'Escape' && isModelDropdownOpen) {
+                      e.preventDefault();
+                      setIsModelDropdownOpen(false);
+                    }
+                  }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    background: 'var(--input-bg)',
+                    border: isModelDropdownOpen ? '1px solid var(--primary)' : '1px solid var(--input-border)',
+                    borderRadius: 'var(--radius-md)',
+                    padding: '4px 10px',
+                    fontSize: '0.8rem',
+                    color: 'var(--foreground)',
+                    cursor: loading ? 'not-allowed' : 'pointer',
+                    minHeight: '28px',
+                    maxWidth: '320px',
+                    boxShadow: isModelDropdownOpen ? '0 0 0 2px var(--ring)' : 'none'
+                  }}
+                >
+                  <IconCpu size={14} style={{ color: 'var(--muted-fg)' }} />
+                  <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {activeModelDisplay}
+                  </span>
+                  <IconChevronDown size={14} style={{ color: 'var(--muted-fg)' }} />
+                </button>
+                {isModelDropdownOpen && (
+                  <div
+                    style={{
+                      position: 'absolute',
+                      left: 0,
+                      ...(modelDropdownPlacement === 'top'
+                        ? { bottom: '100%', marginBottom: '8px' }
+                        : { top: '100%', marginTop: '8px' }),
+                      width: '320px',
+                      maxHeight: '300px',
+                      overflowY: 'auto',
+                      background: 'var(--background)',
+                      border: '1px solid var(--border)',
+                      borderRadius: 'var(--radius-md)',
+                      boxShadow: 'var(--shadow-lg)',
+                      zIndex: 60,
+                      padding: '6px'
+                    }}
+                  >
+                    {modelGroups.map(group => (
+                      <div key={group.providerId} style={{ marginBottom: '6px' }}>
+                        <div
+                          style={{
+                            padding: '6px 8px',
+                            fontSize: '0.75rem',
+                            fontWeight: 600,
+                            color: 'var(--muted-fg)'
+                          }}
+                        >
+                          {group.providerName}
+                        </div>
+                        {group.models.map(model => {
+                          const value = `${group.providerId}/${model.id}`;
+                          const selected = value === activeModelId;
+                          const itemIndex = modelIndexMap.get(value) ?? -1;
+                          const highlighted = itemIndex === activeModelIndex;
+                          return (
+                            <div
+                              key={value}
+                              onMouseEnter={() => setActiveModelIndex(itemIndex)}
+                              onClick={() => {
+                                onModelChange(value);
+                                setIsModelDropdownOpen(false);
+                              }}
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '8px',
+                                padding: '8px',
+                                borderRadius: 'var(--radius-sm)',
+                                cursor: 'pointer',
+                                background: selected || highlighted ? 'var(--sidebar-accent)' : 'transparent'
+                              }}
+                            >
+                              <div style={{ width: '16px', display: 'flex', justifyContent: 'center' }}>
+                                {selected && <IconCheck size={14} style={{ color: 'var(--primary)' }} />}
+                              </div>
+                              <span style={{ fontSize: '0.85rem' }}>{model.id}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
             <button 
               className="send-btn" 

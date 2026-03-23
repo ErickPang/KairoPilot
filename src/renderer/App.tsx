@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import './App.css'
-import { ModelConfig, AgentConfig, Message, Session, SystemStats } from './types';
+import { ModelConfig, AgentConfig, Message, Session, SystemStats, KairoPilotConfig, ProviderConfig } from './types';
 import { ConfigPanel } from './components/ConfigPanel';
 import { Sidebar } from './components/Sidebar';
 import { SettingsSidebar } from './components/SettingsSidebar';
@@ -45,6 +45,44 @@ function App() {
   const { t } = useTranslation();
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const activeAgent = agents.find(a => a.id === activeAgentId);
+  const activeAgentName = activeAgent?.name?.trim()
+    ? activeAgent.name
+    : (activeAgent?.id === 'mainAgent' ? t('agent.defaultName') : t('chat.agentName'));
+
+  const toModelList = useCallback((providers: Record<string, ProviderConfig>): ModelConfig[] => {
+    return Object.entries(providers).map(([providerKey, provider]) => ({
+      id: providerKey,
+      name: providerKey,
+      provider: provider.provider || 'custom',
+      baseUrl: provider.baseUrl,
+      apiKey: provider.apiKey,
+      model: provider.model[0]?.id || '',
+      availableModels: provider.model
+    }));
+  }, []);
+
+  const canInitAgentFromConfig = useCallback((fullConfig: KairoPilotConfig, agentId: string | null | undefined) => {
+    if (!agentId) {
+      return false;
+    }
+    const agent = (fullConfig.agents.list || []).find(item => item.id === agentId);
+    if (!agent?.model) {
+      return false;
+    }
+    const slashIndex = agent.model.indexOf('/');
+    if (slashIndex <= 0) {
+      return false;
+    }
+    const providerKey = agent.model.slice(0, slashIndex);
+    return Boolean(fullConfig.models.providers?.[providerKey]);
+  }, []);
+
+  const applyConfigToState = useCallback((fullConfig: KairoPilotConfig) => {
+    setModels(toModelList(fullConfig.models.providers || {}));
+    setAgents(fullConfig.agents.list || []);
+    setActiveAgentId(fullConfig.agents.activeAgentId || null);
+  }, [toModelList]);
 
   const fetchModels = async (config: ModelConfig) => {
     try {
@@ -77,7 +115,7 @@ function App() {
     }, 2000);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [applyConfigToState]);
 
   const loadSessions = async () => {
     try {
@@ -163,16 +201,13 @@ function App() {
   useEffect(() => {
     const loadConfig = async () => {
       try {
-        const fullConfig = await window.ipcRenderer.invoke('config:get-all') as { models: ModelConfig[], agents: AgentConfig[], activeAgentId?: string };
+        const fullConfig = await window.ipcRenderer.invoke('config:get-all') as KairoPilotConfig;
         if (fullConfig) {
-          setModels(fullConfig.models || []);
-          setAgents(fullConfig.agents || []);
-          setActiveAgentId(fullConfig.activeAgentId || null);
+          applyConfigToState(fullConfig);
 
-          // Auto-init active agent if exists
-          if (fullConfig.activeAgentId) {
+          if (canInitAgentFromConfig(fullConfig, fullConfig.agents.activeAgentId)) {
              try {
-               const result = await window.ipcRenderer.invoke('agent:init', fullConfig.activeAgentId) as { success: boolean, error?: string };
+               const result = await window.ipcRenderer.invoke('agent:init', fullConfig.agents.activeAgentId) as { success: boolean, error?: string };
                if (result.success) {
                  await loadSessions();
                  await loadActiveSession();
@@ -187,7 +222,7 @@ function App() {
       }
     };
     loadConfig();
-  }, []);
+  }, [applyConfigToState, canInitAgentFromConfig]);
 
   // Listen for agent updates
   useEffect(() => {
@@ -308,9 +343,8 @@ function App() {
   const handleSaveModel = async (model: ModelConfig) => {
     try {
       await window.ipcRenderer.invoke('config:save-model', model);
-      // Refresh
-      const fullConfig = await window.ipcRenderer.invoke('config:get-all') as { models: ModelConfig[], agents: AgentConfig[], activeAgentId?: string };
-      setModels(fullConfig.models);
+      const fullConfig = await window.ipcRenderer.invoke('config:get-all') as KairoPilotConfig;
+      applyConfigToState(fullConfig);
     } catch (error) {
       console.error('Failed to save model:', error);
     }
@@ -320,8 +354,8 @@ function App() {
     if (!confirm(t('app.deleteModelConfirm'))) return;
     try {
       await window.ipcRenderer.invoke('config:delete-model', id);
-      const fullConfig = await window.ipcRenderer.invoke('config:get-all') as { models: ModelConfig[], agents: AgentConfig[], activeAgentId?: string };
-      setModels(fullConfig.models);
+      const fullConfig = await window.ipcRenderer.invoke('config:get-all') as KairoPilotConfig;
+      applyConfigToState(fullConfig);
     } catch (error) {
       console.error('Failed to delete model:', error);
     }
@@ -330,11 +364,11 @@ function App() {
   const handleSaveAgent = async (agent: AgentConfig) => {
     try {
       await window.ipcRenderer.invoke('config:save-agent', agent);
-      const fullConfig = await window.ipcRenderer.invoke('config:get-all') as { models: ModelConfig[], agents: AgentConfig[], activeAgentId?: string };
-      setAgents(fullConfig.agents);
+      const fullConfig = await window.ipcRenderer.invoke('config:get-all') as KairoPilotConfig;
+      applyConfigToState(fullConfig);
       
       // If this is the active agent, re-init?
-      if (activeAgentId === agent.id) {
+      if (activeAgentId === agent.id && canInitAgentFromConfig(fullConfig, agent.id)) {
         await window.ipcRenderer.invoke('agent:init', agent.id);
       }
     } catch (error) {
@@ -346,12 +380,12 @@ function App() {
     if (!confirm(t('app.deleteAgentConfirm'))) return;
     try {
       await window.ipcRenderer.invoke('config:delete-agent', id);
-      const fullConfig = await window.ipcRenderer.invoke('config:get-all') as { models: ModelConfig[], agents: AgentConfig[], activeAgentId?: string };
-      setAgents(fullConfig.agents);
+      const fullConfig = await window.ipcRenderer.invoke('config:get-all') as KairoPilotConfig;
+      applyConfigToState(fullConfig);
       if (activeAgentId === id) {
-        setActiveAgentId(fullConfig.activeAgentId || null);
-        if (fullConfig.activeAgentId) {
-          await window.ipcRenderer.invoke('agent:init', fullConfig.activeAgentId);
+        setActiveAgentId(fullConfig.agents.activeAgentId || null);
+        if (canInitAgentFromConfig(fullConfig, fullConfig.agents.activeAgentId)) {
+          await window.ipcRenderer.invoke('agent:init', fullConfig.agents.activeAgentId);
         }
         await loadSessions();
         await loadActiveSession();
@@ -365,18 +399,24 @@ function App() {
     try {
       await window.ipcRenderer.invoke('config:set-active-agent', id);
       setActiveAgentId(id);
-      // Init agent
-      setLoading(true);
-      const result = await window.ipcRenderer.invoke('agent:init', id) as { success: boolean, error?: string };
-      setLoading(false);
-      
-      if (result.success) {
-        // Refresh sessions for the newly selected agent
-        await loadSessions();
-        await loadActiveSession();
-      } else {
-        alert(t('app.initAgentFailed', { error: result.error || 'Unknown' }));
+      const providerKeys = new Set(models.map(item => item.id));
+      const agent = agents.find(item => item.id === id);
+      const slashIndex = agent?.model?.indexOf('/') ?? -1;
+      const providerKey = slashIndex > 0 && agent?.model ? agent.model.slice(0, slashIndex) : '';
+      const canInit = Boolean(agent?.model) && providerKeys.has(providerKey);
+
+      if (canInit) {
+        setLoading(true);
+        const result = await window.ipcRenderer.invoke('agent:init', id) as { success: boolean, error?: string };
+        setLoading(false);
+        
+        if (!result.success) {
+          alert(t('app.initAgentFailed', { error: result.error || 'Unknown' }));
+          return;
+        }
       }
+      await loadSessions();
+      await loadActiveSession();
     } catch (error) {
       console.error('Failed to set active agent:', error);
       setLoading(false);
@@ -465,11 +505,12 @@ function App() {
           systemStats={systemStats} 
           messagesEndRef={messagesEndRef}
           models={models}
-          activeModelId={agents.find(a => a.id === activeAgentId)?.modelConfigId || null}
-          onModelChange={(modelId: string) => {
+          activeModelId={agents.find(a => a.id === activeAgentId)?.model || null}
+          activeAgentName={activeAgentName}
+          onModelChange={(model: string) => {
             const activeAgent = agents.find(a => a.id === activeAgentId);
             if (activeAgent) {
-              handleSaveAgent({ ...activeAgent, modelConfigId: modelId });
+              handleSaveAgent({ ...activeAgent, model });
             }
           }}
         />

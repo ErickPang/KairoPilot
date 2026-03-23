@@ -13,7 +13,7 @@ import { SystemInfoTool } from '../core/tools/system';
 import { WebSearchTool, FetchWebpageTool } from '../core/tools/web';
 import { addAuditLog } from '../store/audit';
 import { getActiveSession } from '../store/chat';
-import { AgentConfig, ModelConfig, getAgent, getModel } from '../store/config';
+import { AgentConfig, ModelConfig, getAgent, getModelForAgent } from '../store/config';
 import { pluginManager } from '../core/plugins/manager';
 
 let currentAgent: AgentRuntime | null = null;
@@ -138,8 +138,8 @@ async function resolveAgentConfig(configOrId: string | AgentConfig | ResolvedAge
   if (typeof configOrId === 'string') {
     const agent = getAgent(configOrId);
     if (!agent) throw new Error(`Agent not found: ${configOrId}`);
-    const model = getModel(agent.modelConfigId);
-    if (!model) throw new Error(`Model not found: ${agent.modelConfigId}`);
+    const model = getModelForAgent(agent);
+    if (!model) throw new Error(`Model not found for agent model: ${agent.model}`);
     return { agent, model };
   }
 
@@ -148,8 +148,8 @@ async function resolveAgentConfig(configOrId: string | AgentConfig | ResolvedAge
   }
 
   const agent = configOrId as AgentConfig;
-  const model = getModel(agent.modelConfigId);
-  if (!model) throw new Error(`Model not found: ${agent.modelConfigId}`);
+  const model = getModelForAgent(agent);
+  if (!model) throw new Error(`Model not found for agent model: ${agent.model}`);
   return { agent, model };
 }
 

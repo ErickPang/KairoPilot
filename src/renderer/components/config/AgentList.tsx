@@ -37,7 +37,8 @@ export const AgentList = memo(function AgentList({
 
       {agents.map(agent => {
         const isActive = agent.id === activeAgentId;
-        const linkedModel = models.find(m => m.id === agent.modelConfigId);
+        const linkedModel = models.find(m => agent.model.startsWith(`${m.id}/`));
+        const modelId = agent.model.includes('/') ? agent.model.split('/')[1] : '';
         
         return (
           <div key={agent.id} className={`config-card ${isActive ? 'active' : ''}`}>
@@ -49,7 +50,7 @@ export const AgentList = memo(function AgentList({
               <div className="card-meta">
                 <span title={t('config.linkedModel')}>
                   <IconCpu size={14} style={{ marginRight: '4px', verticalAlign: 'text-bottom' }} />
-                  {linkedModel ? linkedModel.name : 'Unknown'}
+                  {linkedModel ? `${linkedModel.name} (${modelId})` : 'Unknown'}
                 </span>
                 <span>•</span>
                 <span title={t('config.workspace')}>

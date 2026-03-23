@@ -52,8 +52,9 @@ const en = {
   'chat.send': 'Send',
   'chat.thinking': 'Thinking...',
   'chat.agentName': 'KairoPilot Agent',
+  'chat.currentAgentLabel': 'Current Agent: ',
   'chat.welcome': 'Welcome to KairoPilot',
-  'chat.welcomeDesc': 'Start a conversation or drag & drop files to begin.',
+  'chat.welcomeDesc': 'Start a conversation.',
   'chat.dropFiles': 'Drop files to add context',
   'chat.working': 'Working on it...',
   'chat.viewProcess': 'View Process ({count} steps)',
@@ -160,7 +161,7 @@ const en = {
   'skills.description': 'Description',
   
   // Agents
-  'agent.defaultName': 'Main Agent',
+  'agent.defaultName': 'main',
   // Config Panel
   'config.models': 'Models',
   'config.addModel': 'Add Model',
@@ -176,6 +177,7 @@ const en = {
   'config.configName': 'Configuration Name',
   'config.configNameHelp': 'A friendly name to identify this configuration.',
   'config.provider': 'Provider',
+  'config.selectProvider': 'Please select provider',
   'config.providerCustom': 'Custom Provider',
   'config.providerCustomHelp': 'Use your own OpenAI-compatible endpoint and model.',
   'config.connectionDetails': 'Connection Details',
@@ -205,6 +207,7 @@ const en = {
   'config.allowedPaths': 'Allowed Paths',
   'config.allowedPathsHelp': 'Additional absolute paths the agent can read/write.',
   'config.selectModel': 'Select a model config...',
+  'config.selectModelIds': 'Please select models',
   'config.workspaceName': 'Workspace Name',
   'config.workspaceNameHelp': 'Only alphanumeric characters, dashes, and underscores are allowed. Leave empty for default workspace.',
   'config.workspaceNameHelpMain': 'The main agent always uses the default workspace directory.',

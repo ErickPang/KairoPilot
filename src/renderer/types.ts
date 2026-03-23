@@ -22,10 +22,18 @@ export interface LegacyAgentConfig {
 export interface ModelConfig {
   id: string;
   name: string;
-  provider: 'openai' | 'ollama' | 'anthropic' | 'deepseek' | 'zhipu' | 'kimi' | 'qianwen' | 'custom';
+  provider: '' | 'openai' | 'ollama' | 'anthropic' | 'deepseek' | 'zhipu' | 'kimi' | 'qianwen' | 'custom';
   baseUrl: string;
   apiKey: string;
   model: string;
+  availableModels?: Array<{ id: string; name: string }>;
+}
+
+export interface ProviderConfig {
+  provider: 'openai' | 'ollama' | 'anthropic' | 'deepseek' | 'zhipu' | 'kimi' | 'qianwen' | 'custom';
+  baseUrl: string;
+  apiKey: string;
+  model: Array<{ id: string; name: string }>;
 }
 
 export interface AgentConfig {
@@ -34,10 +42,27 @@ export interface AgentConfig {
   workspace: string;
   workspaceName?: string;
   systemPrompt: string;
-  modelConfigId: string;
+  model: string;
   allowedPaths: string[];
   allowedCommands: string[];
   enableShell: boolean;
+}
+
+export interface KairoPilotConfig {
+  version: string;
+  models: {
+    providers: Record<string, ProviderConfig>;
+  };
+  agents: {
+    activeAgentId: string;
+    list: AgentConfig[];
+  };
+  plugins: {
+    registry: unknown[];
+  };
+  skills: {
+    registry: unknown[];
+  };
 }
 
 export interface SystemStats {

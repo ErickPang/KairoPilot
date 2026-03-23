@@ -22,17 +22,14 @@ interface ConfigPanelProps {
   activeSection?: string;
 }
 
-function generateId() {
-  return Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
-}
-
 const EmptyModelConfig: ModelConfig = {
   id: '',
-  name: 'New Model',
-  provider: 'openai',
-  baseUrl: 'https://api.openai.com/v1',
+  name: '',
+  provider: '',
+  baseUrl: '',
   apiKey: '',
-  model: 'gpt-3.5-turbo'
+  model: '',
+  availableModels: []
 };
 
 const EmptyAgentConfig: AgentConfig = {
@@ -40,7 +37,7 @@ const EmptyAgentConfig: AgentConfig = {
   name: 'New Agent',
   workspace: '',
   systemPrompt: 'You are a helpful AI assistant.',
-  modelConfigId: '',
+  model: '',
   allowedPaths: [],
   allowedCommands: [],
   enableShell: false
@@ -55,6 +52,7 @@ export function ConfigPanel({
   const [view, setView] = useState<'list' | 'edit-model' | 'edit-agent'>('list');
   const [editingModel, setEditingModel] = useState<ModelConfig | null>(null);
   const [editingAgent, setEditingAgent] = useState<AgentConfig | null>(null);
+  const [isEditingExistingModel, setIsEditingExistingModel] = useState(false);
 
   const { t } = useTranslation();
 
@@ -67,19 +65,35 @@ export function ConfigPanel({
 
   const handleEditModel = useCallback((model: ModelConfig) => {
     setEditingModel({ ...model });
+    setIsEditingExistingModel(true);
     setView('edit-model');
     // Auto-fetch models when opening edit
     onFetchModels(model);
   }, [onFetchModels]);
 
   const handleCreateModel = useCallback(() => {
-    setEditingModel({ ...EmptyModelConfig, id: generateId() });
+    setEditingModel({ ...EmptyModelConfig });
+    setIsEditingExistingModel(false);
     setView('edit-model');
   }, []);
 
   const handleSaveModel = useCallback(() => {
     if (editingModel) {
-      onSaveModel(editingModel);
+      const normalizedName = editingModel.name.trim();
+      if (!/^[a-zA-Z][a-zA-Z0-9_-]*$/.test(normalizedName)) {
+        alert('模型名称只能使用英文、数字、下划线或短横线，且必须以英文开头');
+        return;
+      }
+      if (!editingModel.provider) {
+        alert('请先选择提供商');
+        return;
+      }
+      const selectedModelIds = (editingModel.availableModels || []).map(item => item.id).filter(Boolean);
+      if (selectedModelIds.length === 0 && !editingModel.model.trim()) {
+        alert('请至少选择一个模型ID');
+        return;
+      }
+      onSaveModel({ ...editingModel, id: normalizedName, name: normalizedName });
       setView('list');
       setEditingModel(null);
     }
@@ -93,9 +107,10 @@ export function ConfigPanel({
   const handleCreateAgent = useCallback(() => {
     setEditingAgent({ 
       ...EmptyAgentConfig, 
-      id: generateId(), 
-      // Default to first model if available
-      modelConfigId: models.length > 0 ? models[0].id : '' 
+      id: Math.random().toString(36).slice(2, 12),
+      model: models.length > 0
+        ? `${models[0].id}/${models[0].availableModels?.[0]?.id || models[0].model}`
+        : ''
     });
     setView('edit-agent');
   }, [models]);
@@ -157,6 +172,7 @@ export function ConfigPanel({
         <ModelEditor 
           editingModel={editingModel}
           setEditingModel={setEditingModel}
+          isEditingExisting={isEditingExistingModel}
           availableModels={availableModels}
           onFetchModels={onFetchModels}
           onSave={handleSaveModel}

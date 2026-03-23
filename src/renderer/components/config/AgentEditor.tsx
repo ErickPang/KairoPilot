@@ -23,6 +23,23 @@ export const AgentEditor = memo(function AgentEditor({
 }: AgentEditorProps) {
   const { t } = useTranslation();
   const isNewAgent = !agents.some(a => a.id === editingAgent.id);
+  const [selectedProvider, selectedModelId] = editingAgent.model.includes('/')
+    ? editingAgent.model.split('/', 2)
+    : [models[0]?.id || '', ''];
+  const providerOptions = models.map(model => ({
+    value: model.id,
+    label: model.name
+  }));
+  const activeProvider = models.find(model => model.id === selectedProvider) || models[0];
+  const activeProviderModelOptions = activeProvider
+    ? ((activeProvider.availableModels && activeProvider.availableModels.length > 0
+      ? activeProvider.availableModels
+      : [{ id: activeProvider.model, name: activeProvider.model }]).map(item => ({
+      value: item.id,
+      label: item.id
+    })))
+    : [];
+  const activeModelId = selectedModelId || activeProviderModelOptions[0]?.value || '';
 
   return (
     <>
@@ -61,12 +78,32 @@ export const AgentEditor = memo(function AgentEditor({
 
           <div className="form-group" style={{ flex: 1 }}>
             <label>{t('config.linkedModel')}</label>
-            <Select 
-              value={editingAgent.modelConfigId} 
-              onChange={(val) => setEditingAgent({...editingAgent, modelConfigId: val})}
-              placeholder={t('config.selectModel')}
-              options={models.map(m => ({ value: m.id, label: `${m.name} (${m.model})` }))}
-            />
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+              <Select
+                value={activeProvider?.id || ''}
+                onChange={(providerId) => {
+                  const provider = models.find(item => item.id === providerId);
+                  const providerModels = provider
+                    ? (provider.availableModels && provider.availableModels.length > 0
+                      ? provider.availableModels
+                      : [{ id: provider.model, name: provider.model }])
+                    : [];
+                  const nextModelId = providerModels[0]?.id || '';
+                  setEditingAgent({ ...editingAgent, model: `${providerId}/${nextModelId}` });
+                }}
+                placeholder="选择模型提供商"
+                options={providerOptions}
+              />
+              <Select
+                value={activeModelId}
+                onChange={(modelId) => {
+                  const providerId = activeProvider?.id || selectedProvider;
+                  setEditingAgent({ ...editingAgent, model: `${providerId}/${modelId}` });
+                }}
+                placeholder={t('config.selectModel')}
+                options={activeProviderModelOptions}
+              />
+            </div>
           </div>
         </div>
 
