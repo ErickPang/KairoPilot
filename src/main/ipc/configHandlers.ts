@@ -40,7 +40,14 @@ function registerConfigHandlers() {
   });
 
   ipcMain.handle('config:get-all', async () => {
-    return getKairoPilotConfig();
+    const config = getKairoPilotConfig();
+    return {
+      ...config,
+      agents: {
+        ...config.agents,
+        list: getAgents()
+      }
+    };
   });
 
   ipcMain.handle('config:get-models', async () => {

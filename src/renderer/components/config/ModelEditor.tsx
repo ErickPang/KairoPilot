@@ -1,6 +1,6 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { FetchModelsResult, ModelConfig } from '../../types';
-import { IconArrowLeft, IconRefresh, IconChevronDown, IconCheck } from '../Icons';
+import { IconArrowLeft, IconRefresh, IconChevronDown, IconCheck, IconX } from '../Icons';
 import { Select, type SelectOption } from '../Select';
 import { OllamaManager } from './OllamaManager';
 import { useTranslation } from '../../hooks/useTranslation';
@@ -31,6 +31,7 @@ export const ModelEditor = memo(function ModelEditor({
   const [modelDropdownPlacement, setModelDropdownPlacement] = useState<'top' | 'bottom'>('bottom');
   const [manualModelId, setManualModelId] = useState('');
   const [showManualInput, setShowManualInput] = useState(false);
+  const [feedbackDialog, setFeedbackDialog] = useState<{ title: string; message: string; type: 'success' | 'error' } | null>(null);
   const modelDropdownRef = useRef<HTMLDivElement>(null);
   const modelTriggerRef = useRef<HTMLButtonElement>(null);
   const selectedModelIds = useMemo(
@@ -150,11 +151,19 @@ export const ModelEditor = memo(function ModelEditor({
     const result = await onFetchModels(editingModel);
     if (result.success) {
       setShowManualInput(false);
-      alert(t('config.fetchModelsSuccess', { count: String(result.models.length) }));
+      setFeedbackDialog({
+        title: t('common.success'),
+        message: t('config.fetchModelsSuccess', { count: String(result.models.length) }),
+        type: 'success'
+      });
       return;
     }
     setShowManualInput(true);
-    alert(t('config.fetchModelsFailed', { error: result.error || t('common.error') }));
+    setFeedbackDialog({
+      title: t('common.error'),
+      message: t('config.fetchModelsFailed', { error: result.error || t('common.error') }),
+      type: 'error'
+    });
   };
 
   return (
@@ -358,9 +367,10 @@ export const ModelEditor = memo(function ModelEditor({
             </button>
           </div>
           {showManualInput && (
-            <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.5rem' }}>
+            <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.5rem', alignItems: 'stretch' }}>
               <input
                 className="form-control"
+                style={{ flex: '1 1 auto', maxWidth: 'calc(100% - 136px)' }}
                 value={manualModelId}
                 onChange={e => setManualModelId(e.target.value)}
                 onKeyDown={e => {
@@ -371,7 +381,12 @@ export const ModelEditor = memo(function ModelEditor({
                 }}
                 placeholder={t('config.placeholder.manualModelId')}
               />
-              <button type="button" className="btn btn-secondary" onClick={addManualModelId}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={addManualModelId}
+                style={{ flex: '0 0 128px', justifyContent: 'center', whiteSpace: 'nowrap' }}
+              >
                 {t('config.addModelId')}
               </button>
             </div>
@@ -389,6 +404,30 @@ export const ModelEditor = memo(function ModelEditor({
           <button className="btn btn-primary" onClick={onSave}>{t('common.save')}</button>
         </div>
       </div>
+      {feedbackDialog && (
+        <div className="feedback-dialog-overlay" onClick={() => setFeedbackDialog(null)}>
+          <div
+            className={`feedback-dialog ${feedbackDialog.type === 'error' ? 'is-error' : 'is-success'}`}
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="feedback-dialog-header">
+              <div className="feedback-dialog-title-wrap">
+                <img src="/icon.png" alt="KairoPilot" className="feedback-dialog-icon" />
+                <h3 className="feedback-dialog-title">{feedbackDialog.title}</h3>
+              </div>
+              <button className="btn-icon feedback-dialog-close" onClick={() => setFeedbackDialog(null)}>
+                <IconX size={18} />
+              </button>
+            </div>
+            <div className="feedback-dialog-body">
+              <p className="feedback-dialog-message">{feedbackDialog.message}</p>
+            </div>
+            <div className="feedback-dialog-actions">
+              <button className="btn btn-primary" onClick={() => setFeedbackDialog(null)}>{t('common.confirm')}</button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 });

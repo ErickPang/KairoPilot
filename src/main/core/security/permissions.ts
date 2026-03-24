@@ -34,6 +34,14 @@ const SENSITIVE_DIRS_BLACKLIST = new Set([
   '.git'
 ]);
 
+const PROTECTED_PROMPT_FILES = new Set([
+  'KAIROPILOT.md',
+  'IDENTITY.md',
+  'USER.md',
+  'SOUL.md',
+  'MEMORY.md'
+]);
+
 export class PermissionGuard {
   private config: PermissionConfig;
 
@@ -73,6 +81,12 @@ export class PermissionGuard {
       }
     } catch {
       // Ignore if we can't resolve realpath (e.g. permission issues during resolution)
+    }
+
+    const targetBaseName = path.basename(absoluteTarget);
+    if (PROTECTED_PROMPT_FILES.has(targetBaseName)) {
+      console.warn(`[Security] Blocked access to protected prompt file: ${absoluteTarget}`);
+      return false;
     }
 
     // 1. Check against hardcoded sensitive directories

@@ -48,6 +48,9 @@ export interface AgentConfig {
   workspace: string;
   workspaceName?: string;
   systemPrompt: string;
+  identityPrompt: string;
+  userPrompt: string;
+  soulPrompt: string;
   model: string;
   allowedPaths: string[];
   allowedCommands: string[];

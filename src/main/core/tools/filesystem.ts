@@ -2,6 +2,14 @@ import fs from 'fs-extra';
 import { z } from 'zod';
 import { ToolDefinition } from '../llm/types';
 
+const PROTECTED_PROMPT_FILES = new Set([
+  'KAIROPILOT.md',
+  'IDENTITY.md',
+  'USER.md',
+  'SOUL.md',
+  'MEMORY.md'
+]);
+
 export const ReadFileTool: ToolDefinition = {
   name: 'read_file',
   description: 'Read the content of a file at the specified path.',
@@ -48,7 +56,9 @@ export const ListDirectoryTool: ToolDefinition = {
     try {
       const path = args.path as string;
       const files = await fs.readdir(path);
-      return { files };
+      return {
+        files: files.filter(name => !PROTECTED_PROMPT_FILES.has(name))
+      };
     } catch (error) {
       return `Failed to list directory: ${error instanceof Error ? error.message : 'Unknown error'}`;
     }

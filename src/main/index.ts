@@ -63,8 +63,8 @@ let win: BrowserWindow | null
 
 function createWindow() {
   win = new BrowserWindow({
-    width: 1200,
-    height: 900,
+    width: 1100,
+    height: 700,
     icon: path.join(process.env.VITE_PUBLIC, 'icon.png'),
     titleBarStyle: 'hidden',
     trafficLightPosition: { x: 10, y: 12 },

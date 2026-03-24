@@ -32,10 +32,11 @@ async function initializeAgent(config: ResolvedAgentConfig, sender?: WebContents
     : [];
   const allowedPaths = [...new Set([workspace, ...userAllowedPaths])];
   const defaultCommands = ['ls', 'cd', 'pwd', 'mkdir', 'rm', 'touch', 'cat', 'grep', 'echo', 'npm', 'node', 'git', 'python', 'python3', 'open', 'curl'];
+  const hasConfiguredCommands = Array.isArray(agent.allowedCommands);
   const userAllowedCommands = Array.isArray(agent.allowedCommands)
     ? agent.allowedCommands.filter((c: string) => c && c.trim().length > 0)
     : [];
-  const allowedCommands = userAllowedCommands.length > 0 ? userAllowedCommands : defaultCommands;
+  const allowedCommands = hasConfiguredCommands ? userAllowedCommands : defaultCommands;
 
   const permissions = new PermissionGuard({
     fileSystem: {
@@ -62,12 +63,13 @@ async function initializeAgent(config: ResolvedAgentConfig, sender?: WebContents
 
   const systemPromptWithContext = PromptBuilder.buildSystemPrompt({
     workspace,
-    agentPrompt: agent.systemPrompt
+    kairopilotPrompt: agent.systemPrompt,
+    identityPrompt: agent.identityPrompt,
+    userPrompt: agent.userPrompt,
+    soulPrompt: agent.soulPrompt
   });
 
-  console.log('\n--- [DEBUG] Assembled System Prompt Start ---\n');
-  console.log(systemPromptWithContext);
-  console.log('\n--- [DEBUG] Assembled System Prompt End ---\n');
+  console.log(`[Agent] System prompt assembled. Length=${systemPromptWithContext.length}`);
 
   currentAgent = new AgentRuntime(
     llm,
@@ -93,7 +95,14 @@ async function initializeAgent(config: ResolvedAgentConfig, sender?: WebContents
         policyTags: log.policyTags,
         sessionId: getActiveSession()?.id
       });
-    }
+    },
+    () => PromptBuilder.buildSystemPrompt({
+      workspace,
+      kairopilotPrompt: agent.systemPrompt,
+      identityPrompt: agent.identityPrompt,
+      userPrompt: agent.userPrompt,
+      soulPrompt: agent.soulPrompt
+    })
   );
 
   currentAgent.registerTool(ReadFileTool as unknown as ToolDefinition);

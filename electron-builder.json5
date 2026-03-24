@@ -5,6 +5,7 @@
   "buildDependenciesFromSource": true,
   "asar": true,
   "productName": "KairoPilot",
+  "icon": "public/icon.png",
   "directories": {
     "output": "release/${version}"
   },
@@ -13,12 +14,14 @@
     "dist-electron"
   ],
   "mac": {
+    "icon": "public/icon.png",
     "target": [
       "dmg"
     ],
     "artifactName": "${productName}-Mac-${version}-Installer.${ext}"
   },
   "win": {
+    "icon": "public/icon.png",
     "target": [
       {
         "target": "nsis",
@@ -36,6 +39,7 @@
     "deleteAppDataOnUninstall": false
   },
   "linux": {
+    "icon": "public/icon.png",
     "target": [
       "AppImage"
     ],

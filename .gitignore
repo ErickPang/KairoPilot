@@ -15,6 +15,7 @@ release/*
 dist-electron
 CodePilot/*
 demo.json
+.trae/*
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
@@ -25,3 +26,4 @@ demo.json
 *.njsproj
 *.sln
 *.sw?
+name.md

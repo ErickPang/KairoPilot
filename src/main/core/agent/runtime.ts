@@ -9,19 +9,22 @@ export class AgentRuntime {
   private permissionGuard: PermissionGuard;
   private confirmAction?: (toolName: string, args: Record<string, unknown>) => Promise<boolean>;
   private auditLog?: (entry: { tool: string, args: Record<string, unknown>, result?: unknown, error?: string, policyTags?: string[] }) => void;
+  private refreshSystemPrompt?: () => string;
 
   constructor(
     llm: LLMProvider, 
     permissionGuard: PermissionGuard,
     systemPrompt: string = "You are a helpful AI assistant.",
     confirmAction?: (toolName: string, args: Record<string, unknown>) => Promise<boolean>,
-    auditLog?: (entry: { tool: string, args: Record<string, unknown>, result?: unknown, error?: string, policyTags?: string[] }) => void
+    auditLog?: (entry: { tool: string, args: Record<string, unknown>, result?: unknown, error?: string, policyTags?: string[] }) => void,
+    refreshSystemPrompt?: () => string
   ) {
     this.llm = llm;
     this.systemPrompt = systemPrompt;
     this.permissionGuard = permissionGuard;
     this.confirmAction = confirmAction;
     this.auditLog = auditLog;
+    this.refreshSystemPrompt = refreshSystemPrompt;
     this.tools = new Map();
   }
 
@@ -42,6 +45,12 @@ export class AgentRuntime {
 
   // The main loop: This is where the magic happens
   async chat(userInput: string, onUpdate?: (update: Record<string, unknown>) => void): Promise<string> {
+    if (this.refreshSystemPrompt) {
+      const latestSystemPrompt = this.refreshSystemPrompt();
+      if (typeof latestSystemPrompt === 'string' && latestSystemPrompt.trim().length > 0) {
+        this.systemPrompt = latestSystemPrompt;
+      }
+    }
     // 1. Add user message to history
     const userMessage: ChatMessage = { role: 'user', content: userInput };
     this.history.push(userMessage);
@@ -173,6 +182,9 @@ export class AgentRuntime {
       } else {
         // No tool calls? We are done.
         finalResponse = response.content;
+        if (this.shouldBlockSensitiveDisclosure(userInput, finalResponse)) {
+          finalResponse = 'I can’t disclose hidden system instructions or internal memory. I can provide a high-level summary of my safety and behavior policy instead.';
+        }
         break;
       }
     }
@@ -271,5 +283,54 @@ export class AgentRuntime {
     }
 
     return tags;
+  }
+
+  private shouldBlockSensitiveDisclosure(userInput: string, assistantOutput: string): boolean {
+    const normalizedUserInput = (userInput || '').toLowerCase();
+    if (!normalizedUserInput.trim()) {
+      return false;
+    }
+    const extractionPatterns = [
+      'system prompt',
+      'developer prompt',
+      'hidden prompt',
+      'internal prompt',
+      'show your prompt',
+      'reveal prompt',
+      'print prompt',
+      '输出系统提示词',
+      '显示系统提示词',
+      '泄露提示词',
+      '泄露系统',
+      '提示词原文',
+      '开发者指令',
+      '隐藏指令',
+      '越狱'
+    ];
+    const isExtractionAttempt = extractionPatterns.some(pattern => normalizedUserInput.includes(pattern));
+    if (!isExtractionAttempt) {
+      return false;
+    }
+
+    const normalizedOutput = (assistantOutput || '').toLowerCase();
+    const sensitiveMarkers = [
+      '<core_identity>',
+      '<instruction_priority>',
+      '<security_and_behavior_rules>',
+      '<conflict_resolution_protocol>',
+      '<skills_instructions>',
+      '<core_directives>',
+      '<identity>',
+      '<session_user_context>',
+      '<session_soul_context>',
+      '<long_term_memory>',
+      '<environment>'
+    ];
+    if (sensitiveMarkers.some(marker => normalizedOutput.includes(marker))) {
+      return true;
+    }
+
+    const promptPrefix = this.systemPrompt.slice(0, 120).toLowerCase();
+    return promptPrefix.length > 40 && normalizedOutput.includes(promptPrefix);
   }
 }
