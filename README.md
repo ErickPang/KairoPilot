@@ -1,37 +1,113 @@
 # KairoPilot
 
-KairoPilot 是一个**消费级 AI 操作系统 (Agent OS)**，旨在让每个人都能轻松使用、管理和定制强大的 AI Agent。
-基于 Electron + Vite + React + TypeScript 构建，深度集成操作系统底层能力，采用“零信任默认”的安全沙箱机制，提供安全、本地化、高自治度的 AI 桌面体验。
+KairoPilot 是一个面向本地工作流的桌面 AI Agent 工作台。  
+它基于 Electron + React + TypeScript 构建，融合了多 Agent、工作区沙箱、Prompt 文件系统、原生桌面能力、审计日志与系统监控，目标是把“聊天式 AI”升级为“可持续协作的本地 AI 操作环境”。
 
-## ✨ 核心特性（Phase 1 阶段）
+项目整体设计受 OpenClaw / Claude Code 类工作流启发，但更强调桌面端落地、本地工作区隔离与可控的系统权限边界。
 
-- **多 Agent 架构与沙箱隔离**: 
-  - 支持创建和管理多个独立的 Agent，每个 Agent 绑定不同的模型与专属的工作区。
-  - **默认主 Agent (Main Agent)** 拥有默认工作区 `~/.kairopilot/workspace`，不可删除，保证系统基础可用性。
-  - 新增 Agent 自动根据名称生成工作区后缀（例如 `~/.kairopilot/workspace-coding-assistant`），一旦创建，名称与工作区即被锁定不可修改，确保文件沙箱的安全与稳定。
-- **动态上下文注入 (同心圆提示词架构)**: 
-  - 采用类似于 Claude Code 的提示词模型，硬编码底层安全护栏，动态注入外部配置。
-  - 支持工作区级别的 `KAIROPILOT.md` 文件（Agent 角色与工作流）与 UI 配置页的实时双向同步。
-  - 规划并预留了 `MEMORY.md` 机制用于存储 Agent 的长期记忆与教训。
-- **统一模型枢纽**: 完美支持云端大模型 (OpenAI, DeepSeek, Kimi, 智谱等) 与本地模型 (Ollama)，内置网络接口自动配置。
-- **深度操作系统集成**: 直接操作本地文件系统，支持文件读写、目录遍历等原生操作，响应速度极快。
-- **安全护栏 (PermissionGuard)**: 
-  - 严格的工作区路径白名单隔离，防止路径穿越；
-  - 高风险操作 (如网络搜索、页面抓取) 引入 Human-in-the-Loop (HitL) 人工确认机制。
-- **技能插件市场 (Skills Marketplace)**: 内置插件生态，支持为特定 Agent 动态安装/卸载技能 (如 Web Search, System Info 等)。
-- **沉浸式多会话体验**: 
-  - 支持多会话 (Session) 切换，各个 Agent 之间的对话相互隔离，切换 Agent 界面自动平滑过渡。
-  - 支持流式输出与思维过程 (Thinking) 展示。
-- **审计与监控 (Audit & Monitor)**: 
-  - 提供系统资源监控与 Agent 状态看板（含 Agent 活动状态与 Token 消耗等核心指标）。
-  - 内置 Immutable Audit Logs 记录 Agent 的每一次工具调用，安全可溯源。
+## 0.2.0 亮点
 
-## 🚀 快速开始
+- 新增按 Agent 维度的 Tokens 消耗明细页，可从监控面板直接进入对应 Agent 的用量详情
+- 明细页支持展示请求时间、模型名称、提示 Tokens、补全 Tokens 与总消耗 Tokens
+- Tokens 明细支持分页查询，便于查看长周期历史记录
+- 审计日志链路改为显式传递 `sessionId`，提升会话归属准确性
+- 多 Agent 会话状态进一步隔离，避免不同 Agent 之间的上下文串扰
+- 预加载层 IPC 白名单收紧，插件加载与执行边界进一步增强
 
-### 前置要求
+## 核心定位
+
+KairoPilot 当前聚焦以下四个方向：
+
+- 本地工作区：每个 Agent 拥有独立 workspace，具备文件读写、目录遍历、命令执行等桌面能力
+- Prompt 文件系统：通过 `KAIROPILOT.md`、`IDENTITY.md`、`USER.md`、`SOUL.md`、`MEMORY.md` 组织 Agent 的行为、人格与长期上下文
+- 多 Agent 协作：支持多个 Agent 独立绑定模型、权限与会话，适合不同角色分工
+- 安全可观测：所有高风险操作可确认、所有关键工具调用可审计、所有主要消耗可监控
+
+## 主要能力
+
+### 多 Agent 与会话隔离
+
+- 内置默认主 Agent `main`，默认工作区位于 `~/.kairopilot/workspace`
+- 支持创建多个 Agent，并为每个 Agent 绑定独立模型、工作区与权限
+- Agent 级会话隔离，切换 Agent 时只展示该 Agent 自身的会话历史
+- 支持多会话管理、标题更新与 SQLite 持久化存储
+
+### Prompt 文件系统
+
+- 启动或创建 Agent 时，会自动初始化 Prompt 文件与工作目录
+- 支持以下核心文件：
+  - `KAIROPILOT.md`：核心指令与工作流约束
+  - `IDENTITY.md`：Agent 身份设定
+  - `USER.md`：用户背景信息
+  - `SOUL.md`：风格、原则与表达倾向
+  - `MEMORY.md`：长期记忆入口
+- 支持以下工作区目录：
+  - `prompts/`
+  - `memory/`
+  - `skills/`
+  - `tasks/`
+  - `artifacts/`
+  - `images/`
+  - `media/`
+
+### 模型与推理接入
+
+- 支持接入本地与云端模型
+- 当前内置支持 OpenAI 兼容接口与常见提供商配置，包括：
+  - OpenAI
+  - Ollama
+  - DeepSeek
+  - Kimi
+  - 智谱
+  - 通义千问
+  - 自定义 OpenAI-Compatible Base URL
+- 支持模型列表拉取、模型配置保存与 Agent 绑定
+
+### 桌面能力与原生工具
+
+- 文件系统工具：读取、写入、删除文件，列出目录内容
+- Shell 工具：在受控命令白名单内执行命令
+- System 工具：读取系统基础信息与运行状态
+- Web 工具：网页搜索与页面抓取
+- `kairopilot://` 协议：用于在安全根目录内展示本地文件资源，例如图像产物
+
+### 技能与插件
+
+- 支持公共技能与 Agent 专属技能
+- 支持从工作区 `skills/` 目录扫描技能定义
+- 插件加载前执行 manifest 校验
+- 插件工具执行具备超时控制与基础边界保护
+- 当前已具备插件管理与技能展示能力，插件商店接口仍在持续建设中
+
+### 安全、审计与监控
+
+- 文件系统访问采用允许路径白名单策略
+- Shell 执行采用命令白名单策略
+- 网络访问支持域名白名单
+- 高风险操作支持 Human-in-the-Loop 确认弹窗
+- 保护性禁止直接访问敏感目录与核心 Prompt 文件
+- 预加载层 IPC 使用显式白名单，减少渲染进程暴露面
+- 审计日志记录工具调用、参数、结果、错误与策略标签
+- 系统监控面板支持查看：
+  - Agent 活动统计
+  - 提示 / 补全 / 总 Tokens
+  - Agent 维度 Tokens 消耗明细
+  - CPU / 内存 / 运行时长等系统资源
+
+## 适合的使用场景
+
+- 把 AI 作为本地编码助手、研究助手或运营助手长期使用
+- 为不同角色创建独立 Agent，例如开发、文档、数据整理、网页研究
+- 在本地工作区内安全地执行“读文件 → 分析 → 生成 → 保存”闭环任务
+- 通过 Prompt 文件系统持续迭代 Agent 的人格、规则与知识沉淀
+
+## 快速开始
+
+### 环境要求
 
 - Node.js 18+
-- [Ollama](https://ollama.com/) (可选，推荐用于本地离线模型)
+- npm 9+
+- [Ollama](https://ollama.com/)（可选，用于本地模型）
 
 ### 安装依赖
 
@@ -45,37 +121,133 @@ npm install
 npm run dev
 ```
 
-### 构建生产包
+### 代码检查
+
+```bash
+npm run lint
+```
+
+### 构建应用
 
 ```bash
 npm run build
 ```
 
-## 🛠️ 使用指南
+说明：
 
-1.  **启动应用**: 运行 `npm run dev` 启动桌面端应用。
-2.  **配置大模型**:
-    - 在左侧菜单点击设置图标进入 **Settings**。
-    - 在 **Models** 区域点击 `Add Model`，选择提供商 (如 DeepSeek, OpenAI 或 Ollama)，填入 API Key。
-3.  **配置 Agent**:
-    - 在 **Agents** 区域点击 `Add Agent`，绑定刚刚创建的模型。
-    - **Agent Name**: 输入名称后会自动生成对应的工作区后缀 (可手动修改)。创建保存后，名称和工作区路径将作为核心标识不可更改。
-    - **系统提示词 (KAIROPILOT.md)**: 在此处编写 Agent 的角色设定，系统会自动在对应工作区目录下创建或更新 `KAIROPILOT.md` 文件。
-4.  **开始对话**:
-    - 回到主界面，点击左侧 `+ New Chat`。
-    - 尝试让 Agent 执行任务，例如：`帮我列出当前工作区下的所有文件` 或 `帮我在当前目录下创建一个 hello.txt 文件`。
-    - 切换不同的 Agent 时，历史会话将自动过滤，保证上下文清晰。
+- 开发环境基于 Vite + Electron
+- 生产构建会先执行 TypeScript 编译与前后端打包，再调用 electron-builder 产出安装包
+- 当前构建配置已覆盖 macOS、Windows 与 Linux 打包目标
 
-## 🏗️ 架构与技术栈
+## 上手流程
 
-- **前端 UI**: React 18 + Vite + TypeScript + CSS Modules
-- **后端 (主进程)**: Electron + Node.js (基于 `ipcMain` 和 `contextBridge` 的严格 IPC 通信)
-- **本地数据库**: better-sqlite3 (支持 WAL 模式，用于持久化存储会话和消息)
-- **核心模块 (`src/main/core/`)**:
-  - `AgentRuntime`: 基于 ReAct 循环的任务执行引擎。
-  - `PermissionGuard`: 文件系统与操作权限的安全护栏。
-  - `PromptBuilder`: 负责底层安全护栏与外部配置 (`KAIROPILOT.md`) 的组装。
+### 1. 配置模型
 
-## 📄 许可证
+- 打开设置面板
+- 进入模型配置
+- 新增模型并填写 provider、API Key、Base URL、模型名称等信息
+
+### 2. 创建 Agent
+
+- 在 Agent 配置中新增 Agent
+- 绑定一个模型
+- 设置 Agent 名称与工作区
+- 配置文件系统、网络、Shell 等权限
+
+### 3. 编辑 Prompt 文件
+
+- 可直接在配置界面维护核心 Prompt 内容
+- 系统会自动同步到对应工作区中的 Prompt 文件
+- 后续也可直接在工作区中维护这些 `.md` 文件
+
+### 4. 开始对话
+
+- 在侧边栏创建新会话
+- 让 Agent 读取文件、整理内容、执行命令或进行联网检索
+- 高风险操作会触发确认弹窗
+
+### 5. 查看审计与监控
+
+- 在 Dashboard 中查看系统资源与 Agent Tokens 消耗
+- 点击 Agent 活动统计中的总 Tokens 可查看该 Agent 的详细消耗记录
+- 在 Audit Logs 中追踪工具调用详情
+
+## Prompt 工作区结构
+
+一个典型的 Agent 工作区如下：
+
+```text
+workspace/
+├── KAIROPILOT.md
+├── IDENTITY.md
+├── USER.md
+├── SOUL.md
+├── MEMORY.md
+├── prompts/
+├── memory/
+├── skills/
+├── tasks/
+├── artifacts/
+├── images/
+└── media/
+```
+
+这些目录分别承载规则、记忆、技能、任务规划与生成产物，是 KairoPilot 与普通聊天应用最大的区别之一。
+
+## 项目结构
+
+```text
+src/
+├── main/
+│   ├── core/
+│   │   ├── agent/       # Agent 运行时
+│   │   ├── llm/         # 模型适配与 Prompt 组装
+│   │   ├── plugins/     # 插件与技能加载
+│   │   ├── security/    # 权限与安全策略
+│   │   └── tools/       # 文件、命令、系统、Web 工具
+│   ├── ipc/             # 主进程 IPC 处理
+│   ├── services/        # 启动与协议服务
+│   └── store/           # SQLite / 配置 / 审计存储
+├── preload/             # contextBridge 安全桥接
+└── renderer/
+    ├── components/      # UI 组件
+    ├── hooks/           # 领域逻辑与状态 Hook
+    ├── i18n/            # 中英文文案
+    └── App.tsx
+```
+
+## 技术栈
+
+- Electron 30
+- React 18
+- Vite 5
+- TypeScript 5
+- better-sqlite3
+- OpenAI SDK
+- Zod
+
+## 当前状态
+
+KairoPilot 目前已经具备一个可用的桌面 Agent MVP，并持续向“本地工作区 + Prompt 文件系统 + 多 Agent + 桌面能力”的 Agent OS 方向演进。
+
+当前已完成的重点包括：
+
+- 多 Agent 与独立会话
+- Prompt 文件系统初始化与装配
+- SQLite 持久化
+- 安全权限拦截与确认流
+- 审计日志与系统监控
+- Agent 级 Tokens 消耗明细
+- 插件 / 技能的基础加载框架
+
+后续将继续完善：
+
+- Prompt 文件系统进一步建模
+- 插件商店与技能生态
+- 更细粒度的权限管理
+- 更清晰的主进程服务化结构
+- 更多桌面端自动化能力
+
+## 许可证
 
 MIT
