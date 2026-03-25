@@ -21,7 +21,7 @@ export default function AuditLogViewer() {
   const loadLogs = async () => {
     setLoading(true);
     try {
-      const data = await window.ipcRenderer.invoke('audit:get', 100);
+      const data = await window.kairo.invoke('audit:get', 100);
       setLogs(data as AuditLogEntry[]);
     } catch (error) {
       console.error('Failed to load audit logs:', error);

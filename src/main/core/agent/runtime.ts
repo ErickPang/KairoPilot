@@ -7,16 +7,24 @@ export class AgentRuntime {
   private history: ChatMessage[] = [];
   private systemPrompt: string;
   private permissionGuard: PermissionGuard;
-  private confirmAction?: (toolName: string, args: Record<string, unknown>) => Promise<boolean>;
-  private auditLog?: (entry: { tool: string, args: Record<string, unknown>, result?: unknown, error?: string, policyTags?: string[] }) => void;
+  private confirmAction?: (
+    toolName: string,
+    args: Record<string, unknown>,
+    options?: { sessionId?: string }
+  ) => Promise<boolean>;
+  private auditLog?: (entry: { tool: string, args: Record<string, unknown>, result?: unknown, error?: string, policyTags?: string[], sessionId?: string }) => void;
   private refreshSystemPrompt?: () => string;
 
   constructor(
     llm: LLMProvider, 
     permissionGuard: PermissionGuard,
     systemPrompt: string = "You are a helpful AI assistant.",
-    confirmAction?: (toolName: string, args: Record<string, unknown>) => Promise<boolean>,
-    auditLog?: (entry: { tool: string, args: Record<string, unknown>, result?: unknown, error?: string, policyTags?: string[] }) => void,
+    confirmAction?: (
+      toolName: string,
+      args: Record<string, unknown>,
+      options?: { sessionId?: string }
+    ) => Promise<boolean>,
+    auditLog?: (entry: { tool: string, args: Record<string, unknown>, result?: unknown, error?: string, policyTags?: string[], sessionId?: string }) => void,
     refreshSystemPrompt?: () => string
   ) {
     this.llm = llm;
@@ -44,7 +52,11 @@ export class AgentRuntime {
   }
 
   // The main loop: This is where the magic happens
-  async chat(userInput: string, onUpdate?: (update: Record<string, unknown>) => void): Promise<string> {
+  async chat(
+    userInput: string,
+    onUpdate?: (update: Record<string, unknown>) => void,
+    options?: { sessionId?: string }
+  ): Promise<string> {
     if (this.refreshSystemPrompt) {
       const latestSystemPrompt = this.refreshSystemPrompt();
       if (typeof latestSystemPrompt === 'string' && latestSystemPrompt.trim().length > 0) {
@@ -102,7 +114,7 @@ export class AgentRuntime {
             const errorMessage = `Invalid JSON arguments for ${toolName}: ${error instanceof Error ? error.message : 'Unknown error'}`;
             result = `Error executing tool: ${errorMessage}`;
             if (onUpdate) onUpdate({ type: 'tool-error', tool: toolName, error: errorMessage });
-            if (this.auditLog) this.auditLog({ tool: toolName, args, error: errorMessage, policyTags: [`tool:${toolName}`, 'decision:error'] });
+            if (this.auditLog) this.auditLog({ tool: toolName, args, error: errorMessage, policyTags: [`tool:${toolName}`, 'decision:error'], sessionId: options?.sessionId });
             const toolMessage: ChatMessage = {
               role: 'tool',
               content: result,
@@ -137,7 +149,7 @@ export class AgentRuntime {
             const errorMessage = `Invalid arguments for ${toolName}: ${issueText}`;
             result = `Error executing tool: ${errorMessage}`;
             if (onUpdate) onUpdate({ type: 'tool-error', tool: toolName, error: errorMessage });
-            if (this.auditLog) this.auditLog({ tool: toolName, args, error: errorMessage, policyTags: [`tool:${toolName}`, 'decision:error'] });
+            if (this.auditLog) this.auditLog({ tool: toolName, args, error: errorMessage, policyTags: [`tool:${toolName}`, 'decision:error'], sessionId: options?.sessionId });
             const toolMessage: ChatMessage = {
               role: 'tool',
               content: result,
@@ -155,16 +167,16 @@ export class AgentRuntime {
           console.log(`[Agent] Calling tool: ${toolName}`, args);
 
           try {
-            await this.checkPermission(toolName, args);
+            await this.checkPermission(toolName, args, options);
             const output = await tool.execute(args);
             result = JSON.stringify(output);
             if (onUpdate) onUpdate({ type: 'tool-result', tool: toolName, result: output });
-            if (this.auditLog) this.auditLog({ tool: toolName, args, result: output, policyTags });
+            if (this.auditLog) this.auditLog({ tool: toolName, args, result: output, policyTags, sessionId: options?.sessionId });
           } catch (error) {
             const errorMessage = error instanceof Error ? error.message : 'Unknown error';
             result = `Error executing tool: ${errorMessage}`;
             if (onUpdate) onUpdate({ type: 'tool-error', tool: toolName, error: errorMessage });
-            if (this.auditLog) this.auditLog({ tool: toolName, args, error: errorMessage, policyTags: [...policyTags, 'decision:error'] });
+            if (this.auditLog) this.auditLog({ tool: toolName, args, error: errorMessage, policyTags: [...policyTags, 'decision:error'], sessionId: options?.sessionId });
           }
 
           // 7. Feed tool result back to LLM
@@ -192,7 +204,11 @@ export class AgentRuntime {
     return finalResponse;
   }
 
-  private async checkPermission(toolName: string, args: Record<string, unknown>) {
+  private async checkPermission(
+    toolName: string,
+    args: Record<string, unknown>,
+    options?: { sessionId?: string }
+  ) {
     // This maps specific tools to permission checks
     // For MVP, we hardcode some known tools
     if (toolName === 'read_file' || toolName === 'write_file' || toolName === 'list_directory' || toolName === 'delete_file') {
@@ -226,7 +242,7 @@ export class AgentRuntime {
     const highRiskTools = ['execute_command', 'write_file', 'delete_file'];
     if (highRiskTools.includes(toolName) && this.confirmAction) {
       console.log(`[Agent] Requesting confirmation for ${toolName}`);
-      const approved = await this.confirmAction(toolName, args);
+      const approved = await this.confirmAction(toolName, args, options);
       if (!approved) {
         throw new Error(`User denied permission for ${toolName}.`);
       }

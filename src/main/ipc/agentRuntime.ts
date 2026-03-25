@@ -12,11 +12,10 @@ import { createExecuteCommandTool } from '../core/tools/shell';
 import { SystemInfoTool } from '../core/tools/system';
 import { WebSearchTool, FetchWebpageTool } from '../core/tools/web';
 import { addAuditLog } from '../store/audit';
-import { getActiveSession } from '../store/chat';
 import { AgentConfig, ModelConfig, getAgent, getModelForAgent } from '../store/config';
 import { pluginManager } from '../core/plugins/manager';
 
-let currentAgent: AgentRuntime | null = null;
+const runtimeRegistry = new Map<string, AgentRuntime>();
 const pendingConfirmations = new Map<string, (approved: boolean) => void>();
 
 interface ResolvedAgentConfig {
@@ -71,11 +70,11 @@ async function initializeAgent(config: ResolvedAgentConfig, sender?: WebContents
 
   console.log(`[Agent] System prompt assembled. Length=${systemPromptWithContext.length}`);
 
-  currentAgent = new AgentRuntime(
+  const runtime = new AgentRuntime(
     llm,
     permissions,
     systemPromptWithContext,
-    async (toolName, args) => {
+    async (toolName, args, options) => {
       if (!sender) {
         console.warn('No sender available for confirmation, auto-denying.');
         return false;
@@ -83,7 +82,12 @@ async function initializeAgent(config: ResolvedAgentConfig, sender?: WebContents
       const confirmationId = uuidv4();
       return new Promise<boolean>((resolve) => {
         pendingConfirmations.set(confirmationId, resolve);
-        sender.send('agent:ask-confirmation', { id: confirmationId, tool: toolName, args });
+        sender.send('agent:ask-confirmation', {
+          id: confirmationId,
+          tool: toolName,
+          args,
+          sessionId: options?.sessionId
+        });
       });
     },
     (log) => {
@@ -93,7 +97,7 @@ async function initializeAgent(config: ResolvedAgentConfig, sender?: WebContents
         result: log.result,
         error: log.error,
         policyTags: log.policyTags,
-        sessionId: getActiveSession()?.id
+        sessionId: log.sessionId
       });
     },
     () => PromptBuilder.buildSystemPrompt({
@@ -105,19 +109,19 @@ async function initializeAgent(config: ResolvedAgentConfig, sender?: WebContents
     })
   );
 
-  currentAgent.registerTool(ReadFileTool as unknown as ToolDefinition);
-  currentAgent.registerTool(WriteFileTool as unknown as ToolDefinition);
-  currentAgent.registerTool(ListDirectoryTool as unknown as ToolDefinition);
-  currentAgent.registerTool(DeleteFileTool as unknown as ToolDefinition);
-  currentAgent.registerTool(createExecuteCommandTool(workspace) as unknown as ToolDefinition);
-  currentAgent.registerTool(SystemInfoTool as unknown as ToolDefinition);
-  currentAgent.registerTool(WebSearchTool as unknown as ToolDefinition);
-  currentAgent.registerTool(FetchWebpageTool as unknown as ToolDefinition);
+  runtime.registerTool(ReadFileTool as unknown as ToolDefinition);
+  runtime.registerTool(WriteFileTool as unknown as ToolDefinition);
+  runtime.registerTool(ListDirectoryTool as unknown as ToolDefinition);
+  runtime.registerTool(DeleteFileTool as unknown as ToolDefinition);
+  runtime.registerTool(createExecuteCommandTool(workspace) as unknown as ToolDefinition);
+  runtime.registerTool(SystemInfoTool as unknown as ToolDefinition);
+  runtime.registerTool(WebSearchTool as unknown as ToolDefinition);
+  runtime.registerTool(FetchWebpageTool as unknown as ToolDefinition);
 
   try {
     const dynamicTools = await pluginManager.loadAllTools(agent.id);
     for (const tool of dynamicTools) {
-      currentAgent.registerTool(tool as unknown as ToolDefinition);
+      runtime.registerTool(tool as unknown as ToolDefinition);
       console.log(`[Agent] Registered dynamic tool: ${tool.name}`);
     }
   } catch (error) {
@@ -135,12 +139,15 @@ async function initializeAgent(config: ResolvedAgentConfig, sender?: WebContents
           return `[SKILL INSTRUCTIONS: ${skill.name}]\n\n${skill.content}`;
         }
       };
-      currentAgent.registerTool(skillTool as unknown as ToolDefinition);
+      runtime.registerTool(skillTool as unknown as ToolDefinition);
       console.log(`[Agent] Registered skill tool: ${skillTool.name} (Source: ${skill.source})`);
     }
   } catch (error) {
     console.error('Failed to load agent skills:', error);
   }
+
+  runtimeRegistry.set(agent.id, runtime);
+  return runtime;
 }
 
 async function resolveAgentConfig(configOrId: string | AgentConfig | ResolvedAgentConfig): Promise<ResolvedAgentConfig> {
@@ -162,13 +169,13 @@ async function resolveAgentConfig(configOrId: string | AgentConfig | ResolvedAge
   return { agent, model };
 }
 
-function getCurrentAgent() {
-  return currentAgent;
+function getAgentRuntime(agentId: string) {
+  return runtimeRegistry.get(agentId) || null;
 }
 
 export {
   pendingConfirmations,
   initializeAgent,
   resolveAgentConfig,
-  getCurrentAgent
+  getAgentRuntime
 };

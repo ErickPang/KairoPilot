@@ -118,6 +118,7 @@ export class OpenAIProvider implements LLMProvider {
       role: message.role || 'assistant',
       content: message.content || '',
       tool_calls: Array.isArray(message.tool_calls) ? message.tool_calls as unknown as Record<string, unknown>[] : undefined,
+      model: this.model,
       usage: response.usage ? {
         prompt_tokens: response.usage.prompt_tokens,
         completion_tokens: response.usage.completion_tokens,

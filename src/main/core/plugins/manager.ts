@@ -22,6 +22,23 @@ export interface InstalledPlugin extends PluginManifest {
 }
 
 const MOCK_STORE: PluginManifest[] = [];
+const PLUGIN_LOAD_TIMEOUT_MS = 1000;
+const PLUGIN_EXECUTE_TIMEOUT_MS = 30000;
+
+const PluginManifestSchema = z.object({
+  id: z.string().trim().min(1),
+  name: z.string().trim().min(1),
+  description: z.string().trim().min(1),
+  version: z.string().trim().min(1),
+  author: z.string().trim().min(1),
+  icon: z.string().trim().optional()
+});
+
+const InstalledPluginSchema = PluginManifestSchema.extend({
+  installedAt: z.number().finite().nonnegative(),
+  filePath: z.string().trim().min(1),
+  scope: z.string().trim().min(1)
+});
 
 // Real Plugin Code Fetcher placeholder
 const getPluginCode = async () => {
@@ -60,6 +77,77 @@ export class PluginManager {
     try {
       await fs.mkdir(this.pluginsDir, { recursive: true });
     } catch (e) { /* ignore */ }
+  }
+
+  private isSupportedScope(scope: string, agentId?: string): boolean {
+    if (scope === 'public') {
+      return true;
+    }
+    if (agentId && scope === `agent:${agentId}`) {
+      return true;
+    }
+    return !agentId && scope === 'workspace';
+  }
+
+  private resolvePluginCodePath(plugin: InstalledPlugin, stat: Awaited<ReturnType<typeof fs.stat>>) {
+    if (!stat.isDirectory()) {
+      return plugin.filePath;
+    }
+    return path.join(plugin.filePath, 'index.js');
+  }
+
+  private isZodSchema(value: unknown): value is z.ZodSchema {
+    return typeof value === 'object'
+      && value !== null
+      && 'safeParse' in value
+      && typeof (value as { safeParse?: unknown }).safeParse === 'function';
+  }
+
+  private normalizePluginTools(plugin: InstalledPlugin, tools: unknown): ToolDefinition[] {
+    if (!Array.isArray(tools)) {
+      return [];
+    }
+
+    const normalizedTools: ToolDefinition[] = [];
+    for (const tool of tools) {
+      if (typeof tool !== 'object' || tool === null) {
+        console.warn(`[PluginManager] Ignoring invalid tool export from plugin ${plugin.id}.`);
+        continue;
+      }
+
+      const candidate = tool as Partial<ToolDefinition>;
+      if (typeof candidate.name !== 'string' || candidate.name.trim().length === 0) {
+        console.warn(`[PluginManager] Ignoring unnamed tool from plugin ${plugin.id}.`);
+        continue;
+      }
+      if (typeof candidate.description !== 'string' || candidate.description.trim().length === 0) {
+        console.warn(`[PluginManager] Ignoring tool ${candidate.name} from plugin ${plugin.id}: missing description.`);
+        continue;
+      }
+      if (!this.isZodSchema(candidate.parameters)) {
+        console.warn(`[PluginManager] Ignoring tool ${candidate.name} from plugin ${plugin.id}: invalid parameters schema.`);
+        continue;
+      }
+      if (typeof candidate.execute !== 'function') {
+        console.warn(`[PluginManager] Ignoring tool ${candidate.name} from plugin ${plugin.id}: missing execute function.`);
+        continue;
+      }
+
+      normalizedTools.push({
+        name: candidate.name,
+        description: candidate.description,
+        parameters: candidate.parameters,
+        execute: async (args: Record<string, unknown>) => {
+          const execution = Promise.resolve(candidate.execute!(args));
+          const timeout = new Promise<never>((_, reject) => {
+            setTimeout(() => reject(new Error(`Plugin tool timed out after ${PLUGIN_EXECUTE_TIMEOUT_MS}ms.`)), PLUGIN_EXECUTE_TIMEOUT_MS);
+          });
+          return Promise.race([execution, timeout]);
+        }
+      });
+    }
+
+    return normalizedTools;
   }
 
   private getWorkspaceDir(scope: string): string {
@@ -185,16 +273,24 @@ export class PluginManager {
 
   async getInstalledPlugins(): Promise<InstalledPlugin[]> {
     await this.init();
-    const registryPlugins = getPluginRegistry() as InstalledPlugin[];
+    const registryPlugins = getPluginRegistry();
     const validPlugins: InstalledPlugin[] = [];
     let registryModified = false;
     try {
       for (const plugin of registryPlugins) {
+        const validation = InstalledPluginSchema.safeParse(plugin);
+        if (!validation.success) {
+          console.warn('[PluginManager] Removing invalid plugin registry entry.', validation.error.flatten());
+          registryModified = true;
+          continue;
+        }
+
+        const normalizedPlugin = validation.data;
         try {
-          await fs.access(plugin.filePath);
-          validPlugins.push(plugin);
+          await fs.access(normalizedPlugin.filePath);
+          validPlugins.push(normalizedPlugin);
         } catch {
-          console.warn(`[PluginManager] Plugin ${plugin.id} file not found at ${plugin.filePath}, removing from registry.`);
+          console.warn(`[PluginManager] Plugin ${normalizedPlugin.id} file not found at ${normalizedPlugin.filePath}, removing from registry.`);
           registryModified = true;
         }
       }
@@ -212,6 +308,10 @@ export class PluginManager {
     await this.init();
     const storePlugin = MOCK_STORE.find(p => p.id === id);
     if (!storePlugin) throw new Error('Plugin not found in store');
+    const manifestValidation = PluginManifestSchema.safeParse(storePlugin);
+    if (!manifestValidation.success) {
+      throw new Error('Invalid plugin manifest.');
+    }
 
     const installed = await this.getInstalledPlugins();
     // Allow installing the same plugin in different scopes
@@ -232,7 +332,7 @@ export class PluginManager {
     await fs.writeFile(filePath, code, 'utf-8');
 
     const newPlugin: InstalledPlugin = {
-      ...storePlugin,
+      ...manifestValidation.data,
       installedAt: Date.now(),
       filePath,
       scope
@@ -273,51 +373,42 @@ export class PluginManager {
   async loadAllTools(agentId?: string): Promise<ToolDefinition[]> {
     await this.init();
     const installed = await this.getInstalledPlugins();
-    
-    // Filter plugins based on scope
-    const pluginsToLoad = installed.filter(p => {
-      if (p.scope === 'public') return true;
-      if (agentId && p.scope === `agent:${agentId}`) return true;
-      // Fallback for legacy 'workspace' scope if we still want to support it
-      if (!agentId && p.scope === 'workspace') return true;
-      return false;
-    });
-
-    let allTools: ToolDefinition[] = [];
+    const pluginsToLoad = installed.filter((plugin) => this.isSupportedScope(plugin.scope, agentId));
+    const allTools: ToolDefinition[] = [];
+    const seenToolNames = new Set<string>();
 
     for (const plugin of pluginsToLoad) {
       try {
         const stat = await fs.stat(plugin.filePath);
-        let codePath = plugin.filePath;
-        
+        const codePath = this.resolvePluginCodePath(plugin, stat);
+
         if (stat.isDirectory()) {
-          // Check if index.js exists
-          const indexJsPath = path.join(plugin.filePath, 'index.js');
           try {
-            await fs.access(indexJsPath);
-            codePath = indexJsPath;
-          } catch (e) {
-            // It's a directory but no index.js (maybe a prompt-only skill with SKILL.md)
+            await fs.access(codePath);
+          } catch {
             console.log(`[PluginManager] Skill ${plugin.id} is a directory without index.js, skipping JS load.`);
             continue;
           }
         }
 
         const code = await fs.readFile(codePath, 'utf-8');
-        
-        // Setup secure context with injected kairo API
-        const sandbox = {
+        const sandbox = Object.freeze({
           module: { exports: { tools: [] } },
           console: console,
-          z: z // Inject zod so parameters can be defined
-        };
-        
-        vm.createContext(sandbox);
-        vm.runInContext(code, sandbox);
-        
-        const modTools = sandbox.module.exports.tools;
-        if (Array.isArray(modTools)) {
-          allTools = allTools.concat(modTools as ToolDefinition[]);
+          z: z
+        });
+        const context = vm.createContext(sandbox);
+        const script = new vm.Script(code, { filename: codePath });
+        script.runInContext(context, { timeout: PLUGIN_LOAD_TIMEOUT_MS });
+
+        const loadedTools = this.normalizePluginTools(plugin, sandbox.module.exports.tools);
+        for (const tool of loadedTools) {
+          if (seenToolNames.has(tool.name)) {
+            console.warn(`[PluginManager] Skipping duplicate tool name ${tool.name} from plugin ${plugin.id}.`);
+            continue;
+          }
+          seenToolNames.add(tool.name);
+          allTools.push(tool);
         }
       } catch (error) {
         console.error(`Failed to load plugin ${plugin.id}:`, error);

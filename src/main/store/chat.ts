@@ -5,6 +5,7 @@ import path from 'path';
 import { app } from 'electron';
 import fs from 'fs';
 import Store from 'electron-store'; // Only for migration
+import { getAgents } from './config';
 
 export interface Session {
   id: string;
@@ -15,7 +16,52 @@ export interface Session {
   updatedAt: number;
 }
 
+export interface SessionSummary {
+  id: string;
+  title: string;
+  agentId?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface TokenUsageDetailItem {
+  id: string;
+  sessionId: string;
+  sessionTitle: string;
+  agentId: string;
+  role: ChatMessage['role'];
+  content: string;
+  timestamp: number;
+  model: string;
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+}
+
+export interface TokenUsageDetailsResult {
+  items: TokenUsageDetailItem[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+  summary: {
+    agentId?: string;
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+  };
+}
+
 let db: Database.Database | null = null;
+const DEFAULT_AGENT_ID = 'mainAgent';
+
+function normalizeAgentId(agentId?: string | null) {
+  return agentId || DEFAULT_AGENT_ID;
+}
+
+function getActiveSessionStateKey(agentId?: string | null) {
+  return `active_session_id:${normalizeAgentId(agentId)}`;
+}
 
 // Initialize Database
 function getDb(): Database.Database {
@@ -65,11 +111,19 @@ function getDb(): Database.Database {
           ALTER TABLE messages ADD COLUMN usage TEXT;
         `);
       }
+
+      const hasModel = msgColumns.some(col => col.name === 'model');
+      if (!hasModel) {
+        db.exec(`
+          ALTER TABLE messages ADD COLUMN model TEXT;
+        `);
+      }
     } catch (error) {
       console.error('Failed to migrate messages table:', error);
     }
 
     migrateFromElectronStore(db);
+    migrateLegacyActiveSessionState(db);
   }
   return db;
 }
@@ -114,7 +168,7 @@ function migrateFromElectronStore(db: Database.Database) {
 
     if (oldSessions.length > 0) {
       const insertSession = db.prepare('INSERT INTO sessions (id, title, created_at, updated_at) VALUES (@id, @title, @createdAt, @updatedAt)');
-      const insertMessage = db.prepare('INSERT INTO messages (id, session_id, role, content, timestamp, name, tool_call_id, tool_calls, usage) VALUES (@id, @sessionId, @role, @content, @timestamp, @name, @toolCallId, @toolCalls, @usage)');
+      const insertMessage = db.prepare('INSERT INTO messages (id, session_id, role, content, timestamp, name, tool_call_id, tool_calls, usage, model) VALUES (@id, @sessionId, @role, @content, @timestamp, @name, @toolCallId, @toolCalls, @usage, @model)');
 
       const transaction = db.transaction(() => {
         for (const session of oldSessions) {
@@ -135,7 +189,8 @@ function migrateFromElectronStore(db: Database.Database) {
               name: msg.name || null,
               toolCallId: msg.tool_call_id || null,
               toolCalls: msg.tool_calls ? JSON.stringify(msg.tool_calls) : null,
-              usage: msg.usage ? JSON.stringify(msg.usage) : null
+              usage: msg.usage ? JSON.stringify(msg.usage) : null,
+              model: msg.model || null
             });
           }
         }
@@ -159,9 +214,106 @@ function migrateFromElectronStore(db: Database.Database) {
   }
 }
 
+function migrateLegacyActiveSessionState(db: Database.Database) {
+  try {
+    const legacyRow = db.prepare('SELECT value FROM app_state WHERE key = ?').get('active_session_id') as { value: string } | undefined;
+    if (!legacyRow?.value) {
+      return;
+    }
+
+    const scopedKey = getActiveSessionStateKey(DEFAULT_AGENT_ID);
+    const scopedRow = db.prepare('SELECT value FROM app_state WHERE key = ?').get(scopedKey) as { value: string } | undefined;
+    if (!scopedRow) {
+      db.prepare('INSERT OR REPLACE INTO app_state (key, value) VALUES (?, ?)').run(scopedKey, legacyRow.value);
+    }
+  } catch (error) {
+    console.error('[DB] Failed to migrate legacy active session state:', error);
+  }
+}
+
 // --- Public API ---
 
-export function getSessions(agentId?: string): Session[] {
+function mapMessageRowToChatMessage(message: {
+  role: ChatMessage['role'];
+  content: string;
+  timestamp: number;
+  name?: string;
+  tool_call_id?: string;
+  tool_calls?: string;
+  usage?: string;
+  model?: string;
+}): ChatMessage {
+  const chatMessage: ChatMessage = {
+    role: message.role,
+    content: message.content,
+    timestamp: message.timestamp
+  };
+
+  if (message.name) {
+    chatMessage.name = message.name;
+  }
+
+  if (message.tool_call_id) {
+    chatMessage.tool_call_id = message.tool_call_id;
+  }
+
+  if (message.tool_calls) {
+    try {
+      chatMessage.tool_calls = JSON.parse(message.tool_calls);
+    } catch (error) {
+      console.warn('[DB] Failed to parse tool_calls:', error);
+    }
+  }
+
+  if (message.usage) {
+    try {
+      chatMessage.usage = JSON.parse(message.usage);
+    } catch (error) {
+      console.warn('[DB] Failed to parse usage:', error);
+    }
+  }
+
+  if (message.model) {
+    chatMessage.model = message.model;
+  }
+
+  return chatMessage;
+}
+
+function parseUsage(value: string | null | undefined) {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    const usage = JSON.parse(value) as Partial<ChatMessage['usage']>;
+    return {
+      promptTokens: usage?.prompt_tokens || 0,
+      completionTokens: usage?.completion_tokens || 0,
+      totalTokens: usage?.total_tokens || 0
+    };
+  } catch {
+    return null;
+  }
+}
+
+function mapSessionRowToSummary(session: {
+  id: string;
+  title: string;
+  agent_id: string;
+  created_at: number;
+  updated_at: number;
+}): SessionSummary {
+  return {
+    id: session.id,
+    title: session.title,
+    agentId: session.agent_id,
+    createdAt: session.created_at,
+    updatedAt: session.updated_at
+  };
+}
+
+export function listSessions(agentId?: string): SessionSummary[] {
   const db = getDb();
   let query = 'SELECT id, title, agent_id, created_at, updated_at FROM sessions';
   const params: unknown[] = [];
@@ -173,50 +325,30 @@ export function getSessions(agentId?: string): Session[] {
   
   query += ' ORDER BY updated_at DESC';
   
-  const sessions = db.prepare(query).all(...params) as { id: string; title: string; agent_id: string; created_at: number; updated_at: number }[];
-  
-  return sessions.map(s => {
-    const messages = db.prepare('SELECT role, content, timestamp, name, tool_call_id, tool_calls, usage FROM messages WHERE session_id = ? ORDER BY timestamp ASC').all(s.id) as { role: ChatMessage['role']; content: string; timestamp: number; name?: string; tool_call_id?: string; tool_calls?: string; usage?: string }[];
-    return {
-      id: s.id,
-      title: s.title,
-      agentId: s.agent_id,
-      messages: messages.map(m => {
-        const msg: ChatMessage = {
-          role: m.role,
-          content: m.content,
-          timestamp: m.timestamp
-        };
-        if (m.name) msg.name = m.name;
-        if (m.tool_call_id) msg.tool_call_id = m.tool_call_id;
-        if (m.tool_calls) {
-          try {
-            msg.tool_calls = JSON.parse(m.tool_calls);
-          } catch (e) {
-            console.warn('[DB] Failed to parse tool_calls:', e);
-          }
-        }
-        if (m.usage) {
-          try {
-            msg.usage = JSON.parse(m.usage);
-          } catch (e) {
-            console.warn('[DB] Failed to parse usage:', e);
-          }
-        }
-        return msg;
-      }),
-      createdAt: s.created_at,
-      updatedAt: s.updated_at
-    };
-  });
+  const sessions = db.prepare(query).all(...params) as {
+    id: string;
+    title: string;
+    agent_id: string;
+    created_at: number;
+    updated_at: number;
+  }[];
+
+  return sessions.map(mapSessionRowToSummary);
+}
+
+export function getSessions(agentId?: string): Session[] {
+  return listSessions(agentId)
+    .map((session) => getSessionById(session.id))
+    .filter((session): session is Session => session !== null);
 }
 
 export function createSession(title: string = 'New Chat', agentId?: string): Session {
   const db = getDb();
+  const normalizedAgentId = normalizeAgentId(agentId);
   const newSession: Session = {
     id: uuidv4(),
     title,
-    agentId,
+    agentId: normalizedAgentId,
     messages: [],
     createdAt: Date.now(),
     updatedAt: Date.now(),
@@ -226,13 +358,13 @@ export function createSession(title: string = 'New Chat', agentId?: string): Ses
     newSession.id, newSession.title, newSession.agentId || null, newSession.createdAt, newSession.updatedAt
   );
   
-  setActiveSessionId(newSession.id);
+  setActiveSessionId(newSession.id, normalizedAgentId);
   return newSession;
 }
 
-export function getActiveSession(): Session | null {
+export function getActiveSession(agentId?: string): Session | null {
   const db = getDb();
-  const row = db.prepare('SELECT value FROM app_state WHERE key = ?').get('active_session_id') as { value: string } | undefined;
+  const row = db.prepare('SELECT value FROM app_state WHERE key = ?').get(getActiveSessionStateKey(agentId)) as { value: string } | undefined;
   if (!row) return null;
   
   return getSessionById(row.value);
@@ -243,46 +375,25 @@ export function getSessionById(sessionId: string): Session | null {
   const sessionRow = db.prepare('SELECT * FROM sessions WHERE id = ?').get(sessionId) as { id: string; title: string; agent_id: string; created_at: number; updated_at: number } | undefined;
   if (!sessionRow) return null;
 
-  const messages = db.prepare('SELECT role, content, timestamp, name, tool_call_id, tool_calls, usage FROM messages WHERE session_id = ? ORDER BY timestamp ASC').all(sessionId) as { role: ChatMessage['role']; content: string; timestamp: number; name?: string; tool_call_id?: string; tool_calls?: string; usage?: string }[];
+  const messages = db.prepare('SELECT role, content, timestamp, name, tool_call_id, tool_calls, usage, model FROM messages WHERE session_id = ? ORDER BY timestamp ASC').all(sessionId) as { role: ChatMessage['role']; content: string; timestamp: number; name?: string; tool_call_id?: string; tool_calls?: string; usage?: string; model?: string }[];
 
   return {
-    id: sessionRow.id,
-    title: sessionRow.title,
-    createdAt: sessionRow.created_at,
-    updatedAt: sessionRow.updated_at,
-    messages: messages.map(m => {
-      const msg: ChatMessage = {
-        role: m.role,
-        content: m.content,
-        timestamp: m.timestamp
-      };
-      if (m.name) msg.name = m.name;
-      if (m.tool_call_id) msg.tool_call_id = m.tool_call_id;
-      if (m.tool_calls) {
-        try {
-          msg.tool_calls = JSON.parse(m.tool_calls);
-        } catch (e) {
-          // Ignore parse errors
-        }
-      }
-      if (m.usage) {
-        try {
-          msg.usage = JSON.parse(m.usage);
-        } catch (e) {
-          // Ignore parse errors
-        }
-      }
-      return msg;
-    })
+    ...mapSessionRowToSummary(sessionRow),
+    messages: messages.map(mapMessageRowToChatMessage)
   };
 }
 
-export function setActiveSessionId(sessionId: string | null) {
+export function setActiveSessionId(sessionId: string | null, agentId?: string) {
   const db = getDb();
+  const resolvedAgentId = sessionId
+    ? getSessionById(sessionId)?.agentId || agentId
+    : agentId;
+  const stateKey = getActiveSessionStateKey(resolvedAgentId);
+
   if (sessionId) {
-    db.prepare('INSERT OR REPLACE INTO app_state (key, value) VALUES (?, ?)').run('active_session_id', sessionId);
+    db.prepare('INSERT OR REPLACE INTO app_state (key, value) VALUES (?, ?)').run(stateKey, sessionId);
   } else {
-    db.prepare('DELETE FROM app_state WHERE key = ?').run('active_session_id');
+    db.prepare('DELETE FROM app_state WHERE key = ?').run(stateKey);
   }
 }
 
@@ -300,7 +411,7 @@ export function updateSessionMessages(sessionId: string, messages: ChatMessage[]
     
     db.prepare('DELETE FROM messages WHERE session_id = ?').run(sessionId);
     
-    const insert = db.prepare('INSERT INTO messages (id, session_id, role, content, timestamp, name, tool_call_id, tool_calls, usage) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
+    const insert = db.prepare('INSERT INTO messages (id, session_id, role, content, timestamp, name, tool_call_id, tool_calls, usage, model) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
     for (const msg of messages) {
       insert.run(
         uuidv4(), 
@@ -311,7 +422,8 @@ export function updateSessionMessages(sessionId: string, messages: ChatMessage[]
         msg.name || null,
         msg.tool_call_id || null,
         msg.tool_calls ? JSON.stringify(msg.tool_calls) : null,
-        msg.usage ? JSON.stringify(msg.usage) : null
+        msg.usage ? JSON.stringify(msg.usage) : null,
+        msg.model || null
       );
     }
   });
@@ -327,17 +439,20 @@ export function updateSessionTitle(sessionId: string, title: string) {
 export function deleteSession(sessionId: string) {
   const db = getDb();
   const transaction = db.transaction(() => {
+    const sessionRow = db.prepare('SELECT agent_id FROM sessions WHERE id = ?').get(sessionId) as { agent_id: string | null } | undefined;
+    const sessionAgentId = normalizeAgentId(sessionRow?.agent_id);
+    const stateKey = getActiveSessionStateKey(sessionAgentId);
+
     // Cascade delete handles messages, but we need to check active session
     db.prepare('DELETE FROM sessions WHERE id = ?').run(sessionId);
     
-    const activeRow = db.prepare('SELECT value FROM app_state WHERE key = ?').get('active_session_id') as { value: string } | undefined;
+    const activeRow = db.prepare('SELECT value FROM app_state WHERE key = ?').get(stateKey) as { value: string } | undefined;
     if (activeRow && activeRow.value === sessionId) {
-      // Switch to another session or null
-      const nextSession = db.prepare('SELECT id FROM sessions ORDER BY updated_at DESC LIMIT 1').get() as { id: string } | undefined;
+      const nextSession = db.prepare('SELECT id FROM sessions WHERE agent_id = ? ORDER BY updated_at DESC LIMIT 1').get(sessionAgentId) as { id: string } | undefined;
       if (nextSession) {
-        db.prepare('UPDATE app_state SET value = ? WHERE key = ?').run(nextSession.id, 'active_session_id');
+        db.prepare('INSERT OR REPLACE INTO app_state (key, value) VALUES (?, ?)').run(stateKey, nextSession.id);
       } else {
-        db.prepare('DELETE FROM app_state WHERE key = ?').run('active_session_id');
+        db.prepare('DELETE FROM app_state WHERE key = ?').run(stateKey);
       }
     }
   });
@@ -349,6 +464,7 @@ export function clearAllSessions() {
   const db = getDb();
   const transaction = db.transaction(() => {
     db.prepare('DELETE FROM sessions').run(); // Cascade deletes messages
+    db.prepare("DELETE FROM app_state WHERE key LIKE 'active_session_id:%'").run();
     db.prepare('DELETE FROM app_state WHERE key = ?').run('active_session_id');
   });
   transaction();
@@ -367,11 +483,11 @@ export function getAgentStats(): AgentStats[] {
   const db = getDb();
   const sessions = db.prepare('SELECT id, agent_id FROM sessions').all() as {id: string, agent_id: string}[];
   const messages = db.prepare('SELECT session_id, role, usage FROM messages').all() as {session_id: string, role: string, usage: string | null}[];
-
   const statsMap = new Map<string, AgentStats>();
+  const sessionAgentMap = new Map(sessions.map(session => [session.id, session.agent_id || DEFAULT_AGENT_ID]));
 
   for (const session of sessions) {
-    const agentId = session.agent_id || 'mainAgent';
+    const agentId = session.agent_id || DEFAULT_AGENT_ID;
     if (!statsMap.has(agentId)) {
       statsMap.set(agentId, {
         agentId,
@@ -387,25 +503,145 @@ export function getAgentStats(): AgentStats[] {
   }
 
   for (const msg of messages) {
-    const session = sessions.find(s => s.id === msg.session_id);
-    if (session) {
-      const agentId = session.agent_id || 'mainAgent';
-      const stat = statsMap.get(agentId);
-      if (stat) {
-        stat.totalMessages += 1;
-        if (msg.usage) {
-          try {
-            const usage = JSON.parse(msg.usage);
-            stat.promptTokens += usage.prompt_tokens || 0;
-            stat.completionTokens += usage.completion_tokens || 0;
-            stat.totalTokens += usage.total_tokens || 0;
-          } catch (e) {
-            // ignore
-          }
-        }
-      }
+    const agentId = sessionAgentMap.get(msg.session_id);
+    if (!agentId) {
+      continue;
+    }
+
+    const stat = statsMap.get(agentId);
+    if (!stat) {
+      continue;
+    }
+
+    stat.totalMessages += 1;
+    const usage = parseUsage(msg.usage);
+    if (usage) {
+      stat.promptTokens += usage.promptTokens;
+      stat.completionTokens += usage.completionTokens;
+      stat.totalTokens += usage.totalTokens;
     }
   }
 
   return Array.from(statsMap.values());
+}
+
+export function getTokenUsageDetails(agentId?: string, page: number = 1, pageSize: number = 20): TokenUsageDetailsResult {
+  const db = getDb();
+  const normalizedPage = Number.isFinite(page) && page > 0 ? Math.floor(page) : 1;
+  const normalizedPageSize = Number.isFinite(pageSize) && pageSize > 0 ? Math.min(Math.floor(pageSize), 100) : 20;
+  const normalizedAgentId = agentId?.trim() || '';
+  const hasAgentFilter = normalizedAgentId.length > 0;
+  const totalRow = (hasAgentFilter
+    ? db.prepare(`
+      SELECT COUNT(*) as count
+      FROM messages
+      INNER JOIN sessions ON sessions.id = messages.session_id
+      WHERE messages.usage IS NOT NULL AND sessions.agent_id = ?
+    `).get(normalizedAgentId)
+    : db.prepare('SELECT COUNT(*) as count FROM messages WHERE usage IS NOT NULL').get()) as { count: number };
+  const total = totalRow?.count || 0;
+  const totalPages = total === 0 ? 1 : Math.ceil(total / normalizedPageSize);
+  const safePage = Math.min(normalizedPage, totalPages);
+  const offset = (safePage - 1) * normalizedPageSize;
+  const rows = (hasAgentFilter
+    ? db.prepare(`
+    SELECT
+      messages.id,
+      messages.session_id,
+      sessions.title AS session_title,
+      sessions.agent_id,
+      messages.role,
+      messages.content,
+      messages.timestamp,
+      messages.usage,
+      messages.model
+    FROM messages
+    INNER JOIN sessions ON sessions.id = messages.session_id
+    WHERE messages.usage IS NOT NULL AND sessions.agent_id = ?
+    ORDER BY messages.timestamp DESC
+    LIMIT ? OFFSET ?
+  `).all(normalizedAgentId, normalizedPageSize, offset)
+    : db.prepare(`
+    SELECT
+      messages.id,
+      messages.session_id,
+      sessions.title AS session_title,
+      sessions.agent_id,
+      messages.role,
+      messages.content,
+      messages.timestamp,
+      messages.usage,
+      messages.model
+    FROM messages
+    INNER JOIN sessions ON sessions.id = messages.session_id
+    WHERE messages.usage IS NOT NULL
+    ORDER BY messages.timestamp DESC
+    LIMIT ? OFFSET ?
+  `).all(normalizedPageSize, offset)) as Array<{
+    id: string;
+    session_id: string;
+    session_title: string;
+    agent_id: string | null;
+    role: ChatMessage['role'];
+    content: string;
+    timestamp: number;
+    usage: string;
+    model: string | null;
+  }>;
+  const agentModelMap = new Map(
+    getAgents().map((agent) => [agent.id, agent.model || ''])
+  );
+  const agentStats = getAgentStats();
+  const summary = hasAgentFilter
+    ? (agentStats.find((stat) => stat.agentId === normalizedAgentId) || {
+      agentId: normalizedAgentId,
+      promptTokens: 0,
+      completionTokens: 0,
+      totalTokens: 0
+    })
+    : agentStats.reduce((acc, stat) => ({
+      promptTokens: acc.promptTokens + stat.promptTokens,
+      completionTokens: acc.completionTokens + stat.completionTokens,
+      totalTokens: acc.totalTokens + stat.totalTokens
+    }), {
+      promptTokens: 0,
+      completionTokens: 0,
+      totalTokens: 0
+    });
+  const items = rows.flatMap((row) => {
+    const usage = parseUsage(row.usage);
+    if (!usage) {
+      return [];
+    }
+
+    const agentId = row.agent_id || DEFAULT_AGENT_ID;
+    const fallbackModel = agentModelMap.get(agentId) || '';
+    return [{
+      id: row.id,
+      sessionId: row.session_id,
+      sessionTitle: row.session_title,
+      agentId,
+      role: row.role,
+      content: row.content,
+      timestamp: row.timestamp,
+      model: row.model || fallbackModel || 'Unknown',
+      promptTokens: usage.promptTokens,
+      completionTokens: usage.completionTokens,
+      totalTokens: usage.totalTokens
+    }];
+  });
+
+  return {
+    items,
+    total,
+    page: safePage,
+    pageSize: normalizedPageSize,
+    totalPages,
+    summary: {
+      agentId: hasAgentFilter ? normalizedAgentId : undefined,
+      promptTokens: summary.promptTokens,
+      completionTokens: summary.completionTokens,
+      totalTokens: summary.totalTokens
+    }
+  };
 }

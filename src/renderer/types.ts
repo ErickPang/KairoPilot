@@ -87,9 +87,31 @@ export interface SystemStats {
 export interface Session {
   id: string;
   title: string;
+  agentId?: string;
   messages: Message[];
   createdAt: number;
   updatedAt: number;
+}
+
+export interface SessionSummary {
+  id: string;
+  title: string;
+  agentId?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ConfirmationRequest {
+  id: string;
+  tool: string;
+  args: Record<string, unknown>;
+  sessionId?: string;
+}
+
+export interface SessionContextState {
+  activeAgentId: string | null;
+  activeSessionId: string | null;
+  confirmationRequest: ConfirmationRequest | null;
 }
 
 export interface AuditLogEntry {

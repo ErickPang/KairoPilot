@@ -13,6 +13,8 @@ const zh: Record<TranslationKey, string> = {
   'common.error': '错误',
   'common.close': '关闭',
   'common.refresh': '刷新',
+  'common.previous': '上一页',
+  'common.next': '下一页',
 
   // Navigation
   'nav.chat': '聊天',
@@ -94,6 +96,21 @@ const zh: Record<TranslationKey, string> = {
   'dashboard.systemUptime': '系统运行时间',
   'dashboard.totalGb': '总计 {total} GB',
   'dashboard.hrs': '小时',
+  'dashboard.openTokenDetails': '查看消耗明细',
+  'dashboard.openAgentTokenDetails': '查看 {agent} 的消耗明细',
+  'dashboard.backToOverview': '返回监控面板',
+  'dashboard.tokenDetailsTitle': 'Tokens 消耗明细',
+  'dashboard.tokenDetailsSubtitle': '按消息、模型和会话查看详细消耗情况。',
+  'dashboard.agentTokenDetailsTitle': '{agent} 消耗明细',
+  'dashboard.agentTokenDetailsSubtitle': '查看 {agent} 的请求级 Tokens 消耗记录。',
+  'dashboard.tokenRecords': '消耗记录数',
+  'dashboard.time': '时间',
+  'dashboard.requestTime': '请求时间',
+  'dashboard.model': '模型',
+  'dashboard.role': '角色',
+  'dashboard.content': '内容摘要',
+  'dashboard.noTokenDetails': '暂无 Tokens 消耗明细',
+  'dashboard.pageInfo': '第 {page} / {totalPages} 页 · 共 {total} 条',
 
   // Audit Logs
   'audit.subtitle': '审查系统操作、工具执行和安全事件',

@@ -13,6 +13,8 @@ const en = {
   'common.error': 'Error',
   'common.close': 'Close',
   'common.refresh': 'Refresh',
+  'common.previous': 'Previous',
+  'common.next': 'Next',
 
   // Navigation
   'nav.chat': 'Chat',
@@ -94,6 +96,21 @@ const en = {
   'dashboard.systemUptime': 'System Uptime',
   'dashboard.totalGb': '{total} GB Total',
   'dashboard.hrs': 'hrs',
+  'dashboard.openTokenDetails': 'View token details',
+  'dashboard.openAgentTokenDetails': 'View token details for {agent}',
+  'dashboard.backToOverview': 'Back to dashboard',
+  'dashboard.tokenDetailsTitle': 'Token Usage Details',
+  'dashboard.tokenDetailsSubtitle': 'Review usage by message, model, and session.',
+  'dashboard.agentTokenDetailsTitle': '{agent} Token Usage Details',
+  'dashboard.agentTokenDetailsSubtitle': 'Review request-level token usage for {agent}.',
+  'dashboard.tokenRecords': 'Usage Records',
+  'dashboard.time': 'Time',
+  'dashboard.requestTime': 'Request Time',
+  'dashboard.model': 'Model',
+  'dashboard.role': 'Role',
+  'dashboard.content': 'Content',
+  'dashboard.noTokenDetails': 'No token usage details yet',
+  'dashboard.pageInfo': 'Page {page} / {totalPages} · {total} records',
 
   // Audit Logs
   'audit.subtitle': 'Review system operations, tool executions, and security events',

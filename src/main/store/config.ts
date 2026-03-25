@@ -2,6 +2,7 @@ import { app } from 'electron';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { getPromptWorkspaceLayout } from '../core/llm/prompt';
 
 export type ProviderType = 'openai' | 'ollama' | 'anthropic' | 'deepseek' | 'zhipu' | 'kimi' | 'qianwen' | 'custom';
 
@@ -97,20 +98,37 @@ const AGENT_FILE_NAMES = {
 function buildDefaultKairopilotTemplate(agent: Pick<AgentConfig, 'name' | 'workspace'>): string {
   const agentName = (agent.name || 'main').trim() || 'main';
   const workspacePath = (agent.workspace || '').trim() || '<workspace>';
+  const layout = getPromptWorkspaceLayout(workspacePath);
   return `# KAIROPILOT.md - Your Workspace
 ## 当前配置
 - Agent 名称：${agentName}
 - 工作区路径：${workspacePath}
+## Prompt 文件系统
+- prompts/: 可追加的工作区 Prompt 片段
+- memory/: 记忆笔记目录
+- skills/: 技能目录
+- tasks/: 任务与计划目录
+- artifacts/: 产物归档目录
+- images/: 图像输出目录
+- media/: 其他媒体与文件输出目录
 ## First Run
 若系统初始化时未创建\`IDENTITY.md\`、\`USER.md\`、\`SOUL.md\`文件，则需要在首次运行时创建。
 ## 每次会话
 在做其他任何事情之前：
 1. 阅读 SOUL.md —— 这定义了你是谁
 2. 阅读 USER.md —— 这定义了你正在帮助谁
+3. 阅读 prompts/ 与 memory/ 下与你当前任务相关的文件
 ## Skills
 技能提供了你的工具。当你需要一个时，检查它的SKILL.md。
 ## 打造你自己的风格
 这是一个起点。当你弄清楚什么有效时，添加你自己的约定、风格和规则。
+## 目录路径
+- prompts: ${layout.promptsDir}
+- memory: ${layout.memoryDir}
+- tasks: ${layout.tasksDir}
+- artifacts: ${layout.artifactsDir}
+- images: ${layout.imagesDir}
+- media: ${layout.mediaDir}
 `;
 }
 
@@ -383,8 +401,23 @@ function ensureAgentWorkspaceAndPrompt(agent: AgentConfig) {
     return;
   }
   try {
-    if (!fs.existsSync(agent.workspace)) {
-      fs.mkdirSync(agent.workspace, { recursive: true });
+    const layout = getPromptWorkspaceLayout(agent.workspace);
+    if (!fs.existsSync(layout.workspaceRoot)) {
+      fs.mkdirSync(layout.workspaceRoot, { recursive: true });
+    }
+    const workspaceDirectories = [
+      layout.promptsDir,
+      layout.memoryDir,
+      layout.skillsDir,
+      layout.tasksDir,
+      layout.artifactsDir,
+      layout.imagesDir,
+      layout.mediaDir
+    ];
+    for (const directoryPath of workspaceDirectories) {
+      if (!fs.existsSync(directoryPath)) {
+        fs.mkdirSync(directoryPath, { recursive: true });
+      }
     }
     ensureAgentPromptFields(agent);
     const promptFiles: Array<{ fileName: string; content: string }> = [
@@ -628,10 +661,8 @@ export function saveAgent(agent: AgentConfig) {
 
   if (nextAgent.workspace) {
     try {
-      if (!fs.existsSync(nextAgent.workspace)) {
-        fs.mkdirSync(nextAgent.workspace, { recursive: true });
-      }
       ensureAgentPromptFields(nextAgent);
+      ensureAgentWorkspaceAndPrompt(nextAgent);
       const promptFiles: Array<{ fileName: string; content: string }> = [
         { fileName: AGENT_FILE_NAMES.kairopilot, content: nextAgent.systemPrompt },
         { fileName: AGENT_FILE_NAMES.identity, content: nextAgent.identityPrompt },

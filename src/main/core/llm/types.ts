@@ -7,6 +7,7 @@ export interface ChatMessage {
   tool_call_id?: string; // Essential for OpenAI tool responses
   tool_calls?: Record<string, unknown>[]; // For function calling
   timestamp?: number;
+  model?: string;
   usage?: {
     prompt_tokens: number;
     completion_tokens: number;

@@ -1,10 +1,10 @@
 import { useState } from 'react';
-import { Session } from '../types';
+import { SessionSummary } from '../types';
 import { IconPlus, IconEdit, IconTrash } from './Icons';
 import { useTranslation } from '../hooks/useTranslation';
 
 interface SidebarProps {
-  sessions: Session[];
+  sessions: SessionSummary[];
   activeSessionId: string | null;
   handleCreateSession: () => void;
   handleSelectSession: (id: string) => void;
@@ -24,7 +24,7 @@ export function Sidebar({
   const [editTitle, setEditTitle] = useState('');
   const { t } = useTranslation();
 
-  const startEditing = (e: React.MouseEvent, session: Session) => {
+  const startEditing = (e: React.MouseEvent, session: SessionSummary) => {
     e.stopPropagation();
     setEditingId(session.id);
     setEditTitle(session.title);

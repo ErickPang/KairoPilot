@@ -49,9 +49,9 @@ export function PluginStorePanel() {
     setError(null);
     try {
       const [store, installed, fetchedAgents] = await Promise.all([
-        window.ipcRenderer.invoke('plugins:getStore'),
-        window.ipcRenderer.invoke('plugins:getInstalled'),
-        window.ipcRenderer.invoke('config:get-agents')
+        window.kairo.invoke('plugins:getStore'),
+        window.kairo.invoke('plugins:getInstalled'),
+        window.kairo.invoke('config:get-agents')
       ]);
       
       // Inject native tools as installed plugins
@@ -77,7 +77,7 @@ export function PluginStorePanel() {
   const handleInstall = async (id: string, scope: string = 'public') => {
     setActionInProgress(id);
     try {
-      const result = await window.ipcRenderer.invoke('plugins:install', { id, scope });
+      const result = await window.kairo.invoke('plugins:install', { id, scope });
       if (result.success) {
         await loadPlugins();
         setActiveTab('installed');
@@ -94,7 +94,7 @@ export function PluginStorePanel() {
   const handleUninstall = async (id: string, scope: string) => {
     setActionInProgress(`${id}-${scope}`);
     try {
-      const result = await window.ipcRenderer.invoke('plugins:uninstall', { id, scope });
+      const result = await window.kairo.invoke('plugins:uninstall', { id, scope });
       if (result.success) {
         await loadPlugins();
       } else {

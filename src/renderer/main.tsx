@@ -4,15 +4,16 @@ import App from './App.tsx'
 import './index.css'
 import { I18nProvider } from './components/layout/I18nProvider'
 
-// Mock ipcRenderer for browser preview
-if (!window.ipcRenderer) {
-  window.ipcRenderer = {
+// Mock bridge for browser preview
+if (!window.kairo) {
+  window.kairo = {
     invoke: (async (channel: string, ...args: unknown[]) => {
       console.log(`[Mock] invoke ${channel}`, args);
-      if (channel === 'config:get') return {};
+      if (channel === 'config:get-all') return { models: { providers: {} }, agents: { activeAgentId: 'mainAgent', list: [] }, plugins: { registry: [] }, skills: { registry: [] } };
+      if (channel === 'chat:listSessions') return [];
       if (channel === 'chat:getActiveSession') return null;
+      if (channel === 'chat:getSession') return null;
       if (channel === 'chat:clearAllSessions') return { success: true };
-      if (channel === 'system:selectDirectory') return '/mock/directory/path';
       if (channel === 'ollama:check') return { running: true, message: 'Mock Ollama' };
       if (channel === 'ollama:start') return { success: true };
       if (channel === 'ollama:pull') return { success: true };
@@ -32,23 +33,11 @@ if (!window.ipcRenderer) {
         uptime: 123
       };
       return null;
-    }) as CustomIpcRenderer['invoke'],
+    }) as KairoBridge['invoke'],
     on: (channel: string) => {
       console.log(`[Mock] on ${channel}`);
       return () => {};
     },
-    send: (channel: string, ...args: unknown[]) => {
-      console.log(`[Mock] send ${channel}`, args);
-    },
-    off: (channel: string) => {
-      console.log(`[Mock] off ${channel}`);
-    },
-    removeListener: (channel: string) => {
-      console.log(`[Mock] removeListener ${channel}`);
-    },
-    removeAllListeners: (channel: string) => {
-      console.log(`[Mock] removeAllListeners ${channel}`);
-    }
   };
 }
 
@@ -61,6 +50,6 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
 )
 
 // Use contextBridge
-window.ipcRenderer.on('main-process-message', (_event, message) => {
+window.kairo.on('main-process-message', (message) => {
   console.log(message)
 })

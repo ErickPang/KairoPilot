@@ -25,8 +25,8 @@ export function SkillStorePanel() {
     setError(null);
     try {
       const [fetchedSkills, fetchedAgents] = await Promise.all([
-        window.ipcRenderer.invoke('skills:getAll'),
-        window.ipcRenderer.invoke('config:get-agents')
+        window.kairo.invoke('skills:getAll'),
+        window.kairo.invoke('config:get-agents')
       ]);
       setSkills(fetchedSkills as Record<string, AgentSkill[]>);
       setAgents(fetchedAgents as AgentConfig[]);

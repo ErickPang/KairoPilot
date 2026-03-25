@@ -1,8 +1,8 @@
 import { ipcMain } from 'electron';
 import { getAuditLogs } from '../store/audit';
 import { getActiveAgentId, setActiveAgentId } from '../store/config';
-import { createSession, getActiveSession, getSessions, setActiveSessionId, updateSessionMessages } from '../store/chat';
-import { getCurrentAgent, initializeAgent, pendingConfirmations, resolveAgentConfig } from './agentRuntime';
+import { createSession, getActiveSession, getSessionById, listSessions, setActiveSessionId, updateSessionMessages } from '../store/chat';
+import { getAgentRuntime, initializeAgent, pendingConfirmations, resolveAgentConfig } from './agentRuntime';
 
 function registerAgentHandlers() {
   ipcMain.handle('agent:init', async (event, configOrId) => {
@@ -11,9 +11,9 @@ function registerAgentHandlers() {
 
       if (typeof configOrId === 'string') {
         setActiveAgentId(configOrId);
-        const agentSessions = getSessions(configOrId);
+        const agentSessions = listSessions(configOrId);
         if (agentSessions.length > 0) {
-          setActiveSessionId(agentSessions[0].id);
+          setActiveSessionId(agentSessions[0].id, configOrId);
         } else {
           createSession('New Chat', configOrId);
         }
@@ -44,18 +44,17 @@ function registerAgentHandlers() {
   });
 
   ipcMain.handle('agent:chat', async (event, message) => {
-    let agent = getCurrentAgent();
+    const activeAgentId = getActiveAgentId();
+    if (!activeAgentId) {
+      return { error: 'Agent not initialized. Please configure settings first.' };
+    }
+
+    let agent = getAgentRuntime(activeAgentId);
 
     if (!agent) {
       try {
-        const activeAgentId = getActiveAgentId();
-        if (activeAgentId) {
-          const config = await resolveAgentConfig(activeAgentId);
-          await initializeAgent(config, event.sender);
-          agent = getCurrentAgent();
-        } else {
-          return { error: 'Agent not initialized. Please configure settings first.' };
-        }
+        const config = await resolveAgentConfig(activeAgentId);
+        agent = await initializeAgent(config, event.sender);
       } catch {
         return { error: 'Agent not initialized. Please configure settings first.' };
       }
@@ -66,15 +65,25 @@ function registerAgentHandlers() {
     }
 
     try {
-      let session = getActiveSession();
+      let session = getActiveSession(activeAgentId);
+      if (!session || session.agentId !== activeAgentId) {
+        const existingSession = listSessions(activeAgentId)[0];
+        if (existingSession) {
+          setActiveSessionId(existingSession.id, activeAgentId);
+          session = getSessionById(existingSession.id);
+        } else {
+          session = createSession('New Chat', activeAgentId);
+        }
+      }
+
       if (!session) {
-        session = createSession();
+        return { error: 'Failed to resolve active session.' };
       }
 
       agent.setHistory(session.messages);
       const response = await agent.chat(message, (update) => {
         event.sender.send('agent:update', update);
-      });
+      }, { sessionId: session.id });
       updateSessionMessages(session.id, agent.getHistory());
       return { content: response };
     } catch (error) {
