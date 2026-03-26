@@ -7,6 +7,7 @@ import { AgentList } from './config/AgentList';
 import { ModelEditor } from './config/ModelEditor';
 import { AgentEditor } from './config/AgentEditor';
 import { GeneralSettings } from './config/GeneralSettings';
+import { KAIRO_INVOKE } from '../../shared/ipc';
 
 interface ConfigPanelProps {
   models: ModelConfig[];
@@ -25,25 +26,11 @@ interface ConfigPanelProps {
 const EmptyModelConfig: ModelConfig = {
   id: '',
   name: '',
-  provider: '',
+  provider: 'openai',
   baseUrl: '',
   apiKey: '',
   model: '',
   availableModels: []
-};
-
-const EmptyAgentConfig: AgentConfig = {
-  id: '',
-  name: 'New Agent',
-  workspace: '',
-  systemPrompt: 'You are a helpful AI assistant.',
-  identityPrompt: '',
-  userPrompt: '',
-  soulPrompt: '',
-  model: '',
-  allowedPaths: [],
-  allowedCommands: [],
-  enableShell: false
 };
 
 export function ConfigPanel({ 
@@ -107,14 +94,15 @@ export function ConfigPanel({
     setView('edit-agent');
   }, []);
 
-  const handleCreateAgent = useCallback(() => {
-    setEditingAgent({ 
-      ...EmptyAgentConfig, 
-      id: Math.random().toString(36).slice(2, 12),
-      model: models.length > 0
-        ? `${models[0].id}/${models[0].availableModels?.[0]?.id || models[0].model}`
-        : ''
+  const handleCreateAgent = useCallback(async () => {
+    const nextModel = models.length > 0
+      ? `${models[0].id}/${models[0].availableModels?.[0]?.id || models[0].model}`
+      : '';
+    const draft = await window.kairo.invoke(KAIRO_INVOKE.configCreateAgentDraft, {
+      model: nextModel,
+      name: 'New Agent'
     });
+    setEditingAgent(draft);
     setView('edit-agent');
   }, [models]);
 

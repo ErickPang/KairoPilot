@@ -2,6 +2,7 @@ import { useCallback, useMemo } from 'react';
 import { AgentConfig, KairoPilotConfig, ModelConfig, SessionContextState } from '../types';
 import { I18nContextValue } from '../components/layout/I18nContext';
 import { canInitAgentFromConfig } from './configUtils';
+import { KAIRO_INVOKE } from '../../shared/ipc';
 
 interface UseAgentConfigOptions {
   agents: AgentConfig[];
@@ -28,10 +29,10 @@ export function useAgentConfig(options: UseAgentConfigOptions) {
 
   const handleSaveAgent = useCallback(async (agent: AgentConfig) => {
     try {
-      await window.kairo.invoke('config:save-agent', agent);
+      await window.kairo.invoke(KAIRO_INVOKE.configSaveAgent, agent);
       const fullConfig = await refreshConfig();
       if (sessionContext.activeAgentId === agent.id && canInitAgentFromConfig(fullConfig, agent.id)) {
-        await window.kairo.invoke('agent:init', agent.id);
+        await window.kairo.invoke(KAIRO_INVOKE.agentInit, agent.id);
       }
     } catch (error) {
       console.error('Failed to save agent:', error);
@@ -44,14 +45,14 @@ export function useAgentConfig(options: UseAgentConfigOptions) {
     }
 
     try {
-      await window.kairo.invoke('config:delete-agent', id);
+      await window.kairo.invoke(KAIRO_INVOKE.configDeleteAgent, id);
       const fullConfig = await refreshConfig();
       if (sessionContext.activeAgentId === id) {
         updateSessionContext({
           activeAgentId: fullConfig.agents.activeAgentId || null
         });
         if (canInitAgentFromConfig(fullConfig, fullConfig.agents.activeAgentId)) {
-          await window.kairo.invoke('agent:init', fullConfig.agents.activeAgentId);
+          await window.kairo.invoke(KAIRO_INVOKE.agentInit, fullConfig.agents.activeAgentId);
         }
         await loadSessions();
         await loadActiveSession();
@@ -63,7 +64,7 @@ export function useAgentConfig(options: UseAgentConfigOptions) {
 
   const handleSetActiveAgent = useCallback(async (id: string) => {
     try {
-      await window.kairo.invoke('config:set-active-agent', id);
+      await window.kairo.invoke(KAIRO_INVOKE.configSetActiveAgent, id);
       updateSessionContext({
         activeAgentId: id,
         activeSessionId: null,
@@ -77,7 +78,7 @@ export function useAgentConfig(options: UseAgentConfigOptions) {
       const canInit = Boolean(agent?.model) && providerKeys.has(providerKey);
 
       if (canInit) {
-        const result = await window.kairo.invoke('agent:init', id) as { success: boolean; error?: string };
+        const result = await window.kairo.invoke(KAIRO_INVOKE.agentInit, id);
         if (!result.success) {
           alert(t('app.initAgentFailed', { error: result.error || 'Unknown' }));
           return;

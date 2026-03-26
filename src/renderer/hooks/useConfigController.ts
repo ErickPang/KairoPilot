@@ -8,6 +8,7 @@ import { I18nContextValue } from '../components/layout/I18nContext';
 import { canInitAgentFromConfig, toModelList } from './configUtils';
 import { useModelConfig } from './useModelConfig';
 import { useAgentConfig } from './useAgentConfig';
+import { KAIRO_INVOKE } from '../../shared/ipc';
 
 interface UseConfigControllerOptions {
   sessionContext: SessionContextState;
@@ -31,7 +32,7 @@ export function useConfigController(options: UseConfigControllerOptions) {
   }, [updateSessionContext]);
 
   const refreshConfig = useCallback(async () => {
-    const fullConfig = await window.kairo.invoke('config:get-all') as KairoPilotConfig;
+    const fullConfig = await window.kairo.invoke(KAIRO_INVOKE.configGetAll);
     applyConfigToState(fullConfig);
     return fullConfig;
   }, [applyConfigToState]);
@@ -39,7 +40,7 @@ export function useConfigController(options: UseConfigControllerOptions) {
   useEffect(() => {
     const loadConfig = async () => {
       try {
-        const fullConfig = await window.kairo.invoke('config:get-all') as KairoPilotConfig;
+        const fullConfig = await window.kairo.invoke(KAIRO_INVOKE.configGetAll);
         if (!fullConfig) {
           return;
         }
@@ -51,7 +52,7 @@ export function useConfigController(options: UseConfigControllerOptions) {
         }
 
         try {
-          const result = await window.kairo.invoke('agent:init', fullConfig.agents.activeAgentId) as { success: boolean; error?: string };
+          const result = await window.kairo.invoke(KAIRO_INVOKE.agentInit, fullConfig.agents.activeAgentId);
           if (result.success) {
             await loadSessions();
             await loadActiveSession();

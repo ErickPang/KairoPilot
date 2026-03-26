@@ -3,90 +3,27 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { getPromptWorkspaceLayout } from '../core/llm/prompt';
+import {
+  type AgentConfig,
+  type AgentPermissionConfig,
+  type KairoPilotConfig,
+  type LegacyAgentConfig,
+  type ModelConfig,
+  type PluginRegistryEntry,
+  type ProviderConfig,
+  type ProviderType,
+  createDefaultAgentPermissions
+} from '../../shared/contracts';
 
-export type ProviderType = 'openai' | 'ollama' | 'anthropic' | 'deepseek' | 'zhipu' | 'kimi' | 'qianwen' | 'custom';
-
-export interface ModelOption {
-  id: string;
-  name: string;
-}
-
-export interface ProviderConfig {
-  provider: ProviderType;
-  baseUrl: string;
-  apiKey: string;
-  model: ModelOption[];
-}
-
-export interface ModelConfig {
-  id: string;
-  name: string;
-  provider: ProviderType;
-  baseUrl: string;
-  apiKey: string;
-  model: string;
-  availableModels?: ModelOption[];
-}
-
-export interface AgentConfig {
-  id: string;
-  name: string;
-  workspace: string;
-  workspaceName?: string;
-  systemPrompt: string;
-  identityPrompt: string;
-  userPrompt: string;
-  soulPrompt: string;
-  model: string;
-  allowedPaths: string[];
-  allowedCommands: string[];
-  enableShell: boolean;
-}
-
-export interface PluginRegistryEntry {
-  id: string;
-  name: string;
-  description: string;
-  version: string;
-  author: string;
-  icon?: string;
-  installedAt: number;
-  filePath: string;
-  scope: string;
-}
-
-export interface SkillsRegistryEntry {
-  [key: string]: unknown;
-}
-
-export interface KairoPilotConfig {
-  version: string;
-  models: {
-    providers: Record<string, ProviderConfig>;
-  };
-  agents: {
-    activeAgentId: string;
-    list: AgentConfig[];
-  };
-  plugins: {
-    registry: PluginRegistryEntry[];
-  };
-  skills: {
-    registry: SkillsRegistryEntry[];
-  };
-}
-
-export interface LegacyAgentConfig {
-  provider: ProviderType;
-  apiKey: string;
-  baseUrl: string;
-  model: string;
-  workspace: string;
-  systemPrompt: string;
-  enableShell: boolean;
-  allowedPaths?: string[];
-  allowedCommands?: string[];
-}
+export type {
+  AgentConfig,
+  AgentPermissionConfig,
+  KairoPilotConfig,
+  LegacyAgentConfig,
+  ModelConfig,
+  PluginRegistryEntry,
+  ProviderConfig
+} from '../../shared/contracts';
 
 const AGENT_FILE_NAMES = {
   kairopilot: 'KAIROPILOT.md',
@@ -94,6 +31,19 @@ const AGENT_FILE_NAMES = {
   user: 'USER.md',
   soul: 'SOUL.md'
 } as const;
+
+function normalizeWorkspaceName(value: string) {
+  return value.toLowerCase().replace(/\s+/g, '-').replace(/[^a-zA-Z0-9_-]/g, '');
+}
+
+function buildAgentWorkspacePath(agentId: string, workspaceName?: string) {
+  if (agentId === 'mainAgent') {
+    return path.join(os.homedir(), '.kairopilot', 'workspace');
+  }
+  return workspaceName
+    ? path.join(os.homedir(), '.kairopilot', `workspace-${workspaceName}`)
+    : path.join(os.homedir(), '.kairopilot', 'workspace');
+}
 
 function buildDefaultKairopilotTemplate(agent: Pick<AgentConfig, 'name' | 'workspace'>): string {
   const agentName = (agent.name || 'main').trim() || 'main';
@@ -188,6 +138,79 @@ function buildDefaultSoulTemplate(): string {
 `;
 }
 
+function normalizePermissionList(values: unknown): string[] {
+  if (!Array.isArray(values)) {
+    return [];
+  }
+  return [...new Set(values
+    .filter((item): item is string => typeof item === 'string')
+    .map(item => item.trim())
+    .filter(Boolean))];
+}
+
+function normalizePermissionFlag(value: unknown): boolean | undefined {
+  return typeof value === 'boolean' ? value : undefined;
+}
+
+function normalizeAgentPermissions(seed?: Partial<AgentConfig> & {
+  permissions?: Partial<AgentPermissionConfig>;
+  allowedPaths?: string[];
+  allowedCommands?: string[];
+  allowedDomains?: string[];
+  enableShell?: boolean;
+  enableNetwork?: boolean;
+  enableFileSystemRead?: boolean;
+  enableFileSystemWrite?: boolean;
+}): AgentPermissionConfig {
+  const defaults = createDefaultAgentPermissions();
+  return {
+    fileSystem: {
+      read: normalizePermissionFlag(seed?.permissions?.fileSystem?.read)
+        ?? normalizePermissionFlag(seed?.enableFileSystemRead)
+        ?? defaults.fileSystem.read,
+      write: normalizePermissionFlag(seed?.permissions?.fileSystem?.write)
+        ?? normalizePermissionFlag(seed?.enableFileSystemWrite)
+        ?? defaults.fileSystem.write,
+      allowedPaths: normalizePermissionList(seed?.permissions?.fileSystem?.allowedPaths ?? seed?.allowedPaths)
+    },
+    network: {
+      enabled: normalizePermissionFlag(seed?.permissions?.network?.enabled)
+        ?? normalizePermissionFlag(seed?.enableNetwork)
+        ?? defaults.network.enabled,
+      allowedDomains: normalizePermissionList(seed?.permissions?.network?.allowedDomains ?? seed?.allowedDomains)
+    },
+    shell: {
+      enabled: normalizePermissionFlag(seed?.permissions?.shell?.enabled)
+        ?? normalizePermissionFlag(seed?.enableShell)
+        ?? defaults.shell.enabled,
+      allowedCommands: normalizePermissionList(seed?.permissions?.shell?.allowedCommands ?? seed?.allowedCommands)
+    }
+  };
+}
+
+export function createAgentDraft(seed?: Partial<AgentConfig>): AgentConfig {
+  const name = (seed?.name || 'New Agent').trim() || 'New Agent';
+  const id = (seed?.id || '').trim() || Math.random().toString(36).slice(2, 12);
+  const workspaceName = id === 'mainAgent'
+    ? undefined
+    : normalizeWorkspaceName(seed?.workspaceName ?? name);
+  const workspace = buildAgentWorkspacePath(id, workspaceName);
+  const draft: AgentConfig = {
+    id,
+    name,
+    workspace,
+    workspaceName,
+    systemPrompt: '',
+    identityPrompt: '',
+    userPrompt: '',
+    soulPrompt: '',
+    model: seed?.model || '',
+    permissions: normalizeAgentPermissions(seed)
+  };
+  ensureAgentPromptFields(draft);
+  return draft;
+}
+
 function ensureAgentPromptFields(agent: AgentConfig) {
   if (typeof agent.systemPrompt !== 'string' || agent.systemPrompt.trim().length === 0) {
     agent.systemPrompt = buildDefaultKairopilotTemplate(agent);
@@ -215,9 +238,7 @@ const DEFAULT_AGENT: AgentConfig = {
   userPrompt: buildDefaultUserTemplate(),
   soulPrompt: buildDefaultSoulTemplate(),
   model: '',
-  allowedPaths: [path.join(os.homedir(), '.kairopilot', 'workspace')],
-  allowedCommands: ['ls', 'cd', 'pwd', 'mkdir', 'rm', 'touch', 'cat', 'grep', 'echo', 'npm', 'node', 'git', 'python', 'python3', 'open', 'curl'],
-  enableShell: false
+  permissions: createDefaultAgentPermissions()
 };
 
 const DEFAULT_CONFIG: KairoPilotConfig = {
@@ -376,6 +397,7 @@ function normalizeConfig(rawConfig: unknown): KairoPilotConfig {
       ...DEFAULT_AGENT,
       ...rest,
       ...(isLegacyMainAgentName ? { name: 'main' } : {}),
+      permissions: normalizeAgentPermissions(rest),
       model: provider
         ? buildAgentModel(
           providerKey,
@@ -632,6 +654,37 @@ export function getAgent(id: string): AgentConfig | undefined {
   return getAgents().find(a => a.id === id);
 }
 
+export function deleteAgentWorkspace(agent: AgentConfig) {
+  const workspacePath = typeof agent.workspace === 'string' ? agent.workspace.trim() : '';
+  if (!workspacePath) {
+    return false;
+  }
+
+  const resolvedWorkspacePath = path.resolve(workspacePath);
+  const protectedPaths = new Set([
+    path.resolve(os.homedir()),
+    path.resolve(path.parse(resolvedWorkspacePath).root),
+    path.resolve(path.join(os.homedir(), '.kairopilot'))
+  ]);
+
+  if (protectedPaths.has(resolvedWorkspacePath)) {
+    return false;
+  }
+
+  const isSharedWithOtherAgents = getAgents().some((item) => (
+    item.id !== agent.id
+    && typeof item.workspace === 'string'
+    && item.workspace.trim().length > 0
+    && path.resolve(item.workspace) === resolvedWorkspacePath
+  ));
+  if (isSharedWithOtherAgents || !fs.existsSync(resolvedWorkspacePath)) {
+    return false;
+  }
+
+  fs.rmSync(resolvedWorkspacePath, { recursive: true, force: true });
+  return true;
+}
+
 export function saveAgent(agent: AgentConfig) {
   const config = getKairoPilotConfig();
   const nextAgent = { ...agent };
@@ -654,10 +707,9 @@ export function saveAgent(agent: AgentConfig) {
     nextAgent.workspace = path.join(os.homedir(), '.kairopilot', 'workspace');
     nextAgent.workspaceName = undefined;
   } else if (nextAgent.workspaceName !== undefined) {
-    nextAgent.workspace = nextAgent.workspaceName === ''
-      ? path.join(os.homedir(), '.kairopilot', 'workspace')
-      : path.join(os.homedir(), '.kairopilot', `workspace-${nextAgent.workspaceName}`);
+    nextAgent.workspace = buildAgentWorkspacePath(nextAgent.id, nextAgent.workspaceName);
   }
+  nextAgent.permissions = normalizeAgentPermissions(nextAgent);
 
   if (nextAgent.workspace) {
     try {
@@ -722,9 +774,13 @@ export function getAgentConfig(): LegacyAgentConfig {
     model: modelConfig?.model || 'gpt-4o',
     workspace: activeAgent?.workspace || '',
     systemPrompt: activeAgent?.systemPrompt || '',
-    enableShell: activeAgent?.enableShell || false,
-    allowedPaths: activeAgent?.allowedPaths || [],
-    allowedCommands: activeAgent?.allowedCommands || []
+    enableShell: activeAgent?.permissions.shell.enabled || false,
+    enableNetwork: activeAgent?.permissions.network.enabled || false,
+    enableFileSystemRead: activeAgent?.permissions.fileSystem.read || false,
+    enableFileSystemWrite: activeAgent?.permissions.fileSystem.write || false,
+    allowedPaths: activeAgent?.permissions.fileSystem.allowedPaths || [],
+    allowedDomains: activeAgent?.permissions.network.allowedDomains || [],
+    allowedCommands: activeAgent?.permissions.shell.allowedCommands || []
   };
 }
 
@@ -753,9 +809,17 @@ export function saveAgentConfig(legacyConfig: LegacyAgentConfig) {
       console.error(`Failed to write ${AGENT_FILE_NAMES.kairopilot} for agent ${agent.id}:`, e);
     }
   }
-  agent.enableShell = legacyConfig.enableShell;
-  agent.allowedPaths = legacyConfig.allowedPaths || agent.allowedPaths;
-  agent.allowedCommands = legacyConfig.allowedCommands || agent.allowedCommands;
+  agent.permissions = normalizeAgentPermissions({
+    ...agent,
+    permissions: legacyConfig.permissions,
+    enableShell: legacyConfig.enableShell,
+    enableNetwork: legacyConfig.enableNetwork,
+    enableFileSystemRead: legacyConfig.enableFileSystemRead,
+    enableFileSystemWrite: legacyConfig.enableFileSystemWrite,
+    allowedPaths: legacyConfig.allowedPaths,
+    allowedDomains: legacyConfig.allowedDomains,
+    allowedCommands: legacyConfig.allowedCommands
+  });
   agent.model = providerKey && provider ? buildAgentModel(providerKey, legacyConfig.model) : '';
 
   if (provider) {

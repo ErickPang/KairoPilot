@@ -21,7 +21,75 @@ export interface InstalledPlugin extends PluginManifest {
   scope: string; // 'public' or 'agent:{agentId}'
 }
 
-const MOCK_STORE: PluginManifest[] = [];
+interface BuiltInStorePlugin {
+  manifest: PluginManifest;
+  code: string;
+}
+
+const STORE_PLUGINS: BuiltInStorePlugin[] = [
+  {
+    manifest: {
+      id: 'kairo-weather-plugin',
+      name: 'Weather Forecaster',
+      description: 'Get weather summaries and simple travel hints for a city.',
+      version: '1.0.0',
+      author: 'KairoPilot',
+      icon: '🌤️'
+    },
+    code: `
+module.exports.tools = [
+  {
+    name: 'get_weather_forecast',
+    description: 'Get a lightweight weather summary for a city.',
+    parameters: z.object({
+      city: z.string().trim().min(1)
+    }),
+    execute: async ({ city }) => {
+      const normalizedCity = String(city).trim();
+      return {
+        city: normalizedCity,
+        condition: 'Sunny',
+        temperatureCelsius: 26,
+        humidity: 48,
+        summary: normalizedCity + ' is warm and clear today.',
+        recommendation: 'Good time for walking or light outdoor plans.'
+      };
+    }
+  }
+];
+`.trim()
+  },
+  {
+    manifest: {
+      id: 'kairo-crypto-plugin',
+      name: 'Crypto Tracker',
+      description: 'Get mock crypto asset snapshots for demos and local testing.',
+      version: '1.0.0',
+      author: 'KairoPilot',
+      icon: '₿'
+    },
+    code: `
+module.exports.tools = [
+  {
+    name: 'get_crypto_snapshot',
+    description: 'Get a lightweight market snapshot for a crypto symbol.',
+    parameters: z.object({
+      symbol: z.string().trim().min(1)
+    }),
+    execute: async ({ symbol }) => {
+      const normalizedSymbol = String(symbol).trim().toUpperCase();
+      return {
+        symbol: normalizedSymbol,
+        priceUsd: normalizedSymbol === 'BTC' ? 68250 : 3520,
+        change24h: normalizedSymbol === 'BTC' ? 2.4 : 1.1,
+        summary: normalizedSymbol + ' is showing moderate upward momentum in this demo feed.'
+      };
+    }
+  }
+];
+`.trim()
+  }
+];
 const PLUGIN_LOAD_TIMEOUT_MS = 1000;
 const PLUGIN_EXECUTE_TIMEOUT_MS = 30000;
 
@@ -40,9 +108,16 @@ const InstalledPluginSchema = PluginManifestSchema.extend({
   scope: z.string().trim().min(1)
 });
 
-// Real Plugin Code Fetcher placeholder
-const getPluginCode = async () => {
-  throw new Error('Plugin store API not implemented yet.');
+function getStorePluginById(id: string): BuiltInStorePlugin | undefined {
+  return STORE_PLUGINS.find((plugin) => plugin.manifest.id === id);
+}
+
+const getPluginCode = async (id: string) => {
+  const plugin = getStorePluginById(id);
+  if (!plugin) {
+    throw new Error(`Plugin ${id} not found in store.`);
+  }
+  return plugin.code;
 };
 
 export interface AgentSkill {
@@ -267,8 +342,7 @@ export class PluginManager {
   }
 
   async getStorePlugins(): Promise<PluginManifest[]> {
-    // Return empty store for now since API is not implemented
-    return MOCK_STORE;
+    return STORE_PLUGINS.map((plugin) => plugin.manifest);
   }
 
   async getInstalledPlugins(): Promise<InstalledPlugin[]> {
@@ -306,7 +380,7 @@ export class PluginManager {
 
   async installPlugin(id: string, scope: string = 'public'): Promise<boolean> {
     await this.init();
-    const storePlugin = MOCK_STORE.find(p => p.id === id);
+    const storePlugin = getStorePluginById(id)?.manifest;
     if (!storePlugin) throw new Error('Plugin not found in store');
     const manifestValidation = PluginManifestSchema.safeParse(storePlugin);
     if (!manifestValidation.success) {
@@ -318,7 +392,7 @@ export class PluginManager {
     if (installed.find(p => p.id === id && p.scope === scope)) return true;
 
     // "Download" code
-    const code = await getPluginCode();
+    const code = await getPluginCode(id);
     const targetDir = this.pluginsDir;
     
     // Ensure target directory exists
@@ -327,7 +401,7 @@ export class PluginManager {
     } catch (e) { /* ignore */ }
 
     // Differentiate filename if scope is agent specific, or just use ID since pluginsDir is flat
-    const safeScope = scope.replace(':', '_');
+    const safeScope = scope.replace(/[^a-zA-Z0-9_-]/g, '_');
     const filePath = path.join(targetDir, `${id}_${safeScope}.js`);
     await fs.writeFile(filePath, code, 'utf-8');
 
@@ -368,6 +442,19 @@ export class PluginManager {
     savePluginRegistry(registryPlugins);
 
     return true;
+  }
+
+  async cleanupAgentScopedPlugins(agentId: string): Promise<number> {
+    await this.init();
+    const scope = `agent:${agentId}`;
+    const installed = await this.getInstalledPlugins();
+    const scopedPlugins = installed.filter((plugin) => plugin.scope === scope);
+
+    for (const plugin of scopedPlugins) {
+      await this.uninstallPlugin(plugin.id, plugin.scope);
+    }
+
+    return scopedPlugins.length;
   }
 
   async loadAllTools(agentId?: string): Promise<ToolDefinition[]> {

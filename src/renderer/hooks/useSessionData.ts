@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Message, Session, SessionContextState, SessionSummary } from '../types';
+import { Message, SessionContextState, SessionSummary } from '../types';
+import { KAIRO_INVOKE } from '../../shared/ipc';
 
 export function useSessionData(updateSessionContext: (patch: Partial<SessionContextState>) => void) {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -8,7 +9,7 @@ export function useSessionData(updateSessionContext: (patch: Partial<SessionCont
 
   const loadSessions = useCallback(async () => {
     try {
-      const allSessions = await window.kairo.invoke('chat:listSessions') as SessionSummary[];
+      const allSessions = await window.kairo.invoke(KAIRO_INVOKE.chatListSessions);
       setSessions(allSessions);
     } catch (error) {
       console.error('Failed to load sessions:', error);
@@ -17,7 +18,7 @@ export function useSessionData(updateSessionContext: (patch: Partial<SessionCont
 
   const loadActiveSession = useCallback(async () => {
     try {
-      const session = await window.kairo.invoke('chat:getActiveSession') as Session | null;
+      const session = await window.kairo.invoke(KAIRO_INVOKE.chatGetActiveSession);
       if (session) {
         setMessages(session.messages);
         updateSessionContext({ activeSessionId: session.id });

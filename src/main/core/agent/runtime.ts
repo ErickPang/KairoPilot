@@ -1,5 +1,6 @@
 import { LLMProvider, ChatMessage, ToolDefinition } from '../llm/types';
 import { PermissionGuard } from '../security/permissions';
+import { normalizeExecuteCommandInput } from '../tools/shell';
 
 export class AgentRuntime {
   private llm: LLMProvider;
@@ -221,19 +222,18 @@ export class AgentRuntime {
     }
     
     if (toolName === 'execute_command') {
-        const cmd = args.command as string;
-        if (!this.permissionGuard.checkShellCommand(cmd)) {
-        throw new Error(`Permission Denied: Command '${args.command}' is not allowed.`);
+      const normalizedCommand = normalizeExecuteCommandInput(args);
+      args.command = normalizedCommand.command;
+      args.args = normalizedCommand.args;
+      if (!this.permissionGuard.checkShellCommand(normalizedCommand.command)) {
+        throw new Error(`Permission Denied: Command '${normalizedCommand.command}' is not allowed.`);
       }
     }
 
     if (toolName === 'web_search' || toolName === 'fetch_webpage') {
-      // By default, let's allow search if network is not strictly blocked, 
-      // or we can use checkNetwork if it's strictly enforced.
-      // We pass the URL or a dummy domain to check if network is enabled.
       const urlToCheck = (args.url || 'https://duckduckgo.com') as string;
       if (!this.permissionGuard.checkNetwork(urlToCheck)) {
-        throw new Error(`Permission Denied: Network access to ${urlToCheck} is not allowed.`);
+        throw new Error('Real-time web access is disabled for this agent. Enable network permission in Agent configuration before requesting latest or current information.');
       }
     }
 
@@ -252,19 +252,33 @@ export class AgentRuntime {
   }
 
   private repairToolArgs(toolName: string, args: Record<string, unknown>, context: ChatMessage[]): Record<string, unknown> {
+    if (toolName === 'execute_command') {
+      try {
+        const normalizedCommand = normalizeExecuteCommandInput(args);
+        return {
+          ...args,
+          command: normalizedCommand.command,
+          args: normalizedCommand.args
+        };
+      } catch {
+        return args;
+      }
+    }
+
     if (toolName !== 'web_search') {
       return args;
     }
-    if (typeof args.query === 'string' && args.query.trim().length > 0) {
-      return args;
-    }
     const latestUserQuery = this.getLatestUserQuery(context);
-    if (!latestUserQuery) {
+    const requestedQuery = typeof args.query === 'string' && args.query.trim().length > 0
+      ? args.query.trim()
+      : latestUserQuery;
+    if (!requestedQuery) {
       return args;
     }
+
     return {
       ...args,
-      query: latestUserQuery
+      query: this.buildSearchQuery(requestedQuery)
     };
   }
 
@@ -295,10 +309,61 @@ export class AgentRuntime {
     }
 
     if (toolName === 'execute_command' && typeof args.command === 'string') {
-      tags.push(`command:${(args.command as string).split(' ')[0]}`);
+      try {
+        const normalizedCommand = normalizeExecuteCommandInput(args);
+        tags.push(`command:${normalizedCommand.command}`);
+      } catch {
+        tags.push(`command:${args.command as string}`);
+      }
     }
 
     return tags;
+  }
+
+  private buildSearchQuery(query: string): string {
+    const normalizedQuery = query.trim();
+    if (!normalizedQuery) {
+      return query;
+    }
+
+    if (!this.isRecencyQuery(normalizedQuery)) {
+      return normalizedQuery;
+    }
+
+    const now = new Date();
+    const currentYear = String(now.getFullYear());
+    const currentMonth = String(now.getMonth() + 1).padStart(2, '0');
+    const currentDate = `${currentYear}-${currentMonth}-${String(now.getDate()).padStart(2, '0')}`;
+    const lowerCaseQuery = normalizedQuery.toLowerCase();
+    const hasExplicitYear = /\b20\d{2}\b/.test(normalizedQuery);
+    const hasExplicitIsoDate = /\b20\d{2}-\d{2}-\d{2}\b/.test(normalizedQuery);
+    const isChineseQuery = /[\u4e00-\u9fff]/.test(normalizedQuery);
+    const suffixTerms = new Set<string>();
+
+    if (!hasExplicitYear) {
+      suffixTerms.add(currentYear);
+    }
+    if (!hasExplicitIsoDate && (lowerCaseQuery.includes('today') || normalizedQuery.includes('今天'))) {
+      suffixTerms.add(currentDate);
+    }
+    if (isChineseQuery) {
+      suffixTerms.add('最新');
+      suffixTerms.add('当前');
+    } else {
+      suffixTerms.add('latest');
+      suffixTerms.add('current');
+    }
+
+    const suffix = Array.from(suffixTerms)
+      .filter(term => term && !normalizedQuery.toLowerCase().includes(term.toLowerCase()))
+      .join(' ');
+
+    return suffix ? `${normalizedQuery} ${suffix}` : normalizedQuery;
+  }
+
+  private isRecencyQuery(query: string): boolean {
+    const recencyPattern = /\b(latest|current|recent|today|this week|this month|this year|release notes|changelog|docs?|documentation|pricing|news|update)\b/i;
+    return recencyPattern.test(query) || /最新|当前|最近|今天|本周|本月|今年|文档|教程|发布说明|更新|新闻|价格|行情/.test(query);
   }
 
   private shouldBlockSensitiveDisclosure(userInput: string, assistantOutput: string): boolean {

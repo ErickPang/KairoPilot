@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { SystemStats } from '../types';
+import { KAIRO_INVOKE } from '../../shared/ipc';
 
 export function useSystemStats() {
   const [systemStats, setSystemStats] = useState<SystemStats | null>(null);
@@ -7,7 +8,7 @@ export function useSystemStats() {
   useEffect(() => {
     const interval = setInterval(async () => {
       try {
-        const stats = await window.kairo.invoke('system:stats') as SystemStats | null;
+        const stats = await window.kairo.invoke(KAIRO_INVOKE.systemStats);
         setSystemStats(stats);
       } catch {
         return;

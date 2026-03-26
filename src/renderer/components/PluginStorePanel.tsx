@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react';
 import { IconPlugin, IconTrash, IconRefresh } from './Icons';
 import './PluginStorePanel.css';
 import { useTranslation } from '../hooks/useTranslation';
-import { AgentConfig } from '../../main/store/config';
+import type { AgentConfig } from '../types';
+import { KAIRO_INVOKE } from '../../shared/ipc';
 
 interface PluginManifest {
   id: string;
@@ -49,9 +50,9 @@ export function PluginStorePanel() {
     setError(null);
     try {
       const [store, installed, fetchedAgents] = await Promise.all([
-        window.kairo.invoke('plugins:getStore'),
-        window.kairo.invoke('plugins:getInstalled'),
-        window.kairo.invoke('config:get-agents')
+        window.kairo.invoke(KAIRO_INVOKE.pluginsGetStore),
+        window.kairo.invoke(KAIRO_INVOKE.pluginsGetInstalled),
+        window.kairo.invoke(KAIRO_INVOKE.configGetAgents)
       ]);
       
       // Inject native tools as installed plugins
@@ -77,7 +78,7 @@ export function PluginStorePanel() {
   const handleInstall = async (id: string, scope: string = 'public') => {
     setActionInProgress(id);
     try {
-      const result = await window.kairo.invoke('plugins:install', { id, scope });
+      const result = await window.kairo.invoke(KAIRO_INVOKE.pluginsInstall, { id, scope });
       if (result.success) {
         await loadPlugins();
         setActiveTab('installed');
@@ -94,7 +95,7 @@ export function PluginStorePanel() {
   const handleUninstall = async (id: string, scope: string) => {
     setActionInProgress(`${id}-${scope}`);
     try {
-      const result = await window.kairo.invoke('plugins:uninstall', { id, scope });
+      const result = await window.kairo.invoke(KAIRO_INVOKE.pluginsUninstall, { id, scope });
       if (result.success) {
         await loadPlugins();
       } else {

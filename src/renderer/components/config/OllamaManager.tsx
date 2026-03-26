@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { FetchModelsResult, ModelConfig } from '../../types';
 import { IconCpu } from '../Icons';
 import { useTranslation } from '../../hooks/useTranslation';
+import { KAIRO_EVENT, KAIRO_INVOKE } from '../../../shared/ipc';
 
 interface OllamaManagerProps {
   editingModel: ModelConfig;
@@ -20,7 +21,7 @@ export function OllamaManager({ editingModel, onFetchModels }: OllamaManagerProp
   const checkOllamaStatus = async (baseUrl?: string) => {
     try {
       const url = (baseUrl || 'http://localhost:11434').replace('/v1', '');
-      const res = await window.kairo.invoke('ollama:check', url);
+      const res = await window.kairo.invoke(KAIRO_INVOKE.ollamaCheck, url);
       setOllamaStatus(res);
     } catch (error) {
       setOllamaStatus({ running: false, error: 'Failed to check status' });
@@ -36,8 +37,7 @@ export function OllamaManager({ editingModel, onFetchModels }: OllamaManagerProp
   }, [editingModel?.provider, editingModel?.baseUrl]);
 
   useEffect(() => {
-    const removeListener = window.kairo.on('ollama:pull-progress', (...args: unknown[]) => {
-      const data = args[0] as { status: string; completed?: number; total?: number };
+    const removeListener = window.kairo.on(KAIRO_EVENT.ollamaPullProgress, (data) => {
       setPullProgress(data);
     });
     return () => removeListener();
@@ -50,7 +50,7 @@ export function OllamaManager({ editingModel, onFetchModels }: OllamaManagerProp
     
     try {
       const url = editingModel.baseUrl.replace('/v1', '');
-      const res = await window.kairo.invoke('ollama:pull', { baseUrl: url, modelName: modelToPull });
+      const res = await window.kairo.invoke(KAIRO_INVOKE.ollamaPull, { baseUrl: url, modelName: modelToPull });
       
       if (res.success) {
         setPullProgress({ status: 'Success! Model pulled.' });
@@ -72,7 +72,7 @@ export function OllamaManager({ editingModel, onFetchModels }: OllamaManagerProp
   const handleStartOllama = async () => {
     setIsStartingOllama(true);
     try {
-      const res = await window.kairo.invoke('ollama:start');
+      const res = await window.kairo.invoke(KAIRO_INVOKE.ollamaStart);
       if (res.success) {
         setTimeout(() => {
           checkOllamaStatus(editingModel?.baseUrl);

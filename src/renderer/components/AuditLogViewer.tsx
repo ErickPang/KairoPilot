@@ -4,6 +4,7 @@ import { IconRefresh, IconShield, IconTool, IconCheck, IconX } from './Icons';
 import { Select } from './Select';
 import { useTranslation } from '../hooks/useTranslation';
 import './AuditLogViewer.css';
+import { KAIRO_INVOKE } from '../../shared/ipc';
 
 export default function AuditLogViewer() {
   const [logs, setLogs] = useState<AuditLogEntry[]>([]);
@@ -21,8 +22,8 @@ export default function AuditLogViewer() {
   const loadLogs = async () => {
     setLoading(true);
     try {
-      const data = await window.kairo.invoke('audit:get', 100);
-      setLogs(data as AuditLogEntry[]);
+      const data = await window.kairo.invoke(KAIRO_INVOKE.auditGet, 100);
+      setLogs(data);
     } catch (error) {
       console.error('Failed to load audit logs:', error);
     } finally {

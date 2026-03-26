@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react';
 import { FetchModelsResult, ModelConfig } from '../types';
 import { I18nContextValue } from '../components/layout/I18nContext';
+import { KAIRO_INVOKE } from '../../shared/ipc';
 
 interface UseModelConfigOptions {
   refreshConfig: () => Promise<void>;
@@ -13,7 +14,7 @@ export function useModelConfig(options: UseModelConfigOptions) {
 
   const fetchModels = useCallback(async (config: ModelConfig): Promise<FetchModelsResult> => {
     try {
-      const modelList = await window.kairo.invoke('llm:listModels', config) as string[];
+      const modelList = await window.kairo.invoke(KAIRO_INVOKE.llmListModels, config);
       const normalizedList = Array.isArray(modelList) ? modelList : [];
       setAvailableModels(normalizedList);
       if (normalizedList.length > 0) {
@@ -28,7 +29,7 @@ export function useModelConfig(options: UseModelConfigOptions) {
 
   const handleSaveModel = useCallback(async (model: ModelConfig) => {
     try {
-      await window.kairo.invoke('config:save-model', model);
+      await window.kairo.invoke(KAIRO_INVOKE.configSaveModel, model);
       await refreshConfig();
     } catch (error) {
       console.error('Failed to save model:', error);
@@ -41,7 +42,7 @@ export function useModelConfig(options: UseModelConfigOptions) {
     }
 
     try {
-      await window.kairo.invoke('config:delete-model', id);
+      await window.kairo.invoke(KAIRO_INVOKE.configDeleteModel, id);
       await refreshConfig();
     } catch (error) {
       console.error('Failed to delete model:', error);

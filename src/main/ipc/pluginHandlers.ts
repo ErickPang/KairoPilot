@@ -1,17 +1,18 @@
 import { ipcMain } from 'electron';
 import { getAgents } from '../store/config';
 import { pluginManager, AgentSkill } from '../core/plugins/manager';
+import { KAIRO_INVOKE } from '../../shared/ipc';
 
 function registerPluginHandlers() {
-  ipcMain.handle('plugins:getStore', async () => {
+  ipcMain.handle(KAIRO_INVOKE.pluginsGetStore, async () => {
     return pluginManager.getStorePlugins();
   });
 
-  ipcMain.handle('plugins:getInstalled', async () => {
+  ipcMain.handle(KAIRO_INVOKE.pluginsGetInstalled, async () => {
     return pluginManager.getInstalledPlugins();
   });
 
-  ipcMain.handle('skills:getAll', async () => {
+  ipcMain.handle(KAIRO_INVOKE.skillsGetAll, async () => {
     const agents = getAgents();
     const result: Record<string, AgentSkill[]> = {};
     const mainSkills = await pluginManager.getMergedSkillsForAgent('mainAgent');
@@ -23,7 +24,7 @@ function registerPluginHandlers() {
     return result;
   });
 
-  ipcMain.handle('plugins:install', async (_, args) => {
+  ipcMain.handle(KAIRO_INVOKE.pluginsInstall, async (_, args) => {
     try {
       const id = typeof args === 'string' ? args : args.id;
       const scope = typeof args === 'string' ? 'public' : (args.scope || 'public');
@@ -34,7 +35,7 @@ function registerPluginHandlers() {
     }
   });
 
-  ipcMain.handle('plugins:uninstall', async (_, args) => {
+  ipcMain.handle(KAIRO_INVOKE.pluginsUninstall, async (_, args) => {
     try {
       const id = typeof args === 'string' ? args : args.id;
       const scope = typeof args === 'string' ? 'public' : (args.scope || 'public');

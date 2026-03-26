@@ -2,7 +2,8 @@ import { useState, useEffect, type ReactNode } from 'react';
 import { IconRefresh, IconSkill } from './Icons';
 import './PluginStorePanel.css'; // Reusing plugin styles for now
 import { useTranslation } from '../hooks/useTranslation';
-import { AgentConfig } from '../../main/store/config';
+import type { AgentConfig } from '../types';
+import { KAIRO_INVOKE } from '../../shared/ipc';
 
 interface AgentSkill {
   id: string;
@@ -25,11 +26,11 @@ export function SkillStorePanel() {
     setError(null);
     try {
       const [fetchedSkills, fetchedAgents] = await Promise.all([
-        window.kairo.invoke('skills:getAll'),
-        window.kairo.invoke('config:get-agents')
+        window.kairo.invoke(KAIRO_INVOKE.skillsGetAll),
+        window.kairo.invoke(KAIRO_INVOKE.configGetAgents)
       ]);
       setSkills(fetchedSkills as Record<string, AgentSkill[]>);
-      setAgents(fetchedAgents as AgentConfig[]);
+      setAgents(fetchedAgents);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to fetch skills');
     } finally {

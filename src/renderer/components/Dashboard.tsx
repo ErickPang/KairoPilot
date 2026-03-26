@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { AgentConfig, SystemStats } from '../types';
 import { IconDashboard, IconBot, IconChat, IconCpu, IconArrowLeft, IconRefresh } from './Icons';
 import { useTranslation } from '../hooks/useTranslation';
+import { KAIRO_INVOKE } from '../../shared/ipc';
 
 interface AgentStats {
   agentId: string;
@@ -70,7 +71,7 @@ export function Dashboard({ agents, systemStats }: DashboardProps) {
   useEffect(() => {
     const fetchStats = async () => {
       try {
-        const data = await window.kairo.invoke('chat:getAgentStats') as AgentStats[];
+        const data = await window.kairo.invoke(KAIRO_INVOKE.chatGetAgentStats);
         setStats(data);
       } catch (error) {
         console.error('Failed to fetch agent stats:', error);
@@ -101,11 +102,11 @@ export function Dashboard({ agents, systemStats }: DashboardProps) {
     const fetchTokenDetails = async () => {
       try {
         setDetailLoading(true);
-        const data = await window.kairo.invoke('chat:getTokenUsageDetails', {
+        const data = await window.kairo.invoke(KAIRO_INVOKE.chatGetTokenUsageDetails, {
           agentId: selectedAgentId,
           page: detailPage,
           pageSize: TOKEN_DETAIL_PAGE_SIZE
-        }) as TokenUsageDetailsResult;
+        });
         setTokenDetails(data);
       } catch (error) {
         console.error('Failed to fetch token usage details:', error);
@@ -134,11 +135,11 @@ export function Dashboard({ agents, systemStats }: DashboardProps) {
 
     try {
       setDetailLoading(true);
-      const data = await window.kairo.invoke('chat:getTokenUsageDetails', {
+      const data = await window.kairo.invoke(KAIRO_INVOKE.chatGetTokenUsageDetails, {
         agentId: selectedAgentId,
         page: detailPage,
         pageSize: TOKEN_DETAIL_PAGE_SIZE
-      }) as TokenUsageDetailsResult;
+      });
       setTokenDetails(data);
     } catch (error) {
       console.error('Failed to refresh token usage details:', error);

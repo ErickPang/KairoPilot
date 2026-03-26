@@ -8,21 +8,54 @@ function isPathInsideRoot(filePath: string, rootPath: string) {
   return relativePath === '' || (!relativePath.startsWith('..') && !path.isAbsolute(relativePath));
 }
 
+function resolvePathForContainment(targetPath: string) {
+  const absolutePath = path.resolve(targetPath);
+  const missingSegments: string[] = [];
+  let currentPath = absolutePath;
+
+  while (!fs.existsSync(currentPath)) {
+    const parentPath = path.dirname(currentPath);
+    if (parentPath === currentPath) {
+      break;
+    }
+
+    missingSegments.unshift(path.basename(currentPath));
+    currentPath = parentPath;
+  }
+
+  try {
+    if (fs.existsSync(currentPath)) {
+      const resolvedExistingPath = fs.realpathSync(currentPath);
+      return missingSegments.length > 0
+        ? path.join(resolvedExistingPath, ...missingSegments)
+        : resolvedExistingPath;
+    }
+  } catch {
+    return absolutePath;
+  }
+
+  return absolutePath;
+}
+
 export function resolveKairopilotFilePath(requestUrl: string, allowedProtocolRoots: string[]) {
   const rawPath = requestUrl.slice('kairopilot://'.length);
   const decodedPath = decodeURIComponent(rawPath);
-  const normalizedPath = path.resolve(decodedPath);
-
-  if (!allowedProtocolRoots.some((root) => isPathInsideRoot(normalizedPath, root))) {
-    return null;
-  }
+  const normalizedPath = resolvePathForContainment(decodedPath);
 
   try {
     const stats = fs.statSync(normalizedPath);
     if (!stats.isFile()) {
       return null;
     }
-    return normalizedPath;
+
+    const realFilePath = fs.realpathSync(normalizedPath);
+    const normalizedRoots = allowedProtocolRoots.map((root) => resolvePathForContainment(root));
+
+    if (!normalizedRoots.some((root) => isPathInsideRoot(realFilePath, root))) {
+      return null;
+    }
+
+    return realFilePath;
   } catch {
     return null;
   }

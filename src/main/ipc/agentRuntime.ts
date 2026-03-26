@@ -14,6 +14,7 @@ import { WebSearchTool, FetchWebpageTool } from '../core/tools/web';
 import { addAuditLog } from '../store/audit';
 import { AgentConfig, ModelConfig, getAgent, getModelForAgent } from '../store/config';
 import { pluginManager } from '../core/plugins/manager';
+import { DEFAULT_SHELL_COMMANDS } from '../../shared/contracts';
 
 const runtimeRegistry = new Map<string, AgentRuntime>();
 const pendingConfirmations = new Map<string, (approved: boolean) => void>();
@@ -26,30 +27,30 @@ interface ResolvedAgentConfig {
 async function initializeAgent(config: ResolvedAgentConfig, sender?: WebContents) {
   const { agent, model } = config;
   const workspace = agent.workspace ? path.resolve(agent.workspace) : process.cwd();
-  const userAllowedPaths = Array.isArray(agent.allowedPaths)
-    ? agent.allowedPaths.filter((p: string) => p && p.trim().length > 0).map((p: string) => path.resolve(p))
+  const userAllowedPaths = Array.isArray(agent.permissions.fileSystem.allowedPaths)
+    ? agent.permissions.fileSystem.allowedPaths.filter((p: string) => p && p.trim().length > 0).map((p: string) => path.resolve(p))
     : [];
   const allowedPaths = [...new Set([workspace, ...userAllowedPaths])];
-  const defaultCommands = ['ls', 'cd', 'pwd', 'mkdir', 'rm', 'touch', 'cat', 'grep', 'echo', 'npm', 'node', 'git', 'python', 'python3', 'open', 'curl'];
-  const hasConfiguredCommands = Array.isArray(agent.allowedCommands);
-  const userAllowedCommands = Array.isArray(agent.allowedCommands)
-    ? agent.allowedCommands.filter((c: string) => c && c.trim().length > 0)
+  const allowedCommands = Array.isArray(agent.permissions.shell.allowedCommands)
+    ? agent.permissions.shell.allowedCommands.filter((c: string) => c && c.trim().length > 0)
+    : [...DEFAULT_SHELL_COMMANDS];
+  const allowedDomains = Array.isArray(agent.permissions.network.allowedDomains)
+    ? agent.permissions.network.allowedDomains.filter((domain: string) => domain && domain.trim().length > 0)
     : [];
-  const allowedCommands = hasConfiguredCommands ? userAllowedCommands : defaultCommands;
 
   const permissions = new PermissionGuard({
     fileSystem: {
-      read: true,
-      write: true,
+      read: agent.permissions.fileSystem.read,
+      write: agent.permissions.fileSystem.write,
       allowedPaths
     },
     network: {
-      enabled: true,
-      allowedDomains: []
+      enabled: agent.permissions.network.enabled,
+      allowedDomains
     },
     shell: {
-      enabled: agent.enableShell || false,
-      allowedCommands: agent.enableShell ? allowedCommands : []
+      enabled: agent.permissions.shell.enabled,
+      allowedCommands: agent.permissions.shell.enabled ? allowedCommands : []
     }
   });
 
@@ -173,9 +174,14 @@ function getAgentRuntime(agentId: string) {
   return runtimeRegistry.get(agentId) || null;
 }
 
+function removeAgentRuntime(agentId: string) {
+  runtimeRegistry.delete(agentId);
+}
+
 export {
   pendingConfirmations,
   initializeAgent,
   resolveAgentConfig,
-  getAgentRuntime
+  getAgentRuntime,
+  removeAgentRuntime
 };
