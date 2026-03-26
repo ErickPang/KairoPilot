@@ -111,6 +111,14 @@ const zh: Record<TranslationKey, string> = {
   'dashboard.content': '内容摘要',
   'dashboard.noTokenDetails': '暂无 Tokens 消耗明细',
   'dashboard.pageInfo': '第 {page} / {totalPages} 页 · 共 {total} 条',
+  'dashboard.searchPlaceholder': '按模型、内容、会话或 Agent 搜索...',
+  'dashboard.clearFilters': '清空筛选',
+  'dashboard.modelAll': '全部模型',
+  'dashboard.roleAll': '全部角色',
+  'dashboard.topModels': '模型聚合',
+  'dashboard.topRoles': '角色聚合',
+  'dashboard.noAggregationData': '当前条件下暂无聚合数据',
+  'dashboard.tokenFacetMeta': '{count} 条 · 提示 {prompt} · 补全 {completion}',
 
   // Audit Logs
   'audit.subtitle': '审查系统操作、工具执行和安全事件',
@@ -131,6 +139,8 @@ const zh: Record<TranslationKey, string> = {
   'audit.filteredCount': '显示 {shown} / {total}',
   'audit.noFilteredLogs': '当前筛选条件下没有日志。',
   'audit.policyTags': '策略标签',
+  'audit.totalLogs': '日志总数',
+  'audit.pageInfo': '第 {page} / {totalPages} 页 · 共 {total} 条',
 
   // Modal
   'modal.highRisk': '高危操作警告 (High Risk)',

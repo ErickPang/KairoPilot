@@ -73,10 +73,7 @@ function registerChatHandlers() {
   });
 
   ipcMain.handle(KAIRO_INVOKE.chatGetTokenUsageDetails, async (_, params) => {
-    const agentId = typeof params?.agentId === 'string' ? params.agentId : undefined;
-    const page = typeof params?.page === 'number' ? params.page : 1;
-    const pageSize = typeof params?.pageSize === 'number' ? params.pageSize : 20;
-    return getTokenUsageDetails(agentId, page, pageSize);
+    return getTokenUsageDetails(typeof params === 'object' && params ? params : {});
   });
 }
 

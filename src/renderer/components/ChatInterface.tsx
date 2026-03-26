@@ -4,6 +4,7 @@ import remarkGfm from 'remark-gfm';
 import { Message, SystemStats, ModelConfig } from '../types';
 import { IconUser, IconBot, IconTool, IconSend, IconTrash, IconCpu, IconChevronDown, IconCheck } from './Icons';
 import { useTranslation } from '../hooks/useTranslation';
+import type { I18nContextValue } from './layout/I18nContext';
 
 interface ChatInterfaceProps {
   messages: Message[];
@@ -19,6 +20,135 @@ interface ChatInterfaceProps {
   activeAgentName: string;
   onModelChange: (modelId: string) => void;
 }
+
+type MessageGroup = {
+  type: 'user' | 'final_answer' | 'process';
+  messages: Message[];
+};
+
+interface ChatMessagesPanelProps {
+  groupedMessages: MessageGroup[];
+  loading: boolean;
+  markdownComponents: React.ComponentProps<typeof ReactMarkdown>['components'];
+  messages: Message[];
+  messagesEndRef: React.RefObject<HTMLDivElement>;
+  t: I18nContextValue['t'];
+  toRenderableMarkdown: (content?: string) => string;
+}
+
+const MARKDOWN_REMARK_PLUGINS = [remarkGfm];
+
+const ChatMessagesPanel = React.memo(function ChatMessagesPanel({
+  groupedMessages,
+  loading,
+  markdownComponents,
+  messages,
+  messagesEndRef,
+  t,
+  toRenderableMarkdown
+}: ChatMessagesPanelProps) {
+  return (
+    <div className="messages-container">
+      {messages.length === 0 && (
+        <div style={{ 
+          display: 'flex', 
+          flexDirection: 'column', 
+          alignItems: 'center', 
+          justifyContent: 'center', 
+          height: '100%', 
+          color: 'var(--muted-fg)',
+          paddingBottom: '20%'
+        }}>
+          <h2 style={{ color: 'var(--foreground)', marginBottom: '0.5rem' }}>{t('chat.welcome')}</h2>
+          <p>{t('chat.welcomeDesc')}</p>
+        </div>
+      )}
+      
+      {groupedMessages.map((group, groupIdx) => {
+        if (group.type === 'process') {
+          const isLatestLoading = loading && groupIdx === groupedMessages.length - 1;
+          return (
+            <div key={`group-wrapper-${groupIdx}`} className="message system" style={{ margin: '0.5rem auto' }}>
+              <div className="avatar" style={{ backgroundColor: 'transparent', color: 'var(--muted-fg)' }}>
+                <IconCpu size={18} />
+              </div>
+              <div className="message-content" style={{ width: '100%', padding: 0 }}>
+                <details 
+                  key={`group-${groupIdx}`} 
+                  open={isLatestLoading}
+                  className="message-process-group" 
+                  style={{ background: 'var(--sidebar-bg)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)', padding: '0.5rem' }}
+                >
+                  <summary className="process-summary" style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--muted-fg)', fontSize: '0.85rem', userSelect: 'none', padding: '0.25rem' }}>
+                    {isLatestLoading ? t('chat.working') : t('chat.viewProcess', { count: group.messages.length })}
+                  </summary>
+                  <div className="process-content" style={{ marginTop: '0.5rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                    {group.messages.map((msg, i) => (
+                      <div key={i} className={`message ${msg.role} process-item`} style={{ padding: '0.5rem', margin: 0, fontSize: '0.9em', background: 'var(--background)', border: '1px solid var(--border)', maxWidth: '100%' }}>
+                        <div className="avatar" style={{ width: '24px', height: '24px', padding: '4px' }}>
+                          {msg.role === 'tool' ? <IconTool size={14} /> : <IconBot size={14} />}
+                        </div>
+                        <div className="message-content" style={{ padding: '0.25rem 0.5rem' }}>
+                          {msg.role === 'tool' ? (
+                            <div className="markdown-body">
+                              <ReactMarkdown remarkPlugins={MARKDOWN_REMARK_PLUGINS} components={markdownComponents}>
+                                {toRenderableMarkdown(msg.content)}
+                              </ReactMarkdown>
+                              {msg.details && (
+                                <details className="message-details">
+                                  <summary className="message-summary">{t('chat.details')}</summary>
+                                  <pre className="message-pre">{JSON.stringify(msg.details, null, 2)}</pre>
+                                </details>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="markdown-body">
+                              <ReactMarkdown remarkPlugins={MARKDOWN_REMARK_PLUGINS} components={markdownComponents}>
+                                {toRenderableMarkdown(msg.content)}
+                              </ReactMarkdown>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              </div>
+            </div>
+          );
+        }
+
+        return group.messages.map((msg, i) => (
+          <div key={`msg-${groupIdx}-${i}`} className={`message ${msg.role}`}>
+            <div className="avatar">
+              {msg.role === 'user' ? <IconUser size={18} /> : (msg.role === 'tool' ? <IconTool size={18} /> : <IconBot size={18} />)}
+            </div>
+            <div className="message-content">
+              {msg.role === 'user' || msg.role === 'tool' ? (
+                <div style={{ whiteSpace: 'pre-wrap' }}>
+                  {msg.content}
+                  {msg.details && (
+                    <details className="message-details">
+                      <summary className="message-summary">{t('chat.details')}</summary>
+                      <pre className="message-pre">{JSON.stringify(msg.details, null, 2)}</pre>
+                    </details>
+                  )}
+                </div>
+              ) : (
+                <div className="markdown-body">
+                  <ReactMarkdown remarkPlugins={MARKDOWN_REMARK_PLUGINS} components={markdownComponents}>
+                    {toRenderableMarkdown(msg.content)}
+                  </ReactMarkdown>
+                </div>
+              )}
+            </div>
+          </div>
+        ));
+      })}
+      <div ref={messagesEndRef} />
+    </div>
+  );
+});
 
 export function ChatInterface({ 
   messages, 
@@ -44,7 +174,7 @@ export function ChatInterface({
   const [modelDropdownPlacement, setModelDropdownPlacement] = useState<'top' | 'bottom'>('top');
   const modelDropdownRef = React.useRef<HTMLDivElement>(null);
   const modelTriggerRef = React.useRef<HTMLButtonElement>(null);
-  const modelGroups = models.map(model => {
+  const modelGroups = React.useMemo(() => models.map(model => {
     const options = model.availableModels && model.availableModels.length > 0
       ? model.availableModels
       : [{ id: model.model, name: model.model }];
@@ -53,20 +183,32 @@ export function ChatInterface({
       providerName: model.name,
       models: options
     };
-  });
+  }), [models]);
   const activeProviderId = activeModelId?.split('/')[0] || '';
   const activeModelName = activeModelId?.split('/')[1] || '';
-  const activeProvider = modelGroups.find(group => group.providerId === activeProviderId);
-  const activeModelDisplay = activeProvider
-    ? `${activeProvider.providerName} (${activeModelName})`
-    : (activeModelId || t('chat.selectModel'));
-  const flatModelOptions = modelGroups.flatMap(group =>
-    group.models.map(model => ({
-      value: `${group.providerId}/${model.id}`,
-      modelId: model.id
-    }))
+  const activeProvider = React.useMemo(
+    () => modelGroups.find(group => group.providerId === activeProviderId),
+    [activeProviderId, modelGroups]
   );
-  const modelIndexMap = new Map(flatModelOptions.map((item, index) => [item.value, index]));
+  const activeModelDisplay = React.useMemo(
+    () => activeProvider
+      ? `${activeProvider.providerName} (${activeModelName})`
+      : (activeModelId || t('chat.selectModel')),
+    [activeModelId, activeModelName, activeProvider, t]
+  );
+  const flatModelOptions = React.useMemo(
+    () => modelGroups.flatMap(group =>
+      group.models.map(model => ({
+        value: `${group.providerId}/${model.id}`,
+        modelId: model.id
+      }))
+    ),
+    [modelGroups]
+  );
+  const modelIndexMap = React.useMemo(
+    () => new Map(flatModelOptions.map((item, index) => [item.value, index])),
+    [flatModelOptions]
+  );
 
   useEffect(() => {
     if (!isModelDropdownOpen) {
@@ -223,7 +365,7 @@ export function ChatInterface({
 
   // Group messages to hide intermediate process steps
   const groupedMessages = React.useMemo(() => {
-    const groups: { type: 'user' | 'final_answer' | 'process', messages: Message[] }[] = [];
+    const groups: MessageGroup[] = [];
     let currentProcess: Message[] = [];
 
     for (let i = 0; i < messages.length; i++) {
@@ -366,105 +508,15 @@ export function ChatInterface({
         </div>
       </div>
 
-      <div className="messages-container">
-        {messages.length === 0 && (
-          <div style={{ 
-            display: 'flex', 
-            flexDirection: 'column', 
-            alignItems: 'center', 
-            justifyContent: 'center', 
-            height: '100%', 
-            color: 'var(--muted-fg)',
-            paddingBottom: '20%'
-          }}>
-            <h2 style={{ color: 'var(--foreground)', marginBottom: '0.5rem' }}>{t('chat.welcome')}</h2>
-            <p>{t('chat.welcomeDesc')}</p>
-          </div>
-        )}
-        
-        {groupedMessages.map((group, groupIdx) => {
-          if (group.type === 'process') {
-            const isLatestLoading = loading && groupIdx === groupedMessages.length - 1;
-            return (
-              <div key={`group-wrapper-${groupIdx}`} className="message system" style={{ margin: '0.5rem auto' }}>
-                <div className="avatar" style={{ backgroundColor: 'transparent', color: 'var(--muted-fg)' }}>
-                  <IconCpu size={18} />
-                </div>
-                <div className="message-content" style={{ width: '100%', padding: 0 }}>
-                  <details 
-                    key={`group-${groupIdx}`} 
-                    open={isLatestLoading}
-                    className="message-process-group" 
-                    style={{ background: 'var(--sidebar-bg)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)', padding: '0.5rem' }}
-                  >
-                    <summary className="process-summary" style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--muted-fg)', fontSize: '0.85rem', userSelect: 'none', padding: '0.25rem' }}>
-                      {isLatestLoading ? t('chat.working') : t('chat.viewProcess', { count: group.messages.length })}
-                    </summary>
-                    <div className="process-content" style={{ marginTop: '0.5rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                      {group.messages.map((msg, i) => (
-                        <div key={i} className={`message ${msg.role} process-item`} style={{ padding: '0.5rem', margin: 0, fontSize: '0.9em', background: 'var(--background)', border: '1px solid var(--border)', maxWidth: '100%' }}>
-                          <div className="avatar" style={{ width: '24px', height: '24px', padding: '4px' }}>
-                            {msg.role === 'tool' ? <IconTool size={14} /> : <IconBot size={14} />}
-                          </div>
-                          <div className="message-content" style={{ padding: '0.25rem 0.5rem' }}>
-                            {msg.role === 'tool' ? (
-                              <div className="markdown-body">
-                                <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-                                  {toRenderableMarkdown(msg.content)}
-                                </ReactMarkdown>
-                                {msg.details && (
-                                  <details className="message-details">
-                                    <summary className="message-summary">{t('chat.details')}</summary>
-                                    <pre className="message-pre">{JSON.stringify(msg.details, null, 2)}</pre>
-                                  </details>
-                                )}
-                              </div>
-                            ) : (
-                              <div className="markdown-body">
-                                <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-                                  {toRenderableMarkdown(msg.content)}
-                                </ReactMarkdown>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </details>
-                </div>
-              </div>
-            );
-          }
-
-          return group.messages.map((msg, i) => (
-            <div key={`msg-${groupIdx}-${i}`} className={`message ${msg.role}`}>
-              <div className="avatar">
-                {msg.role === 'user' ? <IconUser size={18} /> : (msg.role === 'tool' ? <IconTool size={18} /> : <IconBot size={18} />)}
-              </div>
-              <div className="message-content">
-                {msg.role === 'user' || msg.role === 'tool' ? (
-                  <div style={{ whiteSpace: 'pre-wrap' }}>
-                    {msg.content}
-                    {msg.details && (
-                      <details className="message-details">
-                        <summary className="message-summary">{t('chat.details')}</summary>
-                        <pre className="message-pre">{JSON.stringify(msg.details, null, 2)}</pre>
-                      </details>
-                    )}
-                  </div>
-                ) : (
-                  <div className="markdown-body">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-                      {toRenderableMarkdown(msg.content)}
-                    </ReactMarkdown>
-                  </div>
-                )}
-              </div>
-            </div>
-          ));
-        })}
-        <div ref={messagesEndRef} />
-      </div>
+      <ChatMessagesPanel
+        groupedMessages={groupedMessages}
+        loading={loading}
+        markdownComponents={markdownComponents}
+        messages={messages}
+        messagesEndRef={messagesEndRef}
+        t={t}
+        toRenderableMarkdown={toRenderableMarkdown}
+      />
 
       <div className="input-container">
         <div className="input-box">

@@ -39,49 +39,20 @@ interface KairoBridge {
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.agentChat, args: { userInput: string } | string): Promise<{ content?: string; error?: string }>;
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.agentConfirmResponse, args: { id: string; approved: boolean }): Promise<InvokeSuccess>;
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.agentInit, args: import('./shared/contracts').AgentConfig | string): Promise<InvokeSuccess>;
-  invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.auditGet, limit?: number): Promise<import('./renderer/types').AuditLogEntry[]>;
+  invoke(
+    channel: typeof import('./shared/ipc').KAIRO_INVOKE.auditGet,
+    query?: import('./renderer/types').AuditLogQuery | number
+  ): Promise<import('./renderer/types').AuditLogQueryResult>;
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.chatClearAllSessions): Promise<InvokeSuccess>;
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.chatCreateSession, title?: string): Promise<import('./renderer/types').Session>;
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.chatDeleteSession, sessionId: string): Promise<InvokeSuccess>;
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.chatGetActiveSession): Promise<import('./renderer/types').Session | null>;
-  invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.chatGetAgentStats): Promise<Array<{
-    agentId: string;
-    totalSessions: number;
-    totalMessages: number;
-    promptTokens: number;
-    completionTokens: number;
-    totalTokens: number;
-  }>>;
+  invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.chatGetAgentStats): Promise<import('./renderer/types').AgentStats[]>;
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.chatGetSession, sessionId: string): Promise<import('./renderer/types').Session | null>;
-  invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.chatGetTokenUsageDetails, args: {
-    agentId?: string;
-    page?: number;
-    pageSize?: number;
-  }): Promise<{
-    items: Array<{
-      id: string;
-      sessionId: string;
-      sessionTitle: string;
-      agentId: string;
-      role: string;
-      content: string;
-      timestamp: number;
-      model: string;
-      promptTokens: number;
-      completionTokens: number;
-      totalTokens: number;
-    }>;
-    total: number;
-    page: number;
-    pageSize: number;
-    totalPages: number;
-    summary: {
-      agentId?: string;
-      promptTokens: number;
-      completionTokens: number;
-      totalTokens: number;
-    };
-  }>;
+  invoke(
+    channel: typeof import('./shared/ipc').KAIRO_INVOKE.chatGetTokenUsageDetails,
+    args?: import('./renderer/types').MonitoringTokenQuery
+  ): Promise<import('./renderer/types').MonitoringTokenQueryResult>;
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.chatListSessions): Promise<import('./renderer/types').SessionSummary[]>;
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.chatSetActiveSession, sessionId: string): Promise<InvokeSuccess>;
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.chatUpdateSessionTitle, args: { sessionId: string; title: string }): Promise<InvokeSuccess>;

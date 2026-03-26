@@ -1,9 +1,15 @@
 export type {
   AgentConfig,
+  AgentStats,
   AgentPermissionConfig,
+  AuditLogEntry,
+  AuditLogQuery,
+  AuditLogQueryResult,
   KairoPilotConfig,
   LegacyAgentConfig,
   ModelConfig,
+  MonitoringTokenQuery,
+  MonitoringTokenQueryResult,
   ProviderConfig,
   ProviderType
 } from '../shared/contracts';
@@ -61,15 +67,4 @@ export interface SessionContextState {
   activeAgentId: string | null;
   activeSessionId: string | null;
   confirmationRequest: ConfirmationRequest | null;
-}
-
-export interface AuditLogEntry {
-  id: string;
-  timestamp: number;
-  tool: string;
-  args: Record<string, unknown>;
-  result?: unknown;
-  error?: string;
-  sessionId?: string;
-  policyTags?: string[];
 }

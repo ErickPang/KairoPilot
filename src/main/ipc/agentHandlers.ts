@@ -1,5 +1,5 @@
 import { ipcMain } from 'electron';
-import { getAuditLogs } from '../store/audit';
+import { queryAuditLogs } from '../store/audit';
 import { getActiveAgentId, setActiveAgentId } from '../store/config';
 import { ensureActiveSession, updateSessionMessages } from '../store/chat';
 import { getAgentRuntime, initializeAgent, pendingConfirmations, resolveAgentConfig } from './agentRuntime';
@@ -35,8 +35,11 @@ function registerAgentHandlers() {
     return { success: true };
   });
 
-  ipcMain.handle(KAIRO_INVOKE.auditGet, async (_, limit) => {
-    return getAuditLogs(limit);
+  ipcMain.handle(KAIRO_INVOKE.auditGet, async (_, query) => {
+    if (typeof query === 'number') {
+      return queryAuditLogs({ page: 1, pageSize: query });
+    }
+    return queryAuditLogs(typeof query === 'object' && query ? query : {});
   });
 
   ipcMain.handle(KAIRO_INVOKE.agentChat, async (event, message) => {

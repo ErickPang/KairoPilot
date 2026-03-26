@@ -111,6 +111,14 @@ const en = {
   'dashboard.content': 'Content',
   'dashboard.noTokenDetails': 'No token usage details yet',
   'dashboard.pageInfo': 'Page {page} / {totalPages} · {total} records',
+  'dashboard.searchPlaceholder': 'Search by model, content, session, or agent...',
+  'dashboard.clearFilters': 'Clear Filters',
+  'dashboard.modelAll': 'All Models',
+  'dashboard.roleAll': 'All Roles',
+  'dashboard.topModels': 'Model Aggregation',
+  'dashboard.topRoles': 'Role Aggregation',
+  'dashboard.noAggregationData': 'No aggregation data for current filters',
+  'dashboard.tokenFacetMeta': '{count} records · prompt {prompt} · completion {completion}',
 
   // Audit Logs
   'audit.subtitle': 'Review system operations, tool executions, and security events',
@@ -131,6 +139,8 @@ const en = {
   'audit.filteredCount': 'Showing {shown} / {total}',
   'audit.noFilteredLogs': 'No logs match the current filters.',
   'audit.policyTags': 'Policy Tags',
+  'audit.totalLogs': 'Total Logs',
+  'audit.pageInfo': 'Page {page} / {totalPages} · {total} records',
 
   // Modal
   'modal.highRisk': 'High Risk Warning',

@@ -1,29 +1,73 @@
 import { useState, useEffect, useMemo } from 'react';
-import { AuditLogEntry } from '../types';
+import { AuditLogEntry, AuditLogQueryResult } from '../types';
 import { IconRefresh, IconShield, IconTool, IconCheck, IconX } from './Icons';
 import { Select } from './Select';
 import { useTranslation } from '../hooks/useTranslation';
 import './AuditLogViewer.css';
 import { KAIRO_INVOKE } from '../../shared/ipc';
 
+const AUDIT_PAGE_SIZE = 20;
+
 export default function AuditLogViewer() {
-  const [logs, setLogs] = useState<AuditLogEntry[]>([]);
+  const [result, setResult] = useState<AuditLogQueryResult>({
+    items: [],
+    total: 0,
+    page: 1,
+    pageSize: AUDIT_PAGE_SIZE,
+    totalPages: 1,
+    aggregations: {
+      successCount: 0,
+      errorCount: 0,
+      tools: [],
+      tags: []
+    }
+  });
   const [loading, setLoading] = useState(true);
   const [searchText, setSearchText] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'success' | 'error'>('all');
   const [toolFilter, setToolFilter] = useState('all');
   const [tagFilter, setTagFilter] = useState('all');
+  const [page, setPage] = useState(1);
   const { t } = useTranslation();
+  const logs = result.items;
 
   useEffect(() => {
-    loadLogs();
-  }, []);
+    const timeoutId = window.setTimeout(async () => {
+      setLoading(true);
+      try {
+        const data = await window.kairo.invoke(KAIRO_INVOKE.auditGet, {
+          page,
+          pageSize: AUDIT_PAGE_SIZE,
+          search: searchText.trim() || undefined,
+          status: statusFilter,
+          tool: toolFilter !== 'all' ? toolFilter : undefined,
+          tag: tagFilter !== 'all' ? tagFilter : undefined
+        });
+        setResult(data);
+      } catch (error) {
+        console.error('Failed to load audit logs:', error);
+      } finally {
+        setLoading(false);
+      }
+    }, searchText.trim() ? 250 : 0);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [page, searchText, statusFilter, tagFilter, toolFilter]);
 
   const loadLogs = async () => {
     setLoading(true);
     try {
-      const data = await window.kairo.invoke(KAIRO_INVOKE.auditGet, 100);
-      setLogs(data);
+      const data = await window.kairo.invoke(KAIRO_INVOKE.auditGet, {
+        page,
+        pageSize: AUDIT_PAGE_SIZE,
+        search: searchText.trim() || undefined,
+        status: statusFilter,
+        tool: toolFilter !== 'all' ? toolFilter : undefined,
+        tag: tagFilter !== 'all' ? tagFilter : undefined
+      });
+      setResult(data);
     } catch (error) {
       console.error('Failed to load audit logs:', error);
     } finally {
@@ -32,13 +76,12 @@ export default function AuditLogViewer() {
   };
 
   const toolOptions = useMemo(() => {
-    return Array.from(new Set(logs.map((log) => log.tool))).sort();
-  }, [logs]);
+    return result.aggregations.tools;
+  }, [result.aggregations.tools]);
 
   const tagOptions = useMemo(() => {
-    const tags = logs.flatMap((log) => log.policyTags || []);
-    return Array.from(new Set(tags)).sort();
-  }, [logs]);
+    return result.aggregations.tags;
+  }, [result.aggregations.tags]);
 
   const statusSelectOptions = useMemo(() => {
     return [
@@ -51,39 +94,23 @@ export default function AuditLogViewer() {
   const toolSelectOptions = useMemo(() => {
     return [
       { value: 'all', label: t('audit.toolAll') },
-      ...toolOptions.map((tool) => ({ value: tool, label: tool }))
+      ...toolOptions.map((tool) => ({ value: tool.value, label: `${tool.value} (${tool.count})` }))
     ];
   }, [toolOptions, t]);
 
   const tagSelectOptions = useMemo(() => {
     return [
       { value: 'all', label: t('audit.tagAll') },
-      ...tagOptions.map((tag) => ({ value: tag, label: tag }))
+      ...tagOptions.map((tag) => ({ value: tag.value, label: `${tag.value} (${tag.count})` }))
     ];
   }, [tagOptions, t]);
-
-  const filteredLogs = useMemo(() => {
-    const keyword = searchText.trim().toLowerCase();
-    return logs.filter((log) => {
-      if (statusFilter === 'success' && log.error) return false;
-      if (statusFilter === 'error' && !log.error) return false;
-      if (toolFilter !== 'all' && log.tool !== toolFilter) return false;
-      if (tagFilter !== 'all' && !(log.policyTags || []).includes(tagFilter)) return false;
-      if (!keyword) return true;
-
-      const argsText = typeof log.args === 'string' ? log.args : JSON.stringify(log.args);
-      const tagsText = (log.policyTags || []).join(' ');
-      const errorText = log.error || '';
-      const searchableText = `${log.tool} ${argsText} ${tagsText} ${errorText}`.toLowerCase();
-      return searchableText.includes(keyword);
-    });
-  }, [logs, searchText, statusFilter, toolFilter, tagFilter]);
 
   const handleClearFilters = () => {
     setSearchText('');
     setStatusFilter('all');
     setToolFilter('all');
     setTagFilter('all');
+    setPage(1);
   };
 
   return (
@@ -112,7 +139,7 @@ export default function AuditLogViewer() {
             <IconRefresh size={32} className="spinning" style={{ opacity: 0.5, marginBottom: '1rem', display: 'inline-block' }} />
             <div style={{ fontSize: '1.1rem' }}>{t('common.loading')}</div>
           </div>
-        ) : logs.length === 0 ? (
+        ) : result.total === 0 ? (
           <div className="audit-viewer-empty">
             <div className="audit-viewer-empty-icon">
               <IconShield size={56} />
@@ -126,14 +153,20 @@ export default function AuditLogViewer() {
                 <input
                   className="form-control"
                   value={searchText}
-                  onChange={(e) => setSearchText(e.target.value)}
+                  onChange={(e) => {
+                    setSearchText(e.target.value);
+                    setPage(1);
+                  }}
                   placeholder={t('audit.searchPlaceholder')}
                 />
               </div>
               <div className="audit-filter-group">
                 <Select
                   value={statusFilter}
-                  onChange={(val) => setStatusFilter(val as 'all' | 'success' | 'error')}
+                  onChange={(val) => {
+                    setStatusFilter(val as 'all' | 'success' | 'error');
+                    setPage(1);
+                  }}
                   options={statusSelectOptions}
                   style={{ width: '100%' }}
                 />
@@ -141,7 +174,10 @@ export default function AuditLogViewer() {
               <div className="audit-filter-group">
                 <Select
                   value={toolFilter}
-                  onChange={setToolFilter}
+                  onChange={(value) => {
+                    setToolFilter(value);
+                    setPage(1);
+                  }}
                   options={toolSelectOptions}
                   style={{ width: '100%' }}
                 />
@@ -149,7 +185,10 @@ export default function AuditLogViewer() {
               <div className="audit-filter-group">
                 <Select
                   value={tagFilter}
-                  onChange={setTagFilter}
+                  onChange={(value) => {
+                    setTagFilter(value);
+                    setPage(1);
+                  }}
                   options={tagSelectOptions}
                   style={{ width: '100%' }}
                 />
@@ -159,11 +198,26 @@ export default function AuditLogViewer() {
               </button>
             </div>
 
-            <div className="audit-filter-summary">
-              {t('audit.filteredCount', { shown: filteredLogs.length, total: logs.length })}
+            <div className="audit-summary-grid">
+              <div className="config-card audit-summary-card">
+                <div className="audit-summary-label">{t('audit.totalLogs')}</div>
+                <div className="audit-summary-value">{result.total.toLocaleString()}</div>
+              </div>
+              <div className="config-card audit-summary-card">
+                <div className="audit-summary-label">{t('audit.statusSuccess')}</div>
+                <div className="audit-summary-value">{result.aggregations.successCount.toLocaleString()}</div>
+              </div>
+              <div className="config-card audit-summary-card">
+                <div className="audit-summary-label">{t('audit.statusError')}</div>
+                <div className="audit-summary-value">{result.aggregations.errorCount.toLocaleString()}</div>
+              </div>
             </div>
 
-            {filteredLogs.length === 0 ? (
+            <div className="audit-filter-summary">
+              {t('audit.filteredCount', { shown: logs.length, total: result.total })}
+            </div>
+
+            {logs.length === 0 ? (
               <div className="audit-viewer-empty">
                 <div className="audit-viewer-empty-icon">
                   <IconShield size={56} />
@@ -172,7 +226,7 @@ export default function AuditLogViewer() {
               </div>
             ) : (
               <div className="config-section audit-log-list">
-                {filteredLogs.map((log) => (
+                {logs.map((log: AuditLogEntry) => (
               <div key={log.id} className={`config-card audit-log-card ${log.error ? 'is-error' : ''}`}>
                 <div className="audit-log-header">
                   <div className="audit-log-tool-info">
@@ -239,6 +293,28 @@ export default function AuditLogViewer() {
                 ))}
               </div>
             )}
+
+            <div className="audit-pagination">
+              <div className="audit-pagination-info">
+                {t('audit.pageInfo', { page: result.page, totalPages: result.totalPages, total: result.total })}
+              </div>
+              <div className="audit-pagination-actions">
+                <button
+                  className="btn btn-secondary"
+                  onClick={() => setPage((current) => Math.max(1, current - 1))}
+                  disabled={loading || result.page <= 1}
+                >
+                  {t('common.previous')}
+                </button>
+                <button
+                  className="btn btn-secondary"
+                  onClick={() => setPage((current) => Math.min(result.totalPages, current + 1))}
+                  disabled={loading || result.page >= result.totalPages}
+                >
+                  {t('common.next')}
+                </button>
+              </div>
+            </div>
           </>
         )}
       </div>

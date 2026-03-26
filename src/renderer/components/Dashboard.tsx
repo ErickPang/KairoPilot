@@ -1,45 +1,9 @@
-import { useState, useEffect } from 'react';
-import { AgentConfig, SystemStats } from '../types';
+import { useState, useEffect, useMemo, useCallback } from 'react';
+import { AgentConfig, AgentStats, MonitoringTokenQueryResult, SystemStats } from '../types';
 import { IconDashboard, IconBot, IconChat, IconCpu, IconArrowLeft, IconRefresh } from './Icons';
 import { useTranslation } from '../hooks/useTranslation';
 import { KAIRO_INVOKE } from '../../shared/ipc';
-
-interface AgentStats {
-  agentId: string;
-  totalSessions: number;
-  totalMessages: number;
-  promptTokens: number;
-  completionTokens: number;
-  totalTokens: number;
-}
-
-interface TokenUsageDetailItem {
-  id: string;
-  sessionId: string;
-  sessionTitle: string;
-  agentId: string;
-  role: string;
-  content: string;
-  timestamp: number;
-  model: string;
-  promptTokens: number;
-  completionTokens: number;
-  totalTokens: number;
-}
-
-interface TokenUsageDetailsResult {
-  items: TokenUsageDetailItem[];
-  total: number;
-  page: number;
-  pageSize: number;
-  totalPages: number;
-  summary: {
-    agentId?: string;
-    promptTokens: number;
-    completionTokens: number;
-    totalTokens: number;
-  };
-}
+import { Select } from './Select';
 
 interface DashboardProps {
   agents: AgentConfig[];
@@ -54,16 +18,22 @@ export function Dashboard({ agents, systemStats }: DashboardProps) {
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailPage, setDetailPage] = useState(1);
-  const [tokenDetails, setTokenDetails] = useState<TokenUsageDetailsResult>({
+  const [detailSearchText, setDetailSearchText] = useState('');
+  const [detailModelFilter, setDetailModelFilter] = useState('all');
+  const [detailRoleFilter, setDetailRoleFilter] = useState('all');
+  const [tokenDetails, setTokenDetails] = useState<MonitoringTokenQueryResult>({
     items: [],
     total: 0,
     page: 1,
     pageSize: TOKEN_DETAIL_PAGE_SIZE,
     totalPages: 1,
-    summary: {
+    aggregations: {
+      totalRecords: 0,
       promptTokens: 0,
       completionTokens: 0,
-      totalTokens: 0
+      totalTokens: 0,
+      models: [],
+      roles: []
     }
   });
   const { t } = useTranslation();
@@ -93,30 +63,61 @@ export function Dashboard({ agents, systemStats }: DashboardProps) {
   const totalMessages = stats.reduce((acc, stat) => acc + stat.totalMessages, 0);
   const totalSessions = stats.reduce((acc, stat) => acc + stat.totalSessions, 0);
   const selectedAgentName = selectedAgentId ? getAgentName(selectedAgentId) : '';
+  const modelSelectOptions = useMemo(() => (
+    [
+      { value: 'all', label: t('dashboard.modelAll') },
+      ...tokenDetails.aggregations.models.map((item) => ({
+        value: item.value,
+        label: `${item.value} (${item.count})`
+      }))
+    ]
+  ), [t, tokenDetails.aggregations.models]);
+  const roleSelectOptions = useMemo(() => (
+    [
+      { value: 'all', label: t('dashboard.roleAll') },
+      ...tokenDetails.aggregations.roles.map((item) => ({
+        value: item.value,
+        label: `${item.value} (${item.count})`
+      }))
+    ]
+  ), [t, tokenDetails.aggregations.roles]);
+
+  const fetchTokenDetails = useCallback(async () => {
+    if (!selectedAgentId) {
+      return;
+    }
+
+    try {
+      setDetailLoading(true);
+      const data = await window.kairo.invoke(KAIRO_INVOKE.chatGetTokenUsageDetails, {
+        agentId: selectedAgentId,
+        page: detailPage,
+        pageSize: TOKEN_DETAIL_PAGE_SIZE,
+        search: detailSearchText.trim() || undefined,
+        model: detailModelFilter !== 'all' ? detailModelFilter : undefined,
+        role: detailRoleFilter
+      });
+      setTokenDetails(data);
+    } catch (error) {
+      console.error('Failed to fetch token usage details:', error);
+    } finally {
+      setDetailLoading(false);
+    }
+  }, [detailModelFilter, detailPage, detailRoleFilter, detailSearchText, selectedAgentId]);
 
   useEffect(() => {
     if (view !== 'tokenDetails' || !selectedAgentId) {
       return;
     }
 
-    const fetchTokenDetails = async () => {
-      try {
-        setDetailLoading(true);
-        const data = await window.kairo.invoke(KAIRO_INVOKE.chatGetTokenUsageDetails, {
-          agentId: selectedAgentId,
-          page: detailPage,
-          pageSize: TOKEN_DETAIL_PAGE_SIZE
-        });
-        setTokenDetails(data);
-      } catch (error) {
-        console.error('Failed to fetch token usage details:', error);
-      } finally {
-        setDetailLoading(false);
-      }
-    };
+    const timeoutId = window.setTimeout(() => {
+      void fetchTokenDetails();
+    }, detailSearchText.trim() ? 250 : 0);
 
-    fetchTokenDetails();
-  }, [detailPage, selectedAgentId, view]);
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [detailSearchText, fetchTokenDetails, selectedAgentId, view]);
 
   const formatTimestamp = (timestamp: number) => (
     new Intl.DateTimeFormat(undefined, {
@@ -129,23 +130,7 @@ export function Dashboard({ agents, systemStats }: DashboardProps) {
   );
 
   const refreshTokenDetails = async () => {
-    if (!selectedAgentId) {
-      return;
-    }
-
-    try {
-      setDetailLoading(true);
-      const data = await window.kairo.invoke(KAIRO_INVOKE.chatGetTokenUsageDetails, {
-        agentId: selectedAgentId,
-        page: detailPage,
-        pageSize: TOKEN_DETAIL_PAGE_SIZE
-      });
-      setTokenDetails(data);
-    } catch (error) {
-      console.error('Failed to refresh token usage details:', error);
-    } finally {
-      setDetailLoading(false);
-    }
+    await fetchTokenDetails();
   };
 
   return (
@@ -316,6 +301,70 @@ export function Dashboard({ agents, systemStats }: DashboardProps) {
           gap: 0.75rem;
           align-items: center;
         }
+        .token-filter-panel {
+          display: grid;
+          grid-template-columns: minmax(220px, 1fr) repeat(2, minmax(160px, 220px)) auto;
+          gap: 0.75rem;
+          align-items: center;
+          margin-bottom: 1.5rem;
+        }
+        .token-filter-group {
+          min-width: 0;
+        }
+        .token-aggregation-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+          gap: 1rem;
+          margin-bottom: 1.5rem;
+        }
+        .token-aggregation-card {
+          background: rgba(255, 255, 255, 0.72);
+          border: 1px solid rgba(255, 255, 255, 0.85);
+          border-radius: 18px;
+          padding: 1rem 1.1rem;
+          box-shadow: 0 10px 24px rgba(15, 23, 42, 0.05);
+        }
+        .token-aggregation-title {
+          font-size: 0.85rem;
+          font-weight: 700;
+          color: var(--muted-fg);
+          text-transform: uppercase;
+          letter-spacing: 0.05em;
+          margin-bottom: 0.85rem;
+        }
+        .token-aggregation-list {
+          display: flex;
+          flex-direction: column;
+          gap: 0.7rem;
+        }
+        .token-aggregation-item {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 1rem;
+        }
+        .token-aggregation-item-label {
+          display: flex;
+          flex-direction: column;
+          gap: 0.15rem;
+          min-width: 0;
+        }
+        .token-aggregation-item-name {
+          font-weight: 700;
+          color: var(--foreground);
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        .token-aggregation-item-meta {
+          font-size: 0.82rem;
+          color: var(--muted-fg);
+        }
+        .token-aggregation-item-value {
+          font-weight: 800;
+          color: #6d28d9;
+          white-space: nowrap;
+        }
       `}</style>
 
       {view === 'tokenDetails' ? (
@@ -344,7 +393,7 @@ export function Dashboard({ agents, systemStats }: DashboardProps) {
                 {t('dashboard.promptTokens')}
               </div>
               <div style={{ fontSize: '2.5rem', fontWeight: 800, letterSpacing: '-0.03em', background: 'linear-gradient(135deg, #6d28d9 0%, #8b5cf6 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
-                {tokenDetails.summary.promptTokens.toLocaleString()}
+                {tokenDetails.aggregations.promptTokens.toLocaleString()}
               </div>
             </div>
             <div className="stat-card">
@@ -352,7 +401,7 @@ export function Dashboard({ agents, systemStats }: DashboardProps) {
                 {t('dashboard.completionTokens')}
               </div>
               <div style={{ fontSize: '2.5rem', fontWeight: 800, letterSpacing: '-0.03em', color: 'var(--foreground)' }}>
-                {tokenDetails.summary.completionTokens.toLocaleString()}
+                {tokenDetails.aggregations.completionTokens.toLocaleString()}
               </div>
             </div>
             <div className="stat-card">
@@ -360,7 +409,7 @@ export function Dashboard({ agents, systemStats }: DashboardProps) {
                 {t('dashboard.totalTokens')}
               </div>
               <div style={{ fontSize: '2.5rem', fontWeight: 800, letterSpacing: '-0.03em', color: 'var(--foreground)' }}>
-                {tokenDetails.summary.totalTokens.toLocaleString()}
+                {tokenDetails.aggregations.totalTokens.toLocaleString()}
               </div>
             </div>
             <div className="stat-card">
@@ -368,18 +417,109 @@ export function Dashboard({ agents, systemStats }: DashboardProps) {
                 {t('dashboard.tokenRecords')}
               </div>
               <div style={{ fontSize: '2.5rem', fontWeight: 800, letterSpacing: '-0.03em', color: 'var(--foreground)' }}>
-                {tokenDetails.total.toLocaleString()}
+                {tokenDetails.aggregations.totalRecords.toLocaleString()}
               </div>
             </div>
           </div>
 
           <div className="animate-stagger-3">
+            <div className="token-filter-panel">
+              <div className="token-filter-group">
+                <input
+                  className="form-control"
+                  value={detailSearchText}
+                  onChange={(event) => {
+                    setDetailSearchText(event.target.value);
+                    setDetailPage(1);
+                  }}
+                  placeholder={t('dashboard.searchPlaceholder')}
+                />
+              </div>
+              <div className="token-filter-group">
+                <Select
+                  value={detailModelFilter}
+                  onChange={(value) => {
+                    setDetailModelFilter(value);
+                    setDetailPage(1);
+                  }}
+                  options={modelSelectOptions}
+                  style={{ width: '100%' }}
+                />
+              </div>
+              <div className="token-filter-group">
+                <Select
+                  value={detailRoleFilter}
+                  onChange={(value) => {
+                    setDetailRoleFilter(value);
+                    setDetailPage(1);
+                  }}
+                  options={roleSelectOptions}
+                  style={{ width: '100%' }}
+                />
+              </div>
+              <button
+                className="btn btn-secondary"
+                onClick={() => {
+                  setDetailSearchText('');
+                  setDetailModelFilter('all');
+                  setDetailRoleFilter('all');
+                  setDetailPage(1);
+                }}
+              >
+                {t('dashboard.clearFilters')}
+              </button>
+            </div>
+
+            <div className="token-aggregation-grid">
+              <div className="token-aggregation-card">
+                <div className="token-aggregation-title">{t('dashboard.topModels')}</div>
+                <div className="token-aggregation-list">
+                  {tokenDetails.aggregations.models.length === 0 ? (
+                    <div className="token-aggregation-item-meta">{t('dashboard.noAggregationData')}</div>
+                  ) : (
+                    tokenDetails.aggregations.models.slice(0, 5).map((item) => (
+                      <div key={item.value} className="token-aggregation-item">
+                        <div className="token-aggregation-item-label">
+                          <div className="token-aggregation-item-name">{item.value}</div>
+                          <div className="token-aggregation-item-meta">
+                            {t('dashboard.tokenFacetMeta', { count: item.count, prompt: item.promptTokens, completion: item.completionTokens })}
+                          </div>
+                        </div>
+                        <div className="token-aggregation-item-value">{item.totalTokens.toLocaleString()}</div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+              <div className="token-aggregation-card">
+                <div className="token-aggregation-title">{t('dashboard.topRoles')}</div>
+                <div className="token-aggregation-list">
+                  {tokenDetails.aggregations.roles.length === 0 ? (
+                    <div className="token-aggregation-item-meta">{t('dashboard.noAggregationData')}</div>
+                  ) : (
+                    tokenDetails.aggregations.roles.slice(0, 5).map((item) => (
+                      <div key={item.value} className="token-aggregation-item">
+                        <div className="token-aggregation-item-label">
+                          <div className="token-aggregation-item-name">{item.value}</div>
+                          <div className="token-aggregation-item-meta">
+                            {t('dashboard.tokenFacetMeta', { count: item.count, prompt: item.promptTokens, completion: item.completionTokens })}
+                          </div>
+                        </div>
+                        <div className="token-aggregation-item-value">{item.totalTokens.toLocaleString()}</div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
+
             <div className="data-table-container">
               <table className="data-table">
                 <thead>
                   <tr>
                     <th>{t('dashboard.requestTime')}</th>
                     <th>{t('dashboard.model')}</th>
+                    <th>{t('dashboard.role')}</th>
                     <th>{t('dashboard.promptTokens')}</th>
                     <th>{t('dashboard.completionTokens')}</th>
                     <th>{t('dashboard.totalTokens')}</th>
@@ -388,7 +528,7 @@ export function Dashboard({ agents, systemStats }: DashboardProps) {
                 <tbody>
                   {!detailLoading && tokenDetails.items.length === 0 ? (
                     <tr>
-                      <td colSpan={5} style={{ padding: '4rem', textAlign: 'center', color: 'var(--muted-fg)', fontSize: '1rem' }}>
+                      <td colSpan={6} style={{ padding: '4rem', textAlign: 'center', color: 'var(--muted-fg)', fontSize: '1rem' }}>
                         {t('dashboard.noTokenDetails')}
                       </td>
                     </tr>
@@ -397,6 +537,7 @@ export function Dashboard({ agents, systemStats }: DashboardProps) {
                       <tr key={item.id}>
                         <td style={{ whiteSpace: 'nowrap', color: 'var(--muted-fg)' }}>{formatTimestamp(item.timestamp)}</td>
                         <td><span className="token-model-chip" title={item.model}>{item.model}</span></td>
+                        <td><span className="token-badge">{item.role}</span></td>
                         <td style={{ color: 'var(--muted-fg)', fontWeight: 600 }}>{item.promptTokens.toLocaleString()}</td>
                         <td style={{ color: 'var(--muted-fg)', fontWeight: 600 }}>{item.completionTokens.toLocaleString()}</td>
                         <td style={{ fontWeight: 700, color: '#8b5cf6' }}>{item.totalTokens.toLocaleString()}</td>
@@ -531,6 +672,9 @@ export function Dashboard({ agents, systemStats }: DashboardProps) {
                             onClick={() => {
                               setSelectedAgentId(stat.agentId);
                               setDetailPage(1);
+                              setDetailSearchText('');
+                              setDetailModelFilter('all');
+                              setDetailRoleFilter('all');
                               setView('tokenDetails');
                             }}
                             title={t('dashboard.openAgentTokenDetails', { agent: getAgentName(stat.agentId) })}

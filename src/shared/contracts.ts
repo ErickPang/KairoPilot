@@ -51,6 +51,107 @@ export interface AgentConfig {
   permissions: AgentPermissionConfig
 }
 
+export interface AgentStats {
+  agentId: string
+  totalSessions: number
+  totalMessages: number
+  promptTokens: number
+  completionTokens: number
+  totalTokens: number
+}
+
+export interface AuditLogEntry {
+  id: string
+  timestamp: number
+  tool: string
+  args: Record<string, unknown>
+  result?: unknown
+  error?: string
+  sessionId?: string
+  policyTags?: string[]
+}
+
+export interface QueryFacet {
+  value: string
+  count: number
+}
+
+export interface TokenMetricFacet extends QueryFacet {
+  promptTokens: number
+  completionTokens: number
+  totalTokens: number
+}
+
+export interface PagedQueryResult<TItem, TAggregations> {
+  items: TItem[]
+  total: number
+  page: number
+  pageSize: number
+  totalPages: number
+  aggregations: TAggregations
+}
+
+export type AuditStatusFilter = 'all' | 'success' | 'error'
+
+export interface AuditLogQuery {
+  page?: number
+  pageSize?: number
+  search?: string
+  status?: AuditStatusFilter
+  tool?: string
+  tag?: string
+  sessionId?: string
+  startTime?: number
+  endTime?: number
+}
+
+export interface AuditLogAggregations {
+  successCount: number
+  errorCount: number
+  tools: QueryFacet[]
+  tags: QueryFacet[]
+}
+
+export type AuditLogQueryResult = PagedQueryResult<AuditLogEntry, AuditLogAggregations>
+
+export interface MonitoringTokenUsageItem {
+  id: string
+  sessionId: string
+  sessionTitle: string
+  agentId: string
+  role: string
+  content: string
+  timestamp: number
+  model: string
+  promptTokens: number
+  completionTokens: number
+  totalTokens: number
+}
+
+export interface MonitoringTokenQuery {
+  agentId?: string
+  page?: number
+  pageSize?: number
+  search?: string
+  model?: string
+  role?: string
+  sessionId?: string
+  startTime?: number
+  endTime?: number
+}
+
+export interface MonitoringTokenAggregations {
+  agentId?: string
+  promptTokens: number
+  completionTokens: number
+  totalTokens: number
+  totalRecords: number
+  models: TokenMetricFacet[]
+  roles: TokenMetricFacet[]
+}
+
+export type MonitoringTokenQueryResult = PagedQueryResult<MonitoringTokenUsageItem, MonitoringTokenAggregations>
+
 export interface SkillsRegistryEntry {
   [key: string]: unknown
 }
