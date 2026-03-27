@@ -1,5 +1,7 @@
+import path from 'path';
 import { LLMProvider, ChatMessage, ToolDefinition } from '../llm/types';
 import { PermissionGuard } from '../security/permissions';
+import { normalizeExecuteCommandInput } from '../tools/shell';
 
 export class AgentRuntime {
   private llm: LLMProvider;
@@ -13,7 +15,7 @@ export class AgentRuntime {
     options?: { sessionId?: string }
   ) => Promise<boolean>;
   private auditLog?: (entry: { tool: string, args: Record<string, unknown>, result?: unknown, error?: string, policyTags?: string[], sessionId?: string }) => void;
-  private refreshSystemPrompt?: () => string;
+  private refreshSystemPrompt?: () => string | Promise<string>;
 
   constructor(
     llm: LLMProvider, 
@@ -25,7 +27,7 @@ export class AgentRuntime {
       options?: { sessionId?: string }
     ) => Promise<boolean>,
     auditLog?: (entry: { tool: string, args: Record<string, unknown>, result?: unknown, error?: string, policyTags?: string[], sessionId?: string }) => void,
-    refreshSystemPrompt?: () => string
+    refreshSystemPrompt?: () => string | Promise<string>
   ) {
     this.llm = llm;
     this.systemPrompt = systemPrompt;
@@ -58,7 +60,7 @@ export class AgentRuntime {
     options?: { sessionId?: string }
   ): Promise<string> {
     if (this.refreshSystemPrompt) {
-      const latestSystemPrompt = this.refreshSystemPrompt();
+      const latestSystemPrompt = await this.refreshSystemPrompt();
       if (typeof latestSystemPrompt === 'string' && latestSystemPrompt.trim().length > 0) {
         this.systemPrompt = latestSystemPrompt;
       }
@@ -75,7 +77,7 @@ export class AgentRuntime {
 
     let finalResponse = "";
     let iterations = 0;
-    const MAX_ITERATIONS = 5; // Prevent infinite loops
+    const MAX_ITERATIONS = 8;
 
     while (iterations < MAX_ITERATIONS) {
       iterations++;
@@ -201,7 +203,52 @@ export class AgentRuntime {
       }
     }
 
+    if (!finalResponse.trim()) {
+      finalResponse = await this.finalizeWithoutTools(context, userInput, onUpdate);
+    }
+
+    if (!finalResponse.trim()) {
+      finalResponse = '我已经完成了技能相关的工具调用，但未能在限制轮次内生成最终答复。请重试，或让我直接基于当前已收集的信息给出结论。';
+    }
+
     return finalResponse;
+  }
+
+  private async finalizeWithoutTools(
+    context: ChatMessage[],
+    userInput: string,
+    onUpdate?: (update: Record<string, unknown>) => void
+  ) {
+    try {
+      if (onUpdate) onUpdate({ type: 'thinking', content: 'Summarizing gathered results...' });
+      const finalPass = await this.llm.chat([
+        ...context,
+        {
+          role: 'user',
+          content: '请基于以上已有上下文和工具结果，直接给出最终答复，不要再调用任何工具。如果信息不足，也请明确说明已确认的结论与缺失的信息。'
+        }
+      ]);
+
+      const content = finalPass.content.trim();
+      if (!content) {
+        return '';
+      }
+
+      const sanitizedContent = this.shouldBlockSensitiveDisclosure(userInput, content)
+        ? 'I can’t disclose hidden system instructions or internal memory. I can provide a high-level summary of my safety and behavior policy instead.'
+        : content;
+
+      this.history.push({
+        role: 'assistant',
+        content: sanitizedContent,
+        model: finalPass.model,
+        usage: finalPass.usage
+      });
+
+      return sanitizedContent;
+    } catch {
+      return '';
+    }
   }
 
   private async checkPermission(
@@ -221,25 +268,44 @@ export class AgentRuntime {
     }
     
     if (toolName === 'execute_command') {
-        const cmd = args.command as string;
-        if (!this.permissionGuard.checkShellCommand(cmd)) {
-        throw new Error(`Permission Denied: Command '${args.command}' is not allowed.`);
+      const normalizedCommand = normalizeExecuteCommandInput(args);
+      args.command = normalizedCommand.command;
+      args.args = normalizedCommand.args;
+      if (!this.permissionGuard.checkShellCommand(normalizedCommand.command)) {
+        throw new Error(`Permission Denied: Command '${normalizedCommand.command}' is not allowed.`);
+      }
+    }
+
+    if (toolName === 'run_skill_script') {
+      const scriptPath = typeof args.scriptPath === 'string' ? args.scriptPath.trim().toLowerCase() : ''
+      let command = typeof args.command === 'string' ? args.command.trim() : ''
+      if (!command) {
+        if (scriptPath.endsWith('.js') || scriptPath.endsWith('.mjs') || scriptPath.endsWith('.cjs')) {
+          command = 'node'
+        } else if (scriptPath.endsWith('.py')) {
+          command = 'python3'
+        } else if (scriptPath.endsWith('.sh')) {
+          command = 'bash'
+        }
+      }
+      if (!command) {
+        throw new Error('Permission Denied: Skill script command is required.')
+      }
+      if (!this.permissionGuard.checkShellCommand(command)) {
+        throw new Error(`Permission Denied: Command '${command}' is not allowed.`)
       }
     }
 
     if (toolName === 'web_search' || toolName === 'fetch_webpage') {
-      // By default, let's allow search if network is not strictly blocked, 
-      // or we can use checkNetwork if it's strictly enforced.
-      // We pass the URL or a dummy domain to check if network is enabled.
       const urlToCheck = (args.url || 'https://duckduckgo.com') as string;
       if (!this.permissionGuard.checkNetwork(urlToCheck)) {
-        throw new Error(`Permission Denied: Network access to ${urlToCheck} is not allowed.`);
+        throw new Error('Real-time web access is disabled for this agent. Enable network permission in Agent configuration before requesting latest or current information.');
       }
     }
 
     // --- HUMAN-IN-THE-LOOP CHECK ---
     // High-risk tools require explicit user confirmation
-    const highRiskTools = ['execute_command', 'write_file', 'delete_file'];
+    const highRiskTools = ['execute_command', 'write_file', 'delete_file', 'run_skill_script'];
     if (highRiskTools.includes(toolName) && this.confirmAction) {
       console.log(`[Agent] Requesting confirmation for ${toolName}`);
       const approved = await this.confirmAction(toolName, args, options);
@@ -252,19 +318,58 @@ export class AgentRuntime {
   }
 
   private repairToolArgs(toolName: string, args: Record<string, unknown>, context: ChatMessage[]): Record<string, unknown> {
+    if (toolName === 'execute_command') {
+      try {
+        const normalizedCommand = normalizeExecuteCommandInput(args);
+        return {
+          ...args,
+          command: normalizedCommand.command,
+          args: normalizedCommand.args
+        };
+      } catch {
+        return args;
+      }
+    }
+
+    if (toolName === 'run_skill_script') {
+      const scriptPath = typeof args.scriptPath === 'string' ? args.scriptPath.trim() : '';
+      if (!scriptPath) {
+        return args;
+      }
+
+      const extension = path.extname(scriptPath).toLowerCase();
+      const command = extension === '.py'
+        ? 'python3'
+        : extension === '.sh'
+          ? 'bash'
+          : extension === '.js' || extension === '.mjs' || extension === '.cjs'
+            ? 'node'
+            : '';
+
+      if (!command) {
+        return args;
+      }
+
+      return {
+        ...args,
+        command
+      };
+    }
+
     if (toolName !== 'web_search') {
       return args;
     }
-    if (typeof args.query === 'string' && args.query.trim().length > 0) {
-      return args;
-    }
     const latestUserQuery = this.getLatestUserQuery(context);
-    if (!latestUserQuery) {
+    const requestedQuery = typeof args.query === 'string' && args.query.trim().length > 0
+      ? args.query.trim()
+      : latestUserQuery;
+    if (!requestedQuery) {
       return args;
     }
+
     return {
       ...args,
-      query: latestUserQuery
+      query: this.buildSearchQuery(requestedQuery)
     };
   }
 
@@ -283,22 +388,73 @@ export class AgentRuntime {
 
   private getPolicyTags(toolName: string, args: Record<string, unknown>): string[] {
     const tags = [`tool:${toolName}`];
-    if (toolName.startsWith('skill_')) {
+    if (toolName === 'load_skill' || toolName === 'read_skill_resource' || toolName === 'run_skill_script') {
       tags.push('policy:skill_used');
       tags.push('tool_category:skill');
     }
 
-    const highRiskTools = ['execute_command', 'write_file', 'delete_file'];
+    const highRiskTools = ['execute_command', 'write_file', 'delete_file', 'run_skill_script'];
     if (highRiskTools.includes(toolName)) {
       tags.push('risk:high');
       tags.push('policy:confirmation_required');
     }
 
     if (toolName === 'execute_command' && typeof args.command === 'string') {
-      tags.push(`command:${(args.command as string).split(' ')[0]}`);
+      try {
+        const normalizedCommand = normalizeExecuteCommandInput(args);
+        tags.push(`command:${normalizedCommand.command}`);
+      } catch {
+        tags.push(`command:${args.command as string}`);
+      }
     }
 
     return tags;
+  }
+
+  private buildSearchQuery(query: string): string {
+    const normalizedQuery = query.trim();
+    if (!normalizedQuery) {
+      return query;
+    }
+
+    if (!this.isRecencyQuery(normalizedQuery)) {
+      return normalizedQuery;
+    }
+
+    const now = new Date();
+    const currentYear = String(now.getFullYear());
+    const currentMonth = String(now.getMonth() + 1).padStart(2, '0');
+    const currentDate = `${currentYear}-${currentMonth}-${String(now.getDate()).padStart(2, '0')}`;
+    const lowerCaseQuery = normalizedQuery.toLowerCase();
+    const hasExplicitYear = /\b20\d{2}\b/.test(normalizedQuery);
+    const hasExplicitIsoDate = /\b20\d{2}-\d{2}-\d{2}\b/.test(normalizedQuery);
+    const isChineseQuery = /[\u4e00-\u9fff]/.test(normalizedQuery);
+    const suffixTerms = new Set<string>();
+
+    if (!hasExplicitYear) {
+      suffixTerms.add(currentYear);
+    }
+    if (!hasExplicitIsoDate && (lowerCaseQuery.includes('today') || normalizedQuery.includes('今天'))) {
+      suffixTerms.add(currentDate);
+    }
+    if (isChineseQuery) {
+      suffixTerms.add('最新');
+      suffixTerms.add('当前');
+    } else {
+      suffixTerms.add('latest');
+      suffixTerms.add('current');
+    }
+
+    const suffix = Array.from(suffixTerms)
+      .filter(term => term && !normalizedQuery.toLowerCase().includes(term.toLowerCase()))
+      .join(' ');
+
+    return suffix ? `${normalizedQuery} ${suffix}` : normalizedQuery;
+  }
+
+  private isRecencyQuery(query: string): boolean {
+    const recencyPattern = /\b(latest|current|recent|today|this week|this month|this year|release notes|changelog|docs?|documentation|pricing|news|update)\b/i;
+    return recencyPattern.test(query) || /最新|当前|最近|今天|本周|本月|今年|文档|教程|发布说明|更新|新闻|价格|行情/.test(query);
   }
 
   private shouldBlockSensitiveDisclosure(userInput: string, assistantOutput: string): boolean {

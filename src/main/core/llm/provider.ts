@@ -60,26 +60,15 @@ export class OpenAIProvider implements LLMProvider {
     return trimmed;
   }
 
-  async chat(messages: ChatMessage[], tools?: ToolDefinition[]): Promise<ChatMessage> {
-    const openaiTools = tools?.map(tool => ({
-      type: 'function' as const,
-      function: {
-        name: tool.name,
-        description: tool.description,
-        parameters: this.toJsonSchema(tool.parameters)
-      }
-    }));
-
-    // Keep track of the last assistant message's tool calls to repair broken history
+  private formatMessages(messages: ChatMessage[]) {
     let lastToolCalls: Record<string, unknown>[] = [];
 
-    const formattedMessages = messages.map(msg => {
+    return messages.map((msg) => {
       if (msg.role === 'assistant' && msg.tool_calls) {
         lastToolCalls = msg.tool_calls;
         return msg;
       }
       if (msg.role === 'tool') {
-        // Try to recover missing tool_call_id from the last assistant message
         let callId = msg.tool_call_id;
         if (!callId && lastToolCalls.length > 0) {
           const matchedCall = lastToolCalls.find(
@@ -91,16 +80,31 @@ export class OpenAIProvider implements LLMProvider {
             callId = lastToolCalls[0].id as string;
           }
         }
-        
+
         return {
           role: msg.role,
           content: msg.content,
-          // Fallback to a generated ID to prevent API serialization errors
           tool_call_id: callId || `call_${Math.random().toString(36).substring(2)}`
         };
       }
       return msg;
     });
+  }
+
+  private formatTools(tools?: ToolDefinition[]) {
+    return tools?.map((tool) => ({
+      type: 'function' as const,
+      function: {
+        name: tool.name,
+        description: tool.description,
+        parameters: this.toJsonSchema(tool.parameters)
+      }
+    }));
+  }
+
+  async chat(messages: ChatMessage[], tools?: ToolDefinition[]): Promise<ChatMessage> {
+    const openaiTools = this.formatTools(tools);
+    const formattedMessages = this.formatMessages(messages);
 
     const response = await this.client.chat.completions.create({
       model: this.model,
@@ -125,6 +129,21 @@ export class OpenAIProvider implements LLMProvider {
         total_tokens: response.usage.total_tokens
       } : undefined
     };
+  }
+
+  async stream(messages: ChatMessage[], onChunk: (chunk: string) => void): Promise<void> {
+    const response = await this.client.chat.completions.create({
+      model: this.model,
+      messages: this.formatMessages(messages) as unknown as Parameters<typeof this.client.chat.completions.create>[0]['messages'],
+      stream: true
+    });
+
+    for await (const chunk of response) {
+      const content = chunk.choices[0]?.delta?.content;
+      if (typeof content === 'string' && content.length > 0) {
+        onChunk(content);
+      }
+    }
   }
 
   private toJsonSchema(parameters: ToolDefinition['parameters']): Record<string, unknown> {

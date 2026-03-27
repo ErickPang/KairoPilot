@@ -1,3 +1,20 @@
+export type {
+  AgentConfig,
+  AgentStats,
+  AgentPermissionConfig,
+  AuditLogEntry,
+  AuditLogQuery,
+  AuditLogQueryResult,
+  KairoPilotConfig,
+  LegacyAgentConfig,
+  ModelConfig,
+  MonitoringTokenQuery,
+  MonitoringTokenQueryResult,
+  ProviderConfig,
+  ProviderType,
+  SkillSummary
+} from '../shared/contracts';
+
 export interface Message {
   role: 'user' | 'assistant' | 'system' | 'tool' | 'thinking';
   content?: string;
@@ -7,71 +24,10 @@ export interface Message {
   name?: string;
 }
 
-export interface LegacyAgentConfig {
-  provider: 'openai' | 'ollama' | 'anthropic' | 'deepseek' | 'zhipu' | 'kimi' | 'qianwen' | 'custom';
-  apiKey: string;
-  baseUrl: string;
-  model: string;
-  workspace: string;
-  systemPrompt: string;
-  enableShell: boolean;
-  allowedPaths: string[];
-  allowedCommands: string[];
-}
-
-export interface ModelConfig {
-  id: string;
-  name: string;
-  provider: '' | 'openai' | 'ollama' | 'anthropic' | 'deepseek' | 'zhipu' | 'kimi' | 'qianwen' | 'custom';
-  baseUrl: string;
-  apiKey: string;
-  model: string;
-  availableModels?: Array<{ id: string; name: string }>;
-}
-
 export interface FetchModelsResult {
   success: boolean;
   models: string[];
   error?: string;
-}
-
-export interface ProviderConfig {
-  provider: 'openai' | 'ollama' | 'anthropic' | 'deepseek' | 'zhipu' | 'kimi' | 'qianwen' | 'custom';
-  baseUrl: string;
-  apiKey: string;
-  model: Array<{ id: string; name: string }>;
-}
-
-export interface AgentConfig {
-  id: string;
-  name: string;
-  workspace: string;
-  workspaceName?: string;
-  systemPrompt: string;
-  identityPrompt: string;
-  userPrompt: string;
-  soulPrompt: string;
-  model: string;
-  allowedPaths: string[];
-  allowedCommands: string[];
-  enableShell: boolean;
-}
-
-export interface KairoPilotConfig {
-  version: string;
-  models: {
-    providers: Record<string, ProviderConfig>;
-  };
-  agents: {
-    activeAgentId: string;
-    list: AgentConfig[];
-  };
-  plugins: {
-    registry: unknown[];
-  };
-  skills: {
-    registry: unknown[];
-  };
 }
 
 export interface SystemStats {
@@ -112,15 +68,4 @@ export interface SessionContextState {
   activeAgentId: string | null;
   activeSessionId: string | null;
   confirmationRequest: ConfirmationRequest | null;
-}
-
-export interface AuditLogEntry {
-  id: string;
-  timestamp: number;
-  tool: string;
-  args: Record<string, unknown>;
-  result?: unknown;
-  error?: string;
-  sessionId?: string;
-  policyTags?: string[];
 }

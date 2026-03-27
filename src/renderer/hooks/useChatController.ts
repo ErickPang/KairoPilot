@@ -1,15 +1,7 @@
 import { Dispatch, RefObject, SetStateAction, useCallback, useEffect, useState } from 'react';
-import { ConfirmationRequest, Message, Session, SessionContextState, SessionSummary } from '../types';
+import { ConfirmationRequest, Message, SessionContextState, SessionSummary } from '../types';
 import { I18nContextValue } from '../components/layout/I18nContext';
-
-interface AgentUpdate {
-  type: string;
-  content?: string;
-  tool?: string;
-  args?: Record<string, unknown>;
-  result?: unknown;
-  error?: string;
-}
+import { KAIRO_EVENT, KAIRO_INVOKE } from '../../shared/ipc';
 
 interface UseChatControllerOptions {
   agentCount: number;
@@ -41,8 +33,7 @@ export function useChatController(options: UseChatControllerOptions) {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    const removeListener = window.kairo.on('agent:update', (...args: unknown[]) => {
-      const update = args[0] as AgentUpdate;
+    const removeListener = window.kairo.on(KAIRO_EVENT.agentUpdate, (update) => {
       if (update.type === 'thinking') {
         setMessages((prev) => {
           const lastMsg = prev[prev.length - 1];
@@ -85,8 +76,7 @@ export function useChatController(options: UseChatControllerOptions) {
   }, [setMessages, t]);
 
   useEffect(() => {
-    const removeListener = window.kairo.on('agent:ask-confirmation', (...args: unknown[]) => {
-      const request = args[0] as ConfirmationRequest;
+    const removeListener = window.kairo.on(KAIRO_EVENT.agentAskConfirmation, (request: ConfirmationRequest) => {
       updateSessionContext({ confirmationRequest: request });
     });
 
@@ -95,11 +85,10 @@ export function useChatController(options: UseChatControllerOptions) {
 
   const handleCreateSession = useCallback(async () => {
     try {
-      const newSession = await window.kairo.invoke('chat:createSession') as Session;
+      const newSession = await window.kairo.invoke(KAIRO_INVOKE.chatCreateSession);
       setSessions((prev) => [newSession, ...prev]);
       updateSessionContext({ activeSessionId: newSession.id });
       setMessages([]);
-      await window.kairo.invoke('chat:setActiveSession', newSession.id);
     } catch (error) {
       console.error('Failed to create session:', error);
     }
@@ -107,14 +96,14 @@ export function useChatController(options: UseChatControllerOptions) {
 
   const handleSelectSession = useCallback(async (sessionId: string) => {
     try {
-      const result = await window.kairo.invoke('chat:setActiveSession', sessionId) as { success: boolean; error?: string };
+      const result = await window.kairo.invoke(KAIRO_INVOKE.chatSetActiveSession, sessionId);
       if (!result.success) {
         throw new Error(result.error || 'Failed to switch session');
       }
 
       updateSessionContext({ activeSessionId: sessionId });
 
-      const active = await window.kairo.invoke('chat:getSession', sessionId) as Session | null;
+      const active = await window.kairo.invoke(KAIRO_INVOKE.chatGetSession, sessionId);
       if (active) {
         setMessages(active.messages);
       } else {
@@ -134,7 +123,7 @@ export function useChatController(options: UseChatControllerOptions) {
     }
 
     try {
-      await window.kairo.invoke('chat:deleteSession', sessionId);
+      await window.kairo.invoke(KAIRO_INVOKE.chatDeleteSession, sessionId);
       await loadSessions();
       await loadActiveSession();
     } catch (error) {
@@ -144,7 +133,7 @@ export function useChatController(options: UseChatControllerOptions) {
 
   const handleUpdateSessionTitle = useCallback(async (sessionId: string, title: string) => {
     try {
-      await window.kairo.invoke('chat:updateSessionTitle', { sessionId, title });
+      await window.kairo.invoke(KAIRO_INVOKE.chatUpdateSessionTitle, { sessionId, title });
       setSessions((prev) => prev.map((session) => session.id === sessionId ? { ...session, title } : session));
     } catch (error) {
       console.error('Failed to update session title:', error);
@@ -156,7 +145,7 @@ export function useChatController(options: UseChatControllerOptions) {
       return;
     }
 
-    await window.kairo.invoke('agent:confirm-response', {
+    await window.kairo.invoke(KAIRO_INVOKE.agentConfirmResponse, {
       id: sessionContext.confirmationRequest.id,
       approved: true
     });
@@ -168,7 +157,7 @@ export function useChatController(options: UseChatControllerOptions) {
       return;
     }
 
-    await window.kairo.invoke('agent:confirm-response', {
+    await window.kairo.invoke(KAIRO_INVOKE.agentConfirmResponse, {
       id: sessionContext.confirmationRequest.id,
       approved: false
     });
@@ -177,7 +166,7 @@ export function useChatController(options: UseChatControllerOptions) {
 
   const handleClear = useCallback(async () => {
     try {
-      await window.kairo.invoke('chat:clearAllSessions');
+      await window.kairo.invoke(KAIRO_INVOKE.chatClearAllSessions);
       setMessages([]);
       await loadSessions();
       updateSessionContext({ activeSessionId: null });
@@ -202,10 +191,9 @@ export function useChatController(options: UseChatControllerOptions) {
     }
 
     if (!sessionContext.activeSessionId) {
-      const newSession = await window.kairo.invoke('chat:createSession', input.substring(0, 30)) as Session;
+      const newSession = await window.kairo.invoke(KAIRO_INVOKE.chatCreateSession, input.substring(0, 30));
       setSessions((prev) => [newSession, ...prev]);
       updateSessionContext({ activeSessionId: newSession.id });
-      await window.kairo.invoke('chat:setActiveSession', newSession.id);
     }
 
     const userMessage: Message = { role: 'user', content: input };
@@ -214,7 +202,7 @@ export function useChatController(options: UseChatControllerOptions) {
     setLoading(true);
 
     try {
-      const result = await window.kairo.invoke('agent:chat', input) as { error?: string; content: string };
+      const result = await window.kairo.invoke(KAIRO_INVOKE.agentChat, input);
       if (result.error) {
         setMessages((prev) => [...prev, { role: 'assistant', content: `Error: ${result.error}` }]);
       } else {

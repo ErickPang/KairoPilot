@@ -13,6 +13,12 @@
     "dist",
     "dist-electron"
   ],
+  "extraResources": [
+    {
+      "from": "skills",
+      "to": "builtin-skills"
+    }
+  ],
   "mac": {
     "icon": "public/icon.png",
     "target": [
@@ -30,7 +36,7 @@
         ]
       }
     ],
-    "artifactName": "${productName}-Windows-${version}-Setup.${ext}"
+    "artifactName": "${productName}-${version}.${ext}"
   },
   "nsis": {
     "oneClick": false,
@@ -43,6 +49,6 @@
     "target": [
       "AppImage"
     ],
-    "artifactName": "${productName}-Linux-${version}.${ext}"
+    "artifactName": "${productName}-${version}.${ext}"
   }
 }

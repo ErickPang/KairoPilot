@@ -1,22 +1,20 @@
 import { ipcMain } from 'electron';
-import { getAuditLogs } from '../store/audit';
-import { getActiveAgentId, setActiveAgentId } from '../store/config';
-import { createSession, getActiveSession, getSessionById, listSessions, setActiveSessionId, updateSessionMessages } from '../store/chat';
+import { queryAuditLogs } from '../store/audit';
+import { getActiveAgentId, getAgents, setActiveAgentId } from '../store/config';
+import { ensureActiveSession, updateSessionMessages } from '../store/chat';
+import { skillsManager } from '../core/skills/manager';
 import { getAgentRuntime, initializeAgent, pendingConfirmations, resolveAgentConfig } from './agentRuntime';
+import { KAIRO_EVENT, KAIRO_INVOKE } from '../../shared/ipc';
+import { SkillSummary } from '../../shared/contracts';
 
 function registerAgentHandlers() {
-  ipcMain.handle('agent:init', async (event, configOrId) => {
+  ipcMain.handle(KAIRO_INVOKE.agentInit, async (event, configOrId) => {
     try {
       const config = await resolveAgentConfig(configOrId);
 
       if (typeof configOrId === 'string') {
         setActiveAgentId(configOrId);
-        const agentSessions = listSessions(configOrId);
-        if (agentSessions.length > 0) {
-          setActiveSessionId(agentSessions[0].id, configOrId);
-        } else {
-          createSession('New Chat', configOrId);
-        }
+        ensureActiveSession(configOrId);
       }
 
       await initializeAgent(config, event.sender);
@@ -30,7 +28,7 @@ function registerAgentHandlers() {
     }
   });
 
-  ipcMain.handle('agent:confirm-response', async (_, { id, approved }) => {
+  ipcMain.handle(KAIRO_INVOKE.agentConfirmResponse, async (_, { id, approved }) => {
     const resolve = pendingConfirmations.get(id);
     if (resolve) {
       resolve(approved);
@@ -39,11 +37,24 @@ function registerAgentHandlers() {
     return { success: true };
   });
 
-  ipcMain.handle('audit:get', async (_, limit) => {
-    return getAuditLogs(limit);
+  ipcMain.handle(KAIRO_INVOKE.auditGet, async (_, query) => {
+    if (typeof query === 'number') {
+      return queryAuditLogs({ page: 1, pageSize: query });
+    }
+    return queryAuditLogs(typeof query === 'object' && query ? query : {});
   });
 
-  ipcMain.handle('agent:chat', async (event, message) => {
+  ipcMain.handle(KAIRO_INVOKE.skillsGetAll, async () => {
+    const agents = getAgents();
+    const result: Record<string, SkillSummary[]> = {};
+    result.public = await skillsManager.listPublicSkills();
+    for (const agent of agents) {
+      result[agent.id] = await skillsManager.listAgentSkills(agent.id);
+    }
+    return result;
+  });
+
+  ipcMain.handle(KAIRO_INVOKE.agentChat, async (event, message) => {
     const activeAgentId = getActiveAgentId();
     if (!activeAgentId) {
       return { error: 'Agent not initialized. Please configure settings first.' };
@@ -65,16 +76,7 @@ function registerAgentHandlers() {
     }
 
     try {
-      let session = getActiveSession(activeAgentId);
-      if (!session || session.agentId !== activeAgentId) {
-        const existingSession = listSessions(activeAgentId)[0];
-        if (existingSession) {
-          setActiveSessionId(existingSession.id, activeAgentId);
-          session = getSessionById(existingSession.id);
-        } else {
-          session = createSession('New Chat', activeAgentId);
-        }
-      }
+      const session = ensureActiveSession(activeAgentId);
 
       if (!session) {
         return { error: 'Failed to resolve active session.' };
@@ -82,7 +84,7 @@ function registerAgentHandlers() {
 
       agent.setHistory(session.messages);
       const response = await agent.chat(message, (update) => {
-        event.sender.send('agent:update', update);
+        event.sender.send(KAIRO_EVENT.agentUpdate, update);
       }, { sessionId: session.id });
       updateSessionMessages(session.id, agent.getHistory());
       return { content: response };

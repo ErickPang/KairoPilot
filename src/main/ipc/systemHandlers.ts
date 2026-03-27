@@ -1,11 +1,12 @@
 import { ipcMain, dialog } from 'electron';
 import os from 'os';
 import { spawn } from 'child_process';
+import { KAIRO_EVENT, KAIRO_INVOKE } from '../../shared/ipc';
 
 let previousCpus = os.cpus();
 
 function registerSystemHandlers() {
-  ipcMain.handle('system:stats', async () => {
+  ipcMain.handle(KAIRO_INVOKE.systemStats, async () => {
     const currentCpus = os.cpus();
     const totalMem = os.totalmem();
     const freeMem = os.freemem();
@@ -38,7 +39,7 @@ function registerSystemHandlers() {
     };
   });
 
-  ipcMain.handle('system:selectDirectory', async () => {
+  ipcMain.handle(KAIRO_INVOKE.systemSelectDirectory, async () => {
     const { canceled, filePaths } = await dialog.showOpenDialog({
       properties: ['openDirectory']
     });
@@ -48,7 +49,7 @@ function registerSystemHandlers() {
     return filePaths[0];
   });
 
-  ipcMain.handle('ollama:check', async (_, baseUrl: string) => {
+  ipcMain.handle(KAIRO_INVOKE.ollamaCheck, async (_, baseUrl: string) => {
     try {
       const url = baseUrl || 'http://localhost:11434';
       const response = await fetch(url);
@@ -61,7 +62,7 @@ function registerSystemHandlers() {
     }
   });
 
-  ipcMain.handle('ollama:start', async () => {
+  ipcMain.handle(KAIRO_INVOKE.ollamaStart, async () => {
     return new Promise((resolve) => {
       const child = spawn('ollama', ['serve'], {
         detached: true,
@@ -81,7 +82,7 @@ function registerSystemHandlers() {
     });
   });
 
-  ipcMain.handle('ollama:pull', async (event, { baseUrl, modelName }) => {
+  ipcMain.handle(KAIRO_INVOKE.ollamaPull, async (event, { baseUrl, modelName }) => {
     try {
       const url = `${baseUrl || 'http://localhost:11434'}/api/pull`;
       const response = await fetch(url, {
@@ -113,7 +114,7 @@ function registerSystemHandlers() {
         for (const line of lines) {
           try {
             const data = JSON.parse(line);
-            event.sender.send('ollama:pull-progress', data);
+            event.sender.send(KAIRO_EVENT.ollamaPullProgress, data);
           } catch (_error) {
             continue;
           }

@@ -1,0 +1,52 @@
+export const KAIRO_INVOKE = {
+  agentChat: 'agent:chat',
+  agentConfirmResponse: 'agent:confirm-response',
+  agentInit: 'agent:init',
+  auditGet: 'audit:get',
+  chatClearAllSessions: 'chat:clearAllSessions',
+  chatCreateSession: 'chat:createSession',
+  chatDeleteSession: 'chat:deleteSession',
+  chatGetActiveSession: 'chat:getActiveSession',
+  chatGetAgentStats: 'chat:getAgentStats',
+  chatGetSession: 'chat:getSession',
+  chatGetTokenUsageDetails: 'chat:getTokenUsageDetails',
+  chatListSessions: 'chat:listSessions',
+  chatSetActiveSession: 'chat:setActiveSession',
+  chatUpdateSessionTitle: 'chat:updateSessionTitle',
+  configCreateAgentDraft: 'config:create-agent-draft',
+  configDeleteAgent: 'config:delete-agent',
+  configDeleteModel: 'config:delete-model',
+  configGet: 'config:get',
+  configGetActiveAgentId: 'config:get-active-agent-id',
+  configGetAgents: 'config:get-agents',
+  configGetAll: 'config:get-all',
+  configGetModels: 'config:get-models',
+  configSave: 'config:save',
+  configSaveAgent: 'config:save-agent',
+  configSaveModel: 'config:save-model',
+  configSetActiveAgent: 'config:set-active-agent',
+  llmListModels: 'llm:listModels',
+  ollamaCheck: 'ollama:check',
+  ollamaPull: 'ollama:pull',
+  ollamaStart: 'ollama:start',
+  pluginsGetInstalled: 'plugins:getInstalled',
+  pluginsGetStore: 'plugins:getStore',
+  pluginsInstall: 'plugins:install',
+  pluginsUninstall: 'plugins:uninstall',
+  skillsGetAll: 'skills:getAll',
+  systemSelectDirectory: 'system:selectDirectory',
+  systemStats: 'system:stats'
+} as const
+
+export const KAIRO_EVENT = {
+  agentAskConfirmation: 'agent:ask-confirmation',
+  agentUpdate: 'agent:update',
+  mainProcessMessage: 'main-process-message',
+  ollamaPullProgress: 'ollama:pull-progress'
+} as const
+
+export type KairoInvokeChannel = typeof KAIRO_INVOKE[keyof typeof KAIRO_INVOKE]
+export type KairoEventChannel = typeof KAIRO_EVENT[keyof typeof KAIRO_EVENT]
+
+export const KAIRO_INVOKE_CHANNELS = Object.values(KAIRO_INVOKE) as KairoInvokeChannel[]
+export const KAIRO_EVENT_CHANNELS = Object.values(KAIRO_EVENT) as KairoEventChannel[]

@@ -6,6 +6,13 @@ import { app } from 'electron';
 import fs from 'fs';
 import Store from 'electron-store'; // Only for migration
 import { getAgents } from './config';
+import type {
+  AgentStats,
+  MonitoringTokenQuery,
+  MonitoringTokenQueryResult,
+  MonitoringTokenUsageItem,
+  TokenMetricFacet
+} from '../../shared/contracts';
 
 export interface Session {
   id: string;
@@ -24,34 +31,6 @@ export interface SessionSummary {
   updatedAt: number;
 }
 
-export interface TokenUsageDetailItem {
-  id: string;
-  sessionId: string;
-  sessionTitle: string;
-  agentId: string;
-  role: ChatMessage['role'];
-  content: string;
-  timestamp: number;
-  model: string;
-  promptTokens: number;
-  completionTokens: number;
-  totalTokens: number;
-}
-
-export interface TokenUsageDetailsResult {
-  items: TokenUsageDetailItem[];
-  total: number;
-  page: number;
-  pageSize: number;
-  totalPages: number;
-  summary: {
-    agentId?: string;
-    promptTokens: number;
-    completionTokens: number;
-    totalTokens: number;
-  };
-}
-
 let db: Database.Database | null = null;
 const DEFAULT_AGENT_ID = 'mainAgent';
 
@@ -61,6 +40,15 @@ function normalizeAgentId(agentId?: string | null) {
 
 function getActiveSessionStateKey(agentId?: string | null) {
   return `active_session_id:${normalizeAgentId(agentId)}`;
+}
+
+function ensureIndexes(database: Database.Database) {
+  database.exec(`
+    CREATE INDEX IF NOT EXISTS idx_sessions_agent_updated_at
+      ON sessions(agent_id, updated_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_messages_session_timestamp
+      ON messages(session_id, timestamp ASC);
+  `);
 }
 
 // Initialize Database
@@ -79,6 +67,7 @@ function getDb(): Database.Database {
     db.pragma('journal_mode = WAL'); // Enable Write-Ahead Logging for performance
     
     initTables(db);
+    ensureIndexes(db);
     
     // Migration for agent_id column
     try {
@@ -297,6 +286,33 @@ function parseUsage(value: string | null | undefined) {
   }
 }
 
+function serializeComparableMessage(message: ChatMessage): string {
+  return JSON.stringify({
+    role: message.role,
+    content: message.content || '',
+    timestamp: message.timestamp || 0,
+    name: message.name || null,
+    tool_call_id: message.tool_call_id || null,
+    tool_calls: message.tool_calls || null,
+    usage: message.usage || null,
+    model: message.model || null
+  });
+}
+
+function getSharedMessagePrefixLength(existingMessages: ChatMessage[], nextMessages: ChatMessage[]) {
+  const maxComparableLength = Math.min(existingMessages.length, nextMessages.length);
+  let prefixLength = 0;
+
+  while (prefixLength < maxComparableLength) {
+    if (serializeComparableMessage(existingMessages[prefixLength]) !== serializeComparableMessage(nextMessages[prefixLength])) {
+      break;
+    }
+    prefixLength += 1;
+  }
+
+  return prefixLength;
+}
+
 function mapSessionRowToSummary(session: {
   id: string;
   title: string;
@@ -311,6 +327,28 @@ function mapSessionRowToSummary(session: {
     createdAt: session.created_at,
     updatedAt: session.updated_at
   };
+}
+
+function getSessionAgentId(sessionId: string): string | null {
+  const db = getDb();
+  const row = db.prepare('SELECT agent_id FROM sessions WHERE id = ?').get(sessionId) as { agent_id: string | null } | undefined;
+  return row?.agent_id || null;
+}
+
+function getLatestSessionSummary(agentId?: string): SessionSummary | null {
+  const db = getDb();
+  const normalizedAgentId = normalizeAgentId(agentId);
+  const row = db.prepare(
+    'SELECT id, title, agent_id, created_at, updated_at FROM sessions WHERE agent_id = ? ORDER BY updated_at DESC LIMIT 1'
+  ).get(normalizedAgentId) as {
+    id: string;
+    title: string;
+    agent_id: string;
+    created_at: number;
+    updated_at: number;
+  } | undefined;
+
+  return row ? mapSessionRowToSummary(row) : null;
 }
 
 export function listSessions(agentId?: string): SessionSummary[] {
@@ -370,6 +408,25 @@ export function getActiveSession(agentId?: string): Session | null {
   return getSessionById(row.value);
 }
 
+export function ensureActiveSession(agentId?: string, title: string = 'New Chat'): Session {
+  const normalizedAgentId = normalizeAgentId(agentId);
+  const activeSession = getActiveSession(normalizedAgentId);
+  if (activeSession?.agentId === normalizedAgentId) {
+    return activeSession;
+  }
+
+  const latestSession = getLatestSessionSummary(normalizedAgentId);
+  if (latestSession) {
+    setActiveSessionId(latestSession.id, normalizedAgentId);
+    const hydratedSession = getSessionById(latestSession.id);
+    if (hydratedSession) {
+      return hydratedSession;
+    }
+  }
+
+  return createSession(title, normalizedAgentId);
+}
+
 export function getSessionById(sessionId: string): Session | null {
   const db = getDb();
   const sessionRow = db.prepare('SELECT * FROM sessions WHERE id = ?').get(sessionId) as { id: string; title: string; agent_id: string; created_at: number; updated_at: number } | undefined;
@@ -386,7 +443,7 @@ export function getSessionById(sessionId: string): Session | null {
 export function setActiveSessionId(sessionId: string | null, agentId?: string) {
   const db = getDb();
   const resolvedAgentId = sessionId
-    ? getSessionById(sessionId)?.agentId || agentId
+    ? getSessionAgentId(sessionId) || agentId
     : agentId;
   const stateKey = getActiveSessionStateKey(resolvedAgentId);
 
@@ -401,24 +458,52 @@ export function updateSessionMessages(sessionId: string, messages: ChatMessage[]
   const db = getDb();
   
   const transaction = db.transaction(() => {
-    // 1. Update session timestamp
-    db.prepare('UPDATE sessions SET updated_at = ? WHERE id = ?').run(Date.now(), sessionId);
+    const now = Date.now();
+    db.prepare('UPDATE sessions SET updated_at = ? WHERE id = ?').run(now, sessionId);
 
-    // 2. Sync messages (Full replace strategy for simplicity, or diffing?)
-    // Full replace is safer for consistency but slower.
-    // Given the previous implementation was full JSON replace, this is still better/same.
-    // Optimization: Delete all and re-insert is the easiest way to handle edits/deletes in chat.
-    
-    db.prepare('DELETE FROM messages WHERE session_id = ?').run(sessionId);
-    
+    const existingRows = db.prepare(
+      'SELECT role, content, timestamp, name, tool_call_id, tool_calls, usage, model FROM messages WHERE session_id = ? ORDER BY timestamp ASC'
+    ).all(sessionId) as Array<{
+      role: ChatMessage['role'];
+      content: string;
+      timestamp: number;
+      name?: string;
+      tool_call_id?: string;
+      tool_calls?: string;
+      usage?: string;
+      model?: string;
+    }>;
+    const existingMessages = existingRows.map(mapMessageRowToChatMessage);
+    const sharedPrefixLength = getSharedMessagePrefixLength(existingMessages, messages);
     const insert = db.prepare('INSERT INTO messages (id, session_id, role, content, timestamp, name, tool_call_id, tool_calls, usage, model) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+
+    if (sharedPrefixLength === existingMessages.length && messages.length >= existingMessages.length) {
+      for (const msg of messages.slice(sharedPrefixLength)) {
+        insert.run(
+          uuidv4(),
+          sessionId,
+          msg.role,
+          msg.content || '',
+          msg.timestamp || now,
+          msg.name || null,
+          msg.tool_call_id || null,
+          msg.tool_calls ? JSON.stringify(msg.tool_calls) : null,
+          msg.usage ? JSON.stringify(msg.usage) : null,
+          msg.model || null
+        );
+      }
+      return;
+    }
+
+    db.prepare('DELETE FROM messages WHERE session_id = ?').run(sessionId);
+
     for (const msg of messages) {
       insert.run(
         uuidv4(), 
         sessionId, 
         msg.role, 
-        msg.content || '', 
-        msg.timestamp || Date.now(),
+        msg.content || '',
+        msg.timestamp || now,
         msg.name || null,
         msg.tool_call_id || null,
         msg.tool_calls ? JSON.stringify(msg.tool_calls) : null,
@@ -460,6 +545,26 @@ export function deleteSession(sessionId: string) {
   transaction();
 }
 
+export function deleteSessionsByAgent(agentId: string) {
+  const db = getDb();
+  const normalizedAgentId = normalizeAgentId(agentId);
+  const stateKey = getActiveSessionStateKey(normalizedAgentId);
+  const sessionRows = db.prepare('SELECT id FROM sessions WHERE agent_id = ?').all(normalizedAgentId) as Array<{ id: string }>;
+  const sessionIds = sessionRows.map((row) => row.id);
+
+  const transaction = db.transaction(() => {
+    const deleteMessages = db.prepare('DELETE FROM messages WHERE session_id = ?');
+    for (const sessionId of sessionIds) {
+      deleteMessages.run(sessionId);
+    }
+    db.prepare('DELETE FROM sessions WHERE agent_id = ?').run(normalizedAgentId);
+    db.prepare('DELETE FROM app_state WHERE key = ?').run(stateKey);
+  });
+
+  transaction();
+  return sessionIds;
+}
+
 export function clearAllSessions() {
   const db = getDb();
   const transaction = db.transaction(() => {
@@ -468,15 +573,6 @@ export function clearAllSessions() {
     db.prepare('DELETE FROM app_state WHERE key = ?').run('active_session_id');
   });
   transaction();
-}
-
-export interface AgentStats {
-  agentId: string;
-  totalSessions: number;
-  totalMessages: number;
-  promptTokens: number;
-  completionTokens: number;
-  totalTokens: number;
 }
 
 export function getAgentStats(): AgentStats[] {
@@ -525,90 +621,114 @@ export function getAgentStats(): AgentStats[] {
   return Array.from(statsMap.values());
 }
 
-export function getTokenUsageDetails(agentId?: string, page: number = 1, pageSize: number = 20): TokenUsageDetailsResult {
-  const db = getDb();
-  const normalizedPage = Number.isFinite(page) && page > 0 ? Math.floor(page) : 1;
-  const normalizedPageSize = Number.isFinite(pageSize) && pageSize > 0 ? Math.min(Math.floor(pageSize), 100) : 20;
-  const normalizedAgentId = agentId?.trim() || '';
-  const hasAgentFilter = normalizedAgentId.length > 0;
-  const totalRow = (hasAgentFilter
-    ? db.prepare(`
-      SELECT COUNT(*) as count
-      FROM messages
-      INNER JOIN sessions ON sessions.id = messages.session_id
-      WHERE messages.usage IS NOT NULL AND sessions.agent_id = ?
-    `).get(normalizedAgentId)
-    : db.prepare('SELECT COUNT(*) as count FROM messages WHERE usage IS NOT NULL').get()) as { count: number };
-  const total = totalRow?.count || 0;
-  const totalPages = total === 0 ? 1 : Math.ceil(total / normalizedPageSize);
-  const safePage = Math.min(normalizedPage, totalPages);
-  const offset = (safePage - 1) * normalizedPageSize;
-  const rows = (hasAgentFilter
-    ? db.prepare(`
-    SELECT
-      messages.id,
-      messages.session_id,
-      sessions.title AS session_title,
-      sessions.agent_id,
-      messages.role,
-      messages.content,
-      messages.timestamp,
-      messages.usage,
-      messages.model
-    FROM messages
-    INNER JOIN sessions ON sessions.id = messages.session_id
-    WHERE messages.usage IS NOT NULL AND sessions.agent_id = ?
-    ORDER BY messages.timestamp DESC
-    LIMIT ? OFFSET ?
-  `).all(normalizedAgentId, normalizedPageSize, offset)
-    : db.prepare(`
-    SELECT
-      messages.id,
-      messages.session_id,
-      sessions.title AS session_title,
-      sessions.agent_id,
-      messages.role,
-      messages.content,
-      messages.timestamp,
-      messages.usage,
-      messages.model
-    FROM messages
-    INNER JOIN sessions ON sessions.id = messages.session_id
-    WHERE messages.usage IS NOT NULL
-    ORDER BY messages.timestamp DESC
-    LIMIT ? OFFSET ?
-  `).all(normalizedPageSize, offset)) as Array<{
-    id: string;
-    session_id: string;
-    session_title: string;
-    agent_id: string | null;
-    role: ChatMessage['role'];
-    content: string;
-    timestamp: number;
-    usage: string;
-    model: string | null;
-  }>;
+function buildMonitoringWhereClause(query: MonitoringTokenQuery) {
+  const clauses = ['messages.usage IS NOT NULL'];
+  const params: Array<string | number> = [];
+  const agentId = query.agentId?.trim();
+  const model = query.model?.trim();
+  const role = query.role?.trim();
+  const sessionId = query.sessionId?.trim();
+  const search = query.search?.trim().toLowerCase();
+  const startTime = Number.isFinite(query.startTime) ? Number(query.startTime) : undefined;
+  const endTime = Number.isFinite(query.endTime) ? Number(query.endTime) : undefined;
+
+  if (agentId) {
+    clauses.push('sessions.agent_id = ?');
+    params.push(agentId);
+  }
+
+  if (model) {
+    clauses.push('COALESCE(messages.model, \'\') = ?');
+    params.push(model);
+  }
+
+  if (role && role !== 'all') {
+    clauses.push('messages.role = ?');
+    params.push(role);
+  }
+
+  if (sessionId) {
+    clauses.push('messages.session_id = ?');
+    params.push(sessionId);
+  }
+
+  if (typeof startTime === 'number') {
+    clauses.push('messages.timestamp >= ?');
+    params.push(startTime);
+  }
+
+  if (typeof endTime === 'number') {
+    clauses.push('messages.timestamp <= ?');
+    params.push(endTime);
+  }
+
+  if (search) {
+    const keyword = `%${search}%`;
+    clauses.push(`(
+      LOWER(COALESCE(messages.content, '')) LIKE ?
+      OR LOWER(COALESCE(messages.model, '')) LIKE ?
+      OR LOWER(COALESCE(sessions.title, '')) LIKE ?
+      OR LOWER(COALESCE(sessions.agent_id, '')) LIKE ?
+    )`);
+    params.push(keyword, keyword, keyword, keyword);
+  }
+
+  return {
+    whereClause: `WHERE ${clauses.join(' AND ')}`,
+    params,
+    normalizedAgentId: agentId
+  };
+}
+
+function buildTokenMetricFacets(
+  items: MonitoringTokenUsageItem[],
+  keySelector: (item: MonitoringTokenUsageItem) => string
+): TokenMetricFacet[] {
+  const facetMap = new Map<string, TokenMetricFacet>();
+
+  for (const item of items) {
+    const value = keySelector(item) || 'Unknown';
+    const current = facetMap.get(value) ?? {
+      value,
+      count: 0,
+      promptTokens: 0,
+      completionTokens: 0,
+      totalTokens: 0
+    };
+    current.count += 1;
+    current.promptTokens += item.promptTokens;
+    current.completionTokens += item.completionTokens;
+    current.totalTokens += item.totalTokens;
+    facetMap.set(value, current);
+  }
+
+  return Array.from(facetMap.values()).sort((left, right) => {
+    if (right.totalTokens !== left.totalTokens) {
+      return right.totalTokens - left.totalTokens;
+    }
+    if (right.count !== left.count) {
+      return right.count - left.count;
+    }
+    return left.value.localeCompare(right.value);
+  });
+}
+
+function mapMonitoringRows(rows: Array<{
+  id: string;
+  session_id: string;
+  session_title: string;
+  agent_id: string | null;
+  role: ChatMessage['role'];
+  content: string;
+  timestamp: number;
+  usage: string;
+  model: string | null;
+}>): MonitoringTokenUsageItem[] {
   const agentModelMap = new Map(
     getAgents().map((agent) => [agent.id, agent.model || ''])
   );
-  const agentStats = getAgentStats();
-  const summary = hasAgentFilter
-    ? (agentStats.find((stat) => stat.agentId === normalizedAgentId) || {
-      agentId: normalizedAgentId,
-      promptTokens: 0,
-      completionTokens: 0,
-      totalTokens: 0
-    })
-    : agentStats.reduce((acc, stat) => ({
-      promptTokens: acc.promptTokens + stat.promptTokens,
-      completionTokens: acc.completionTokens + stat.completionTokens,
-      totalTokens: acc.totalTokens + stat.totalTokens
-    }), {
-      promptTokens: 0,
-      completionTokens: 0,
-      totalTokens: 0
-    });
-  const items = rows.flatMap((row) => {
+
+  return rows.flatMap((row) => {
     const usage = parseUsage(row.usage);
     if (!usage) {
       return [];
@@ -630,18 +750,93 @@ export function getTokenUsageDetails(agentId?: string, page: number = 1, pageSiz
       totalTokens: usage.totalTokens
     }];
   });
+}
+
+export function getTokenUsageDetails(query: MonitoringTokenQuery = {}): MonitoringTokenQueryResult {
+  const db = getDb();
+  const page = Number.isFinite(query.page) && Number(query.page) > 0 ? Math.floor(Number(query.page)) : 1;
+  const pageSize = Number.isFinite(query.pageSize) && Number(query.pageSize) > 0 ? Math.min(Math.floor(Number(query.pageSize)), 100) : 20;
+  const { whereClause, params, normalizedAgentId } = buildMonitoringWhereClause(query);
+  const totalRow = db.prepare(`
+    SELECT COUNT(*) as count
+    FROM messages
+    INNER JOIN sessions ON sessions.id = messages.session_id
+    ${whereClause}
+  `).get(...params) as { count: number };
+  const total = totalRow?.count || 0;
+  const totalPages = total === 0 ? 1 : Math.ceil(total / pageSize);
+  const safePage = Math.min(page, totalPages);
+  const offset = (safePage - 1) * pageSize;
+  const baseSelect = `
+    SELECT
+      messages.id,
+      messages.session_id,
+      sessions.title AS session_title,
+      sessions.agent_id,
+      messages.role,
+      messages.content,
+      messages.timestamp,
+      messages.usage,
+      messages.model
+    FROM messages
+    INNER JOIN sessions ON sessions.id = messages.session_id
+    ${whereClause}
+  `;
+  const rows = db.prepare(`
+    ${baseSelect}
+    ORDER BY messages.timestamp DESC
+    LIMIT ? OFFSET ?
+  `).all(...params, pageSize, offset) as Array<{
+    id: string;
+    session_id: string;
+    session_title: string;
+    agent_id: string | null;
+    role: ChatMessage['role'];
+    content: string;
+    timestamp: number;
+    usage: string;
+    model: string | null;
+  }>;
+  const aggregateRows = db.prepare(`
+    ${baseSelect}
+    ORDER BY messages.timestamp DESC
+  `).all(...params) as Array<{
+    id: string;
+    session_id: string;
+    session_title: string;
+    agent_id: string | null;
+    role: ChatMessage['role'];
+    content: string;
+    timestamp: number;
+    usage: string;
+    model: string | null;
+  }>;
+  const items = mapMonitoringRows(rows);
+  const aggregateItems = mapMonitoringRows(aggregateRows);
+  const aggregations = aggregateItems.reduce((acc, item) => ({
+    promptTokens: acc.promptTokens + item.promptTokens,
+    completionTokens: acc.completionTokens + item.completionTokens,
+    totalTokens: acc.totalTokens + item.totalTokens
+  }), {
+    promptTokens: 0,
+    completionTokens: 0,
+    totalTokens: 0
+  });
 
   return {
     items,
     total,
     page: safePage,
-    pageSize: normalizedPageSize,
+    pageSize,
     totalPages,
-    summary: {
-      agentId: hasAgentFilter ? normalizedAgentId : undefined,
-      promptTokens: summary.promptTokens,
-      completionTokens: summary.completionTokens,
-      totalTokens: summary.totalTokens
+    aggregations: {
+      agentId: normalizedAgentId || undefined,
+      promptTokens: aggregations.promptTokens,
+      completionTokens: aggregations.completionTokens,
+      totalTokens: aggregations.totalTokens,
+      totalRecords: aggregateItems.length,
+      models: buildTokenMetricFacets(aggregateItems, (item) => item.model),
+      roles: buildTokenMetricFacets(aggregateItems, (item) => item.role)
     }
   };
 }

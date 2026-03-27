@@ -54,11 +54,39 @@ export class PermissionGuard {
    * This prevents directory traversal attacks (e.g. ../../etc/passwd)
    */
   private isPathSafe(basePath: string, targetPath: string): boolean {
-    const resolvedBase = path.resolve(basePath);
-    const resolvedTarget = path.resolve(targetPath);
+    const resolvedBase = this.resolvePathForContainment(basePath);
+    const resolvedTarget = this.resolvePathForContainment(targetPath);
     // It must start with the base path + separator (to avoid matching /project-evil with /project),
     // or it must be exactly the base path.
     return resolvedTarget.startsWith(resolvedBase + path.sep) || resolvedTarget === resolvedBase;
+  }
+
+  private resolvePathForContainment(targetPath: string): string {
+    const absolutePath = path.resolve(targetPath);
+    const missingSegments: string[] = [];
+    let currentPath = absolutePath;
+
+    while (!fs.existsSync(currentPath)) {
+      const parentPath = path.dirname(currentPath);
+      if (parentPath === currentPath) {
+        break;
+      }
+      missingSegments.unshift(path.basename(currentPath));
+      currentPath = parentPath;
+    }
+
+    try {
+      if (fs.existsSync(currentPath)) {
+        const resolvedExistingPath = fs.realpathSync(currentPath);
+        return missingSegments.length > 0
+          ? path.join(resolvedExistingPath, ...missingSegments)
+          : resolvedExistingPath;
+      }
+    } catch {
+      // Ignore and fall back to resolved absolute path below.
+    }
+
+    return absolutePath;
   }
 
   /**
@@ -72,16 +100,7 @@ export class PermissionGuard {
     if (isRead && !this.config.fileSystem.read) return false;
     if (isWrite && !this.config.fileSystem.write) return false;
 
-    let absoluteTarget = path.resolve(targetPath);
-
-    // Resolve realpath to prevent symlink escape attacks (if the file/dir exists)
-    try {
-      if (fs.existsSync(absoluteTarget)) {
-        absoluteTarget = fs.realpathSync(absoluteTarget);
-      }
-    } catch {
-      // Ignore if we can't resolve realpath (e.g. permission issues during resolution)
-    }
+    const absoluteTarget = this.resolvePathForContainment(targetPath);
 
     const targetBaseName = path.basename(absoluteTarget);
     if (PROTECTED_PROMPT_FILES.has(targetBaseName)) {
@@ -116,10 +135,8 @@ export class PermissionGuard {
    */
   checkShellCommand(command: string): boolean {
     if (!this.config.shell.enabled) return false;
-    
-    // Extract the binary name (first word)
-    const binary = command.trim().split(/\s+/)[0];
-    return this.config.shell.allowedCommands.includes(binary);
+
+    return this.config.shell.allowedCommands.includes(command.trim());
   }
 
   /**

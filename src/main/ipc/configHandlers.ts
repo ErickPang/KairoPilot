@@ -1,7 +1,14 @@
 import { ipcMain } from 'electron';
+import { pluginManager } from '../core/plugins/manager';
 import { OpenAIProvider } from '../core/llm/provider';
+import { removeAgentRuntime } from './agentRuntime';
+import { deleteAuditLogsBySessionIds } from '../store/audit';
+import { deleteSessionsByAgent } from '../store/chat';
 import {
+  createAgentDraft,
+  deleteAgentWorkspace,
   getAgentConfig,
+  getAgent,
   saveAgentConfig,
   getKairoPilotConfig,
   getModels,
@@ -13,18 +20,34 @@ import {
   setActiveAgentId,
   getActiveAgentId
 } from '../store/config';
+import { KAIRO_INVOKE } from '../../shared/ipc';
+
+function removeRuntimesForAgents(agentIds: string[]) {
+  const uniqueAgentIds = [...new Set(agentIds.filter((id) => typeof id === 'string' && id.length > 0))];
+  for (const agentId of uniqueAgentIds) {
+    removeAgentRuntime(agentId);
+  }
+}
+
+function findAgentIdsByProvider(providerId: string) {
+  return getAgents()
+    .filter((agent) => agent.model === providerId || agent.model.startsWith(`${providerId}/`))
+    .map((agent) => agent.id);
+}
 
 function registerConfigHandlers() {
-  ipcMain.handle('config:get', async () => {
+  ipcMain.handle(KAIRO_INVOKE.configGet, async () => {
     return getAgentConfig();
   });
 
-  ipcMain.handle('config:save', async (_, config) => {
+  ipcMain.handle(KAIRO_INVOKE.configSave, async (_, config) => {
+    const activeAgentId = getActiveAgentId();
     saveAgentConfig(config);
+    removeRuntimesForAgents([activeAgentId]);
     return { success: true };
   });
 
-  ipcMain.handle('llm:listModels', async (_, config) => {
+  ipcMain.handle(KAIRO_INVOKE.llmListModels, async (_, config) => {
     try {
       const llm = new OpenAIProvider({
         provider: config.provider || 'openai',
@@ -39,7 +62,7 @@ function registerConfigHandlers() {
     }
   });
 
-  ipcMain.handle('config:get-all', async () => {
+  ipcMain.handle(KAIRO_INVOKE.configGetAll, async () => {
     const config = getKairoPilotConfig();
     return {
       ...config,
@@ -50,40 +73,70 @@ function registerConfigHandlers() {
     };
   });
 
-  ipcMain.handle('config:get-models', async () => {
+  ipcMain.handle(KAIRO_INVOKE.configGetModels, async () => {
     return getModels();
   });
 
-  ipcMain.handle('config:save-model', async (_, model) => {
+  ipcMain.handle(KAIRO_INVOKE.configSaveModel, async (_, model) => {
     saveModel(model);
+    removeRuntimesForAgents(findAgentIdsByProvider(model.id));
     return { success: true };
   });
 
-  ipcMain.handle('config:delete-model', async (_, id) => {
+  ipcMain.handle(KAIRO_INVOKE.configDeleteModel, async (_, id) => {
+    removeRuntimesForAgents(findAgentIdsByProvider(id));
     deleteModel(id);
     return { success: true };
   });
 
-  ipcMain.handle('config:get-agents', async () => {
+  ipcMain.handle(KAIRO_INVOKE.configGetAgents, async () => {
     return getAgents();
   });
 
-  ipcMain.handle('config:save-agent', async (_, agent) => {
+  ipcMain.handle(KAIRO_INVOKE.configCreateAgentDraft, async (_, seed) => {
+    return createAgentDraft(seed);
+  });
+
+  ipcMain.handle(KAIRO_INVOKE.configSaveAgent, async (_, agent) => {
     saveAgent(agent);
+    removeRuntimesForAgents([agent.id]);
     return { success: true };
   });
 
-  ipcMain.handle('config:delete-agent', async (_, id) => {
+  ipcMain.handle(KAIRO_INVOKE.configDeleteAgent, async (_, id) => {
+    if (typeof id !== 'string' || id.length === 0) {
+      throw new Error('Invalid agent id');
+    }
+    if (id === 'mainAgent') {
+      throw new Error('Main Agent cannot be deleted');
+    }
+    const agent = getAgent(id);
+    if (!agent) {
+      return { success: true };
+    }
+    const sessionIds = deleteSessionsByAgent(id);
+    deleteAuditLogsBySessionIds(sessionIds);
+    removeAgentRuntime(id);
     deleteAgent(id);
+    try {
+      await pluginManager.cleanupAgentScopedPlugins(id);
+    } catch (error) {
+      console.warn(`[Handlers] Failed to clean up scoped plugins for agent ${id}:`, error);
+    }
+    try {
+      deleteAgentWorkspace(agent);
+    } catch (error) {
+      console.warn(`[Handlers] Failed to delete workspace for agent ${id}:`, error);
+    }
     return { success: true };
   });
 
-  ipcMain.handle('config:set-active-agent', async (_, id) => {
+  ipcMain.handle(KAIRO_INVOKE.configSetActiveAgent, async (_, id) => {
     setActiveAgentId(id);
     return { success: true };
   });
 
-  ipcMain.handle('config:get-active-agent-id', async () => {
+  ipcMain.handle(KAIRO_INVOKE.configGetActiveAgentId, async () => {
     return getActiveAgentId();
   });
 }

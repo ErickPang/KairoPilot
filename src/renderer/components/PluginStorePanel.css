@@ -1,4 +1,4 @@
-.plugin-tabs {
+.store-tabs {
   display: flex;
   gap: 1rem;
   margin-top: 1rem;
@@ -7,7 +7,7 @@
   padding-bottom: 0.5rem;
 }
 
-.plugin-tab {
+.store-tab {
   background: none;
   border: none;
   padding: 0.5rem 1.25rem;
@@ -20,23 +20,23 @@
   box-shadow: none;
 }
 
-.plugin-tab:hover {
+.store-tab:hover {
   color: var(--foreground);
   background: rgba(255, 255, 255, 0.5);
 }
 
-.plugin-tab.active {
+.store-tab.active {
   color: var(--primary-fg);
   background: var(--primary-gradient);
   font-weight: 600;
   box-shadow: 0 4px 12px rgba(16, 185, 129, 0.2);
 }
 
-.plugin-tab.active::after {
+.store-tab.active::after {
   display: none;
 }
 
-.skill-category-title {
+.store-section-title {
   font-size: 1rem;
   font-weight: 600;
   color: var(--foreground);
@@ -263,6 +263,11 @@
   font-size: 0.85rem;
   color: var(--muted-fg);
   word-break: break-word;
+}
+
+.store-card-actions {
+  display: flex;
+  justify-content: flex-end;
 }
 
 .modal-overlay {

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import React, { useState } from 'react';
 import { SessionSummary } from '../types';
 import { IconPlus, IconEdit, IconTrash } from './Icons';
 import { useTranslation } from '../hooks/useTranslation';
@@ -12,7 +12,7 @@ interface SidebarProps {
   handleUpdateSessionTitle: (id: string, title: string) => void;
 }
 
-export function Sidebar({ 
+export const Sidebar = React.memo(function Sidebar({ 
   sessions, 
   activeSessionId, 
   handleCreateSession, 
@@ -99,4 +99,4 @@ export function Sidebar({
       </div>
     </div>
   );
-}
+});
