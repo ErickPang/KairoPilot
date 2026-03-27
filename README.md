@@ -248,6 +248,43 @@ KairoPilot 目前已经具备一个可用的桌面 Agent MVP，并持续向“�
 - 更清晰的主进程服务化结构
 - 更多桌面端自动化能力
 
+## 项目协作规范
+
+### Git Flow（适合有发布周期的项目）
+
+- **主分支**：`main` —— 存放正式发布版本，每个提交对应一个版本。
+    
+- **开发分支**：`develop` —— 集成所有功能，准备下一次发布。
+    
+- **功能分支**：`feature/xxx` —— 从 `develop` 切出，完成后合并回 `develop`。
+    
+- **发布分支**：`release/v1.0` —— 从 `develop` 切出，用于发布前的测试和修复，完成后合并到 `main` 和 `develop`。
+    
+- **热修复分支**：`hotfix/v1.0.1` —— 从 `main` 切出，修复线上紧急问题，完成后合并到 `main` 和 `develop`。
+
+### 分支命名规范
+
+社区普遍遵循以下命名规则，让分支一看就懂：
+
+| 分支类型    | 命名格式                     | 示例                         |
+| ------- | ------------------------ | -------------------------- |
+| 主分支     | `main` 或 `master`        | `main`                     |
+| 开发分支    | `develop`                | `develop`                  |
+| 功能分支    | `feature/<描述>`           | `feature/user-login`       |
+| 修复分支    | `bugfix/<描述>`            | `bugfix/fix-header-layout` |
+| 热修复分支   | `hotfix/<描述>`            | `hotfix/critical-security` |
+| 发布分支    | `release/<版本号>`          | `release/v1.2.0`           |
+| 文档/实验分支 | `docs/<描述>` 或 `exp/<描述>` | `docs/api-guide`           |
+
+**命名要点**：
+
+- 全部使用**小写字母**，单词间用**连字符 `-`** 分隔（避免空格、下划线、驼峰）。
+  
+- 描述应简洁明了，例如 `feature/add-dark-mode` 比 `feature/dark` 更清晰。
+  
+- 如果与 issue 关联，可包含编号，如 `bugfix/issue-123`
+
+
 ## 许可证
 
 MIT
