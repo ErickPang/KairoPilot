@@ -134,15 +134,15 @@ export function PluginStorePanel() {
           </button>
         </div>
 
-        <div className="plugin-tabs">
+        <div className="store-tabs">
           <button 
-            className={`plugin-tab ${activeTab === 'installed' ? 'active' : ''}`}
+            className={`store-tab ${activeTab === 'installed' ? 'active' : ''}`}
             onClick={() => setActiveTab('installed')}
           >
             {t('plugins.installedTab')}
           </button>
           <button 
-            className={`plugin-tab ${activeTab === 'store' ? 'active' : ''}`}
+            className={`store-tab ${activeTab === 'store' ? 'active' : ''}`}
             onClick={() => setActiveTab('store')}
           >
             {t('plugins.uninstalledTab')}
@@ -162,19 +162,19 @@ export function PluginStorePanel() {
 
         {loading && (
           <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--muted-fg)' }}>
-            {t('skills.loading')}
+            {t('plugins.loading')}
           </div>
         )}
 
         {!loading && activeTab === 'installed' && (
-          <div className="installed-skills-container">
-            <h3 className="skill-category-title">{t('plugins.installedTitle')}</h3>
+          <div className="installed-plugins-container">
+            <h3 className="store-section-title">{t('plugins.installedTitle')}</h3>
             {publicPlugins.length === 0 ? (
               <div className="empty-state">{t('plugins.noInstalled')}</div>
             ) : (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '1rem' }}>
                 {publicPlugins.map(plugin => (
-                  <InstalledSkillItem 
+                  <InstalledPluginItem 
                     key={`${plugin.id}-${plugin.scope}`} 
                     plugin={plugin} 
                     onUninstall={() => handleUninstall(plugin.id, plugin.scope)}
@@ -193,7 +193,7 @@ export function PluginStorePanel() {
               <div className="empty-state" style={{ marginTop: '4rem', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center' }}>
                 <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>🛒</div>
                 <h3 style={{ margin: '0 0 0.5rem 0' }}>{t('plugins.marketplace')}</h3>
-                <p style={{ margin: 0, color: 'var(--muted-fg)' }}>{t('skills.allInstalled')}</p>
+                <p style={{ margin: 0, color: 'var(--muted-fg)' }}>{t('plugins.allInstalled')}</p>
               </div>
             ) : (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '1rem' }}>
@@ -210,7 +210,7 @@ export function PluginStorePanel() {
                       <div style={{ flex: 1 }}>
                         <h4 style={{ margin: '0 0 0.25rem 0' }}>{plugin.name}</h4>
                         <div style={{ fontSize: '0.8rem', color: 'var(--muted-fg)' }}>
-                          v{plugin.version} • {t('skills.by', { author: plugin.author })}
+                          v{plugin.version} • {t('plugins.by', { author: plugin.author })}
                         </div>
                       </div>
                     </div>
@@ -219,13 +219,13 @@ export function PluginStorePanel() {
                       {plugin.description}
                     </p>
 
-                    <div className="skill-card-actions">
+                    <div className="store-card-actions">
                       <button 
                         className="btn btn-primary"
                         onClick={() => handleInstallClick(plugin.id)}
                         disabled={actionInProgress === plugin.id}
                       >
-                        {actionInProgress === plugin.id ? <IconRefresh size={14} className="spinning" /> : t('skills.install')}
+                        {actionInProgress === plugin.id ? <IconRefresh size={14} className="spinning" /> : t('plugins.install')}
                       </button>
                     </div>
                   </div>
@@ -239,14 +239,14 @@ export function PluginStorePanel() {
       {installModalOpen && (
         <div className="modal-overlay" onClick={() => setInstallModalOpen(false)}>
           <div className="modal-content" onClick={e => e.stopPropagation()}>
-            <h3 style={{ marginBottom: '1rem', color: 'var(--foreground)' }}>{t('skills.installScope')}</h3>
+            <h3 style={{ marginBottom: '1rem', color: 'var(--foreground)' }}>{t('plugins.installScope')}</h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', maxHeight: '300px', overflowY: 'auto' }}>
               <button 
                 className="btn btn-secondary" 
                 onClick={() => handleConfirmInstall('public')}
                 style={{ justifyContent: 'flex-start', padding: '0.75rem', backgroundColor: 'var(--background)' }}
               >
-                {t('skills.publicScope')}
+                {t('plugins.publicScope')}
               </button>
               {agents.map(agent => (
                 <button 
@@ -255,7 +255,7 @@ export function PluginStorePanel() {
                   onClick={() => handleConfirmInstall(`agent:${agent.id}`)}
                   style={{ justifyContent: 'flex-start', padding: '0.75rem', backgroundColor: 'var(--background)' }}
                 >
-                  {t('skills.agentScope', { agent: agent.name })}
+                  {t('plugins.agentScope', { agent: agent.name })}
                 </button>
               ))}
             </div>
@@ -269,7 +269,7 @@ export function PluginStorePanel() {
   );
 }
 
-function InstalledSkillItem({ plugin, onUninstall, isWorking, isNative }: { plugin: InstalledPlugin, onUninstall: () => void, isWorking: boolean, isNative?: boolean }) {
+function InstalledPluginItem({ plugin, onUninstall, isWorking, isNative }: { plugin: InstalledPlugin, onUninstall: () => void, isWorking: boolean, isNative?: boolean }) {
   const { t } = useTranslation();
   
   return (
@@ -285,7 +285,7 @@ function InstalledSkillItem({ plugin, onUninstall, isWorking, isNative }: { plug
         <div style={{ flex: 1 }}>
           <h4 style={{ margin: '0 0 0.25rem 0' }}>{plugin.name}</h4>
           <div style={{ fontSize: '0.8rem', color: 'var(--muted-fg)' }}>
-            v{plugin.version} • {t('skills.by', { author: plugin.author })}
+            v{plugin.version} • {t('plugins.by', { author: plugin.author })}
           </div>
         </div>
       </div>
@@ -295,15 +295,15 @@ function InstalledSkillItem({ plugin, onUninstall, isWorking, isNative }: { plug
       </p>
 
       <div style={{ fontSize: '0.8rem', color: 'var(--muted-fg)', marginTop: '0.5rem' }}>
-        <strong>{t('skills.installedAt')}:</strong> {new Date(plugin.installedAt).toLocaleString()}
+        <strong>{t('plugins.installedAt')}:</strong> {new Date(plugin.installedAt).toLocaleString()}
       </div>
 
-      <div className="skill-card-actions" style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '0.5rem' }}>
+      <div className="store-card-actions" style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '0.5rem' }}>
         <button 
           className="btn btn-secondary btn-sm btn-danger"
           onClick={(e) => {
             e.stopPropagation();
-            if(confirm(t('common.confirm') + ' ' + t('skills.uninstall') + '?')) {
+            if(confirm(t('common.confirm') + ' ' + t('plugins.uninstall') + '?')) {
               onUninstall();
             }
           }}
@@ -311,7 +311,7 @@ function InstalledSkillItem({ plugin, onUninstall, isWorking, isNative }: { plug
           style={{ opacity: isNative ? 0.5 : 1, cursor: isNative ? 'not-allowed' : 'pointer' }}
         >
           {isWorking ? <IconRefresh size={14} className="spinning" /> : <IconTrash size={14} />}
-          <span style={{ marginLeft: '4px' }}>{isNative ? t('skills.installed') : t('skills.uninstall')}</span>
+          <span style={{ marginLeft: '4px' }}>{isNative ? t('plugins.installed') : t('plugins.uninstall')}</span>
         </button>
       </div>
     </div>

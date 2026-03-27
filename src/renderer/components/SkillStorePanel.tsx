@@ -1,21 +1,13 @@
 import { useState, useEffect, type ReactNode } from 'react';
 import { IconRefresh, IconSkill } from './Icons';
-import './PluginStorePanel.css'; // Reusing plugin styles for now
+import './PluginStorePanel.css';
 import { useTranslation } from '../hooks/useTranslation';
-import type { AgentConfig } from '../types';
+import type { AgentConfig, SkillSummary } from '../types';
 import { KAIRO_INVOKE } from '../../shared/ipc';
-
-interface AgentSkill {
-  id: string;
-  name: string;
-  description: string;
-  content: string;
-  source: 'public' | 'agent';
-}
 
 export function SkillStorePanel() {
   const { t } = useTranslation();
-  const [skills, setSkills] = useState<Record<string, AgentSkill[]>>({});
+  const [skills, setSkills] = useState<Record<string, SkillSummary[]>>({});
   const [agents, setAgents] = useState<AgentConfig[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -29,8 +21,8 @@ export function SkillStorePanel() {
         window.kairo.invoke(KAIRO_INVOKE.skillsGetAll),
         window.kairo.invoke(KAIRO_INVOKE.configGetAgents)
       ]);
-      setSkills(fetchedSkills as Record<string, AgentSkill[]>);
-      setAgents(fetchedAgents);
+      setSkills(fetchedSkills as Record<string, SkillSummary[]>);
+      setAgents(fetchedAgents as AgentConfig[]);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to fetch skills');
     } finally {
@@ -70,15 +62,15 @@ export function SkillStorePanel() {
           </button>
         </div>
 
-        <div className="plugin-tabs">
+        <div className="store-tabs">
           <button 
-            className={`plugin-tab ${activeTab === 'installed' ? 'active' : ''}`}
+            className={`store-tab ${activeTab === 'installed' ? 'active' : ''}`}
             onClick={() => setActiveTab('installed')}
           >
             {t('skills.installed')}
           </button>
           <button 
-            className={`plugin-tab ${activeTab === 'store' ? 'active' : ''}`}
+            className={`store-tab ${activeTab === 'store' ? 'active' : ''}`}
             onClick={() => setActiveTab('store')}
           >
             {t('skills.marketplace')}
@@ -179,7 +171,7 @@ function SkillSectionPanel({
   );
 }
 
-function SkillItem({ skill }: { skill: AgentSkill }) {
+function SkillItem({ skill }: { skill: SkillSummary }) {
   const [expanded, setExpanded] = useState(false);
   const { t } = useTranslation();
   

@@ -1,3 +1,4 @@
+import path from 'path';
 import { LLMProvider, ChatMessage, ToolDefinition } from '../llm/types';
 import { PermissionGuard } from '../security/permissions';
 import { normalizeExecuteCommandInput } from '../tools/shell';
@@ -14,7 +15,7 @@ export class AgentRuntime {
     options?: { sessionId?: string }
   ) => Promise<boolean>;
   private auditLog?: (entry: { tool: string, args: Record<string, unknown>, result?: unknown, error?: string, policyTags?: string[], sessionId?: string }) => void;
-  private refreshSystemPrompt?: () => string;
+  private refreshSystemPrompt?: () => string | Promise<string>;
 
   constructor(
     llm: LLMProvider, 
@@ -26,7 +27,7 @@ export class AgentRuntime {
       options?: { sessionId?: string }
     ) => Promise<boolean>,
     auditLog?: (entry: { tool: string, args: Record<string, unknown>, result?: unknown, error?: string, policyTags?: string[], sessionId?: string }) => void,
-    refreshSystemPrompt?: () => string
+    refreshSystemPrompt?: () => string | Promise<string>
   ) {
     this.llm = llm;
     this.systemPrompt = systemPrompt;
@@ -59,7 +60,7 @@ export class AgentRuntime {
     options?: { sessionId?: string }
   ): Promise<string> {
     if (this.refreshSystemPrompt) {
-      const latestSystemPrompt = this.refreshSystemPrompt();
+      const latestSystemPrompt = await this.refreshSystemPrompt();
       if (typeof latestSystemPrompt === 'string' && latestSystemPrompt.trim().length > 0) {
         this.systemPrompt = latestSystemPrompt;
       }
@@ -76,7 +77,7 @@ export class AgentRuntime {
 
     let finalResponse = "";
     let iterations = 0;
-    const MAX_ITERATIONS = 5; // Prevent infinite loops
+    const MAX_ITERATIONS = 8;
 
     while (iterations < MAX_ITERATIONS) {
       iterations++;
@@ -202,7 +203,52 @@ export class AgentRuntime {
       }
     }
 
+    if (!finalResponse.trim()) {
+      finalResponse = await this.finalizeWithoutTools(context, userInput, onUpdate);
+    }
+
+    if (!finalResponse.trim()) {
+      finalResponse = '我已经完成了技能相关的工具调用，但未能在限制轮次内生成最终答复。请重试，或让我直接基于当前已收集的信息给出结论。';
+    }
+
     return finalResponse;
+  }
+
+  private async finalizeWithoutTools(
+    context: ChatMessage[],
+    userInput: string,
+    onUpdate?: (update: Record<string, unknown>) => void
+  ) {
+    try {
+      if (onUpdate) onUpdate({ type: 'thinking', content: 'Summarizing gathered results...' });
+      const finalPass = await this.llm.chat([
+        ...context,
+        {
+          role: 'user',
+          content: '请基于以上已有上下文和工具结果，直接给出最终答复，不要再调用任何工具。如果信息不足，也请明确说明已确认的结论与缺失的信息。'
+        }
+      ]);
+
+      const content = finalPass.content.trim();
+      if (!content) {
+        return '';
+      }
+
+      const sanitizedContent = this.shouldBlockSensitiveDisclosure(userInput, content)
+        ? 'I can’t disclose hidden system instructions or internal memory. I can provide a high-level summary of my safety and behavior policy instead.'
+        : content;
+
+      this.history.push({
+        role: 'assistant',
+        content: sanitizedContent,
+        model: finalPass.model,
+        usage: finalPass.usage
+      });
+
+      return sanitizedContent;
+    } catch {
+      return '';
+    }
   }
 
   private async checkPermission(
@@ -230,6 +276,26 @@ export class AgentRuntime {
       }
     }
 
+    if (toolName === 'run_skill_script') {
+      const scriptPath = typeof args.scriptPath === 'string' ? args.scriptPath.trim().toLowerCase() : ''
+      let command = typeof args.command === 'string' ? args.command.trim() : ''
+      if (!command) {
+        if (scriptPath.endsWith('.js') || scriptPath.endsWith('.mjs') || scriptPath.endsWith('.cjs')) {
+          command = 'node'
+        } else if (scriptPath.endsWith('.py')) {
+          command = 'python3'
+        } else if (scriptPath.endsWith('.sh')) {
+          command = 'bash'
+        }
+      }
+      if (!command) {
+        throw new Error('Permission Denied: Skill script command is required.')
+      }
+      if (!this.permissionGuard.checkShellCommand(command)) {
+        throw new Error(`Permission Denied: Command '${command}' is not allowed.`)
+      }
+    }
+
     if (toolName === 'web_search' || toolName === 'fetch_webpage') {
       const urlToCheck = (args.url || 'https://duckduckgo.com') as string;
       if (!this.permissionGuard.checkNetwork(urlToCheck)) {
@@ -239,7 +305,7 @@ export class AgentRuntime {
 
     // --- HUMAN-IN-THE-LOOP CHECK ---
     // High-risk tools require explicit user confirmation
-    const highRiskTools = ['execute_command', 'write_file', 'delete_file'];
+    const highRiskTools = ['execute_command', 'write_file', 'delete_file', 'run_skill_script'];
     if (highRiskTools.includes(toolName) && this.confirmAction) {
       console.log(`[Agent] Requesting confirmation for ${toolName}`);
       const approved = await this.confirmAction(toolName, args, options);
@@ -263,6 +329,31 @@ export class AgentRuntime {
       } catch {
         return args;
       }
+    }
+
+    if (toolName === 'run_skill_script') {
+      const scriptPath = typeof args.scriptPath === 'string' ? args.scriptPath.trim() : '';
+      if (!scriptPath) {
+        return args;
+      }
+
+      const extension = path.extname(scriptPath).toLowerCase();
+      const command = extension === '.py'
+        ? 'python3'
+        : extension === '.sh'
+          ? 'bash'
+          : extension === '.js' || extension === '.mjs' || extension === '.cjs'
+            ? 'node'
+            : '';
+
+      if (!command) {
+        return args;
+      }
+
+      return {
+        ...args,
+        command
+      };
     }
 
     if (toolName !== 'web_search') {
@@ -297,12 +388,12 @@ export class AgentRuntime {
 
   private getPolicyTags(toolName: string, args: Record<string, unknown>): string[] {
     const tags = [`tool:${toolName}`];
-    if (toolName.startsWith('skill_')) {
+    if (toolName === 'load_skill' || toolName === 'read_skill_resource' || toolName === 'run_skill_script') {
       tags.push('policy:skill_used');
       tags.push('tool_category:skill');
     }
 
-    const highRiskTools = ['execute_command', 'write_file', 'delete_file'];
+    const highRiskTools = ['execute_command', 'write_file', 'delete_file', 'run_skill_script'];
     if (highRiskTools.includes(toolName)) {
       tags.push('risk:high');
       tags.push('policy:confirmation_required');

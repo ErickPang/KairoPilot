@@ -1,4 +1,7 @@
 import path from 'path';
+import fs from 'fs/promises';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import { z } from 'zod';
 import { v4 as uuidv4 } from 'uuid';
 import { WebContents } from 'electron';
@@ -14,14 +17,176 @@ import { WebSearchTool, FetchWebpageTool } from '../core/tools/web';
 import { addAuditLog } from '../store/audit';
 import { AgentConfig, ModelConfig, getAgent, getModelForAgent } from '../store/config';
 import { pluginManager } from '../core/plugins/manager';
+import { skillsManager } from '../core/skills/manager';
 import { DEFAULT_SHELL_COMMANDS } from '../../shared/contracts';
 
 const runtimeRegistry = new Map<string, AgentRuntime>();
 const pendingConfirmations = new Map<string, (approved: boolean) => void>();
+const execFileAsync = promisify(execFile);
+const SKILL_SCRIPT_MAX_BUFFER_BYTES = 1024 * 1024;
 
 interface ResolvedAgentConfig {
   agent: AgentConfig;
   model: ModelConfig;
+}
+
+function resolveSkillScriptCommand(absoluteScriptPath: string) {
+  const extension = path.extname(absoluteScriptPath).toLowerCase();
+  if (extension === '.js' || extension === '.mjs' || extension === '.cjs') {
+    return 'node';
+  }
+  if (extension === '.py') {
+    return 'python3';
+  }
+  if (extension === '.sh') {
+    return 'bash';
+  }
+  throw new Error(`Unsupported skill script type: ${extension || 'unknown'}`);
+}
+
+function isInternalSkillResource(resourcePath: string) {
+  const normalizedPath = resourcePath.trim().replace(/\\/g, '/');
+  if (!normalizedPath) {
+    return true;
+  }
+
+  return normalizedPath
+    .split('/')
+    .some((segment) => segment === '_meta.json' || segment.startsWith('.'));
+}
+
+async function buildSkillCatalogSection(agentId: string) {
+  const skills = await skillsManager.listMergedSkills(agentId);
+  if (skills.length === 0) {
+    return '<available_skills>\nNo skills available.\n</available_skills>';
+  }
+
+  const entries = skills
+    .map((skill) => {
+      const versionText = skill.version ? ` | version: ${skill.version}` : '';
+      const sourceText = ` | scope: ${skill.source}`;
+      return `- ${skill.id}: ${skill.description}${versionText}${sourceText}`;
+    })
+    .join('\n');
+
+  return `<available_skills>\n${entries}\n</available_skills>`;
+}
+
+async function buildSystemPromptWithSkills(agent: AgentConfig, workspace: string) {
+  const basePrompt = PromptBuilder.buildSystemPrompt({
+    workspace,
+    kairopilotPrompt: agent.systemPrompt,
+    identityPrompt: agent.identityPrompt,
+    userPrompt: agent.userPrompt,
+    soulPrompt: agent.soulPrompt
+  });
+  const skillCatalog = await buildSkillCatalogSection(agent.id);
+  return `${basePrompt}\n\n${skillCatalog}`;
+}
+
+async function createLoadSkillTool(agentId: string): Promise<ToolDefinition> {
+  return {
+    name: 'load_skill',
+    description: 'Load the instructions of a matching skill by name before executing a skill-guided workflow.',
+    parameters: z.object({
+      name: z.string().trim().min(1).describe('The skill name or skill directory name.')
+    }),
+    execute: async (args: Record<string, unknown>) => {
+      const name = String(args.name ?? '').trim();
+      const metadata = await skillsManager.getMetadata(name, agentId);
+      const content = await skillsManager.readSkillContent(name, agentId);
+      const skillPath = await skillsManager.resolveSkillPath(name, agentId);
+
+      if (!metadata || !content || !skillPath) {
+        throw new Error(`Skill not found: ${name}`);
+      }
+
+      const entries = await fs.readdir(skillPath, { withFileTypes: true });
+      const resources = entries
+        .filter((entry) => entry.name !== 'SKILL.md' && !entry.name.startsWith('.') && entry.name !== '_meta.json')
+        .map((entry) => ({
+          name: entry.name,
+          type: entry.isDirectory() ? 'directory' : 'file'
+        }));
+
+      return {
+        name: metadata.name,
+        description: metadata.description,
+        version: metadata.metadata.version,
+        allowedTools: metadata.metadata.allowedTools,
+        skillPath,
+        content,
+        resources
+      };
+    }
+  };
+}
+
+function createReadSkillResourceTool(agentId: string): ToolDefinition {
+  return {
+    name: 'read_skill_resource',
+    description: 'Read an additional resource file from a loaded skill using a path relative to the skill root.',
+    parameters: z.object({
+      skill: z.string().trim().min(1).describe('The skill name or skill directory name.'),
+      path: z.string().trim().min(1).describe('A relative path inside the skill directory.')
+    }),
+    execute: async (args: Record<string, unknown>) => {
+      const skill = String(args.skill ?? '').trim();
+      const resourcePath = String(args.path ?? '').trim();
+      if (isInternalSkillResource(resourcePath)) {
+        throw new Error(`Skill resource is internal-only: ${skill}/${resourcePath}`);
+      }
+      const resource = await skillsManager.readSkillResource(skill, resourcePath, agentId);
+      if (!resource) {
+        throw new Error(`Skill resource not found: ${skill}/${resourcePath}`);
+      }
+      return resource;
+    }
+  };
+}
+
+function createRunSkillScriptTool(agentId: string): ToolDefinition {
+  return {
+    name: 'run_skill_script',
+    description: 'Run a bundled script from a skill when the skill explicitly requires executable helper logic.',
+    parameters: z.object({
+      skill: z.string().trim().min(1).describe('The skill name or skill directory name.'),
+      scriptPath: z.string().trim().min(1).describe('A relative path to the script inside the skill directory.'),
+      args: z.array(z.string()).default([]).describe('Arguments passed to the skill script.')
+    }),
+    execute: async (args: Record<string, unknown>) => {
+      const skill = String(args.skill ?? '').trim();
+      const scriptPath = String(args.scriptPath ?? '').trim();
+      const scriptArgs = Array.isArray(args.args)
+        ? args.args.map((value) => String(value))
+        : [];
+
+      const allowed = await skillsManager.canUseAllowedTool(skill, 'run_skill_script', agentId);
+      if (!allowed) {
+        throw new Error(`Skill ${skill} does not allow run_skill_script.`);
+      }
+
+      const absoluteScriptPath = await skillsManager.resolveResourcePath(skill, scriptPath, agentId);
+      if (!absoluteScriptPath) {
+        throw new Error(`Skill script not found: ${skill}/${scriptPath}`);
+      }
+
+      const command = resolveSkillScriptCommand(absoluteScriptPath);
+      const { stdout, stderr } = await execFileAsync(command, [absoluteScriptPath, ...scriptArgs], {
+        cwd: path.dirname(absoluteScriptPath),
+        maxBuffer: SKILL_SCRIPT_MAX_BUFFER_BYTES,
+        windowsHide: true
+      });
+
+      return {
+        command,
+        scriptPath: absoluteScriptPath,
+        stdout: stdout.trim(),
+        stderr: stderr.trim(),
+        exitCode: 0
+      };
+    }
+  };
 }
 
 async function initializeAgent(config: ResolvedAgentConfig, sender?: WebContents) {
@@ -61,13 +226,7 @@ async function initializeAgent(config: ResolvedAgentConfig, sender?: WebContents
     model: model.model || 'gpt-3.5-turbo'
   });
 
-  const systemPromptWithContext = PromptBuilder.buildSystemPrompt({
-    workspace,
-    kairopilotPrompt: agent.systemPrompt,
-    identityPrompt: agent.identityPrompt,
-    userPrompt: agent.userPrompt,
-    soulPrompt: agent.soulPrompt
-  });
+  const systemPromptWithContext = await buildSystemPromptWithSkills(agent, workspace);
 
   console.log(`[Agent] System prompt assembled. Length=${systemPromptWithContext.length}`);
 
@@ -101,13 +260,7 @@ async function initializeAgent(config: ResolvedAgentConfig, sender?: WebContents
         sessionId: log.sessionId
       });
     },
-    () => PromptBuilder.buildSystemPrompt({
-      workspace,
-      kairopilotPrompt: agent.systemPrompt,
-      identityPrompt: agent.identityPrompt,
-      userPrompt: agent.userPrompt,
-      soulPrompt: agent.soulPrompt
-    })
+    () => buildSystemPromptWithSkills(agent, workspace)
   );
 
   runtime.registerTool(ReadFileTool as unknown as ToolDefinition);
@@ -118,6 +271,9 @@ async function initializeAgent(config: ResolvedAgentConfig, sender?: WebContents
   runtime.registerTool(SystemInfoTool as unknown as ToolDefinition);
   runtime.registerTool(WebSearchTool as unknown as ToolDefinition);
   runtime.registerTool(FetchWebpageTool as unknown as ToolDefinition);
+  runtime.registerTool(await createLoadSkillTool(agent.id));
+  runtime.registerTool(createReadSkillResourceTool(agent.id));
+  runtime.registerTool(createRunSkillScriptTool(agent.id));
 
   try {
     const dynamicTools = await pluginManager.loadAllTools(agent.id);
@@ -127,24 +283,6 @@ async function initializeAgent(config: ResolvedAgentConfig, sender?: WebContents
     }
   } catch (error) {
     console.error('Failed to load dynamic plugins:', error);
-  }
-
-  try {
-    const agentSkills = await pluginManager.getMergedSkillsForAgent(agent.id);
-    for (const skill of agentSkills) {
-      const skillTool = {
-        name: `skill_${skill.id.replace(/[^a-zA-Z0-9_-]/g, '_')}`,
-        description: `Use this skill when you need to: ${skill.description}. Calling this will return the standard operating procedure (SOP) or instructions.`,
-        parameters: z.object({}),
-        execute: async () => {
-          return `[SKILL INSTRUCTIONS: ${skill.name}]\n\n${skill.content}`;
-        }
-      };
-      runtime.registerTool(skillTool as unknown as ToolDefinition);
-      console.log(`[Agent] Registered skill tool: ${skillTool.name} (Source: ${skill.source})`);
-    }
-  } catch (error) {
-    console.error('Failed to load agent skills:', error);
   }
 
   runtimeRegistry.set(agent.id, runtime);

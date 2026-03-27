@@ -1,9 +1,11 @@
 import { ipcMain } from 'electron';
 import { queryAuditLogs } from '../store/audit';
-import { getActiveAgentId, setActiveAgentId } from '../store/config';
+import { getActiveAgentId, getAgents, setActiveAgentId } from '../store/config';
 import { ensureActiveSession, updateSessionMessages } from '../store/chat';
+import { skillsManager } from '../core/skills/manager';
 import { getAgentRuntime, initializeAgent, pendingConfirmations, resolveAgentConfig } from './agentRuntime';
 import { KAIRO_EVENT, KAIRO_INVOKE } from '../../shared/ipc';
+import { SkillSummary } from '../../shared/contracts';
 
 function registerAgentHandlers() {
   ipcMain.handle(KAIRO_INVOKE.agentInit, async (event, configOrId) => {
@@ -40,6 +42,16 @@ function registerAgentHandlers() {
       return queryAuditLogs({ page: 1, pageSize: query });
     }
     return queryAuditLogs(typeof query === 'object' && query ? query : {});
+  });
+
+  ipcMain.handle(KAIRO_INVOKE.skillsGetAll, async () => {
+    const agents = getAgents();
+    const result: Record<string, SkillSummary[]> = {};
+    result.public = await skillsManager.listPublicSkills();
+    for (const agent of agents) {
+      result[agent.id] = await skillsManager.listAgentSkills(agent.id);
+    }
+    return result;
   });
 
   ipcMain.handle(KAIRO_INVOKE.agentChat, async (event, message) => {

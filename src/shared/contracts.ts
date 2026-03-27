@@ -152,6 +152,40 @@ export interface MonitoringTokenAggregations {
 
 export type MonitoringTokenQueryResult = PagedQueryResult<MonitoringTokenUsageItem, MonitoringTokenAggregations>
 
+export type SkillScope = 'public' | 'agent'
+
+export interface SkillMetadata {
+  name: string
+  description: string
+  metadata: {
+    version?: string
+    allowedTools: string[]
+  }
+}
+
+export interface SkillRecord {
+  id: string
+  scope: SkillScope
+  agentId?: string
+  content: string
+  skillDir: string
+  skillFilePath: string
+  contentHash: string
+  metadata: SkillMetadata
+}
+
+export interface SkillSummary {
+  id: string
+  name: string
+  description: string
+  version?: string
+  allowedTools: string[]
+  content: string
+  source: SkillScope
+  skillDir: string
+  skillFilePath: string
+}
+
 export interface SkillsRegistryEntry {
   [key: string]: unknown
 }

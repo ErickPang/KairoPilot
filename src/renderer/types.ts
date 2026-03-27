@@ -11,7 +11,8 @@ export type {
   MonitoringTokenQuery,
   MonitoringTokenQueryResult,
   ProviderConfig,
-  ProviderType
+  ProviderType,
+  SkillSummary
 } from '../shared/contracts';
 
 export interface Message {

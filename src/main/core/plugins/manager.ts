@@ -4,7 +4,7 @@ import path from 'path';
 import vm from 'vm';
 import { z } from 'zod';
 import { ToolDefinition } from '../llm/types';
-import { getAgent, getPluginRegistry, savePluginRegistry } from '../../store/config';
+import { getPluginRegistry, savePluginRegistry } from '../../store/config';
 
 export interface PluginManifest {
   id: string;
@@ -120,21 +120,11 @@ const getPluginCode = async (id: string) => {
   return plugin.code;
 };
 
-export interface AgentSkill {
-  id: string;
-  name: string;
-  description: string;
-  content: string;
-  source: 'public' | 'agent';
-}
-
 export class PluginManager {
-  private publicSkillsDir: string;
   private pluginsDir: string;
 
   constructor() {
     const userDataDir = app.getPath('userData');
-    this.publicSkillsDir = path.join(userDataDir, 'skills');
     this.pluginsDir = path.join(userDataDir, 'plugins');
   }
 
@@ -143,10 +133,6 @@ export class PluginManager {
     
     try {
       await fs.mkdir(baseDir, { recursive: true });
-    } catch (e) { /* ignore */ }
-
-    try {
-      await fs.mkdir(this.publicSkillsDir, { recursive: true });
     } catch (e) { /* ignore */ }
     
     try {
@@ -223,122 +209,6 @@ export class PluginManager {
     }
 
     return normalizedTools;
-  }
-
-  private getWorkspaceDir(scope: string): string {
-    if (scope === 'public') return this.publicSkillsDir;
-    
-    if (scope.startsWith('agent:')) {
-      const agentId = scope.split(':')[1];
-      const agent = getAgent(agentId);
-      if (agent && agent.workspace) {
-        return path.join(agent.workspace, 'skills');
-      }
-
-      // Fallback
-      const workspaceName = agentId === 'mainAgent' ? 'workspace' : `workspace-${agentId}`;
-      return path.join(app.getPath('userData'), workspaceName, 'skills');
-    }
-    
-    return path.join(app.getPath('userData'), 'workspace', 'skills');
-  }
-
-  private async parseSkillFile(dirPath: string, folderName: string): Promise<AgentSkill | null> {
-    try {
-      const skillPath = path.join(dirPath, 'SKILL.md');
-      const content = await fs.readFile(skillPath, 'utf-8');
-      
-      const fmMatch = content.match(/^---\r?\n([\s\S]+?)\r?\n---/);
-      let name = folderName;
-      let description = `Skill: ${name}`;
-      let body = content;
-
-      if (fmMatch) {
-        const frontMatter = fmMatch[1];
-        body = content.slice(fmMatch[0].length).trim();
-        
-        const nameMatch = frontMatter.match(/^name:\s*(.+)/m);
-        if (nameMatch) name = nameMatch[1].trim();
-        
-        const descMatch = frontMatter.match(/^description:\s*(.+)/m);
-        if (descMatch) description = descMatch[1].trim();
-        
-        if (frontMatter.match(/^description:\s*\|/m)) {
-           const descLines = [];
-           const lines = frontMatter.split(/\r?\n/);
-           let inDesc = false;
-           for (const line of lines) {
-             if (line.match(/^description:\s*\|/)) {
-               inDesc = true;
-               continue;
-             }
-             if (inDesc) {
-               if (line.match(/^[a-z]+:/)) break;
-               descLines.push(line.trim());
-             }
-           }
-           if (descLines.length > 0) {
-             description = descLines.filter(Boolean).join(" ");
-           }
-        }
-      } else {
-        const nameMatch = content.match(/^name:\s*(.+)/m);
-        if (nameMatch) name = nameMatch[1].trim();
-        const descMatch = content.match(/^description:\s*(.+)/m);
-        if (descMatch) description = descMatch[1].trim();
-      }
-
-      return {
-        id: folderName,
-        name,
-        description,
-        content: body,
-        source: 'public'
-      };
-    } catch (e) {
-      return null;
-    }
-  }
-
-  private async scanSkillsDirectory(dir: string, source: 'public' | 'agent'): Promise<AgentSkill[]> {
-    const skills: AgentSkill[] = [];
-    try {
-      const entries = await fs.readdir(dir, { withFileTypes: true });
-      for (const entry of entries) {
-        if (entry.isDirectory() && !entry.name.startsWith('.')) {
-          const skill = await this.parseSkillFile(path.join(dir, entry.name), entry.name);
-          if (skill) {
-            skill.source = source;
-            skills.push(skill);
-          }
-        }
-      }
-    } catch (e) {
-      // Directory might not exist, ignore
-    }
-    return skills;
-  }
-
-  async getMergedSkillsForAgent(agentId: string): Promise<AgentSkill[]> {
-    await this.init();
-    const publicSkills = await this.scanSkillsDirectory(this.publicSkillsDir, 'public');
-    
-    const agentSkillsDir = this.getWorkspaceDir(`agent:${agentId}`);
-    const agentSkills = await this.scanSkillsDirectory(agentSkillsDir, 'agent');
-
-    const skillMap = new Map<string, AgentSkill>();
-    
-    // Load public skills first
-    for (const skill of publicSkills) {
-      skillMap.set(skill.id, skill);
-    }
-
-    // Override with agent skills (if same id, agent workspace wins)
-    for (const skill of agentSkills) {
-      skillMap.set(skill.id, skill);
-    }
-
-    return Array.from(skillMap.values());
   }
 
   async getStorePlugins(): Promise<PluginManifest[]> {
@@ -473,7 +343,7 @@ export class PluginManager {
           try {
             await fs.access(codePath);
           } catch {
-            console.log(`[PluginManager] Skill ${plugin.id} is a directory without index.js, skipping JS load.`);
+            console.log(`[PluginManager] Plugin ${plugin.id} is a directory without index.js, skipping JS load.`);
             continue;
           }
         }

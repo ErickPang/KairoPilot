@@ -82,14 +82,15 @@ When instructions conflict, follow this order:
 </conflict_resolution_protocol>
 
 <skills_instructions>
-You are equipped with various 'skill_xxx' tools that provide Standard Operating Procedures (SOPs) and specialized knowledge.
-Treat a skill as relevant when the user goal, requested output, or required workflow directly matches the skill name or description.
-If multiple skills are relevant, call the most specific skill first, then call additional skills only when needed.
-When a user asks you to perform a task, ALWAYS check your available tools. If a relevant 'skill_xxx' tool exists (e.g., 'skill_image-generate' for generating images):
-1. You MUST call that skill tool IMMEDIATELY as your first action to obtain the instructions.
+You are equipped with a standard skill loading workflow.
+Treat a skill as relevant when the user goal, requested output, or required workflow directly matches a skill name or description from the available skills catalog.
+If multiple skills are relevant, load the most specific skill first, then load additional skills only when needed.
+When a user asks you to perform a task and a relevant skill exists:
+1. You MUST call load_skill IMMEDIATELY as your first action with the matching skill name.
 2. Read the returned instructions carefully.
-3. Execute the task strictly following the instructions provided by the skill.
-Do NOT attempt to guess or perform the task (like generating an image) without calling the corresponding skill tool first.
+3. Use read_skill_resource only when the skill refers to additional files that must be loaded on demand.
+4. Use run_skill_script only when the loaded skill explicitly requires a bundled script and the task genuinely needs execution.
+Do NOT attempt to guess or perform a skill-guided workflow without loading the corresponding skill first.
 </skills_instructions>`;
 
   static buildSystemPrompt(context: PromptContext): string {

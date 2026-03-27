@@ -76,13 +76,7 @@ interface KairoBridge {
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.pluginsGetStore): Promise<Record<string, unknown>[]>;
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.pluginsInstall, args: { id: string; scope?: string }): Promise<InvokeSuccess>;
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.pluginsUninstall, args: { id: string; scope?: string }): Promise<InvokeSuccess>;
-  invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.skillsGetAll): Promise<Record<string, Array<{
-    id: string;
-    name: string;
-    description: string;
-    content: string;
-    source: 'public' | 'agent';
-  }>>>;
+  invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.skillsGetAll): Promise<Record<string, import('./shared/contracts').SkillSummary[]>>;
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.systemSelectDirectory): Promise<string | null>;
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.systemStats): Promise<import('./renderer/types').SystemStats | null>;
   on(channel: typeof import('./shared/ipc').KAIRO_EVENT.agentAskConfirmation, listener: (request: import('./renderer/types').ConfirmationRequest) => void): () => void;
