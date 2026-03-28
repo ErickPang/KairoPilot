@@ -54,6 +54,72 @@ function registerAgentHandlers() {
     return result;
   });
 
+  ipcMain.handle(KAIRO_INVOKE.skillsGetStore, async () => {
+    return skillsManager.getStoreSkills();
+  });
+
+  ipcMain.handle(KAIRO_INVOKE.skillsGetStoreByQuery, async (_, query) => {
+    const payload = typeof query === 'object' && query ? query : { kind: 'curated' };
+    return skillsManager.getStoreSkills(
+      payload.kind === 'registry' && typeof payload.url === 'string'
+        ? { kind: 'registry', url: payload.url }
+        : { kind: 'curated' }
+    );
+  });
+
+  ipcMain.handle(KAIRO_INVOKE.skillsGetRegistry, async () => {
+    return skillsManager.getRegistrySources();
+  });
+
+  ipcMain.handle(KAIRO_INVOKE.skillsSetRegistry, async (_, entries) => {
+    try {
+      const payload = Array.isArray(entries) ? entries : [];
+      await skillsManager.saveRegistrySources(payload);
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  });
+
+  ipcMain.handle(KAIRO_INVOKE.skillsPrepareInstall, async (_, args) => {
+    try {
+      const payload = typeof args === 'object' && args ? args : { id: '', scope: 'public' };
+      return await skillsManager.prepareStoreSkillInstall({
+        id: typeof payload.id === 'string' ? payload.id : '',
+        scope: typeof payload.scope === 'string' ? payload.scope : 'public',
+        marketplaceQuery: typeof payload.marketplaceQuery === 'object' && payload.marketplaceQuery
+          ? payload.marketplaceQuery
+          : undefined
+      });
+    } catch (error) {
+      throw new Error(error instanceof Error ? error.message : 'Unknown error');
+    }
+  });
+
+  ipcMain.handle(KAIRO_INVOKE.skillsInstall, async (_, args) => {
+    try {
+      const payload = typeof args === 'object' && args ? args : { requestId: '' };
+      await skillsManager.installStoreSkill({
+        requestId: typeof payload.requestId === 'string' ? payload.requestId : ''
+      });
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  });
+
+  ipcMain.handle(KAIRO_INVOKE.skillsDiscardInstall, async (_, args) => {
+    try {
+      const payload = typeof args === 'object' && args ? args : { requestId: '' };
+      await skillsManager.discardPreparedInstall({
+        requestId: typeof payload.requestId === 'string' ? payload.requestId : ''
+      });
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  });
+
   ipcMain.handle(KAIRO_INVOKE.agentChat, async (event, message) => {
     const activeAgentId = getActiveAgentId();
     if (!activeAgentId) {

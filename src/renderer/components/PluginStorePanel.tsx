@@ -114,7 +114,7 @@ export function PluginStorePanel() {
 
   return (
     <div className="config-panel">
-      <div className="config-header" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '1rem' }}>
+      <div className="config-header" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '0.625rem' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
           <div>
             <div className="config-title">
@@ -172,7 +172,7 @@ export function PluginStorePanel() {
             {publicPlugins.length === 0 ? (
               <div className="empty-state">{t('plugins.noInstalled')}</div>
             ) : (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '1rem' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '0.875rem' }}>
                 {publicPlugins.map(plugin => (
                   <InstalledPluginItem 
                     key={`${plugin.id}-${plugin.scope}`} 
@@ -190,16 +190,16 @@ export function PluginStorePanel() {
         {!loading && activeTab === 'store' && (
           <div>
             {uninstalledPlugins.length === 0 ? (
-              <div className="empty-state" style={{ marginTop: '4rem', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center' }}>
-                <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>🛒</div>
+              <div className="empty-state" style={{ marginTop: '2.5rem', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center' }}>
+                <div style={{ fontSize: '3rem', marginBottom: '0.75rem' }}>🛒</div>
                 <h3 style={{ margin: '0 0 0.5rem 0' }}>{t('plugins.marketplace')}</h3>
                 <p style={{ margin: 0, color: 'var(--muted-fg)' }}>{t('plugins.allInstalled')}</p>
               </div>
             ) : (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '1rem' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '0.875rem' }}>
                 {uninstalledPlugins.map(plugin => (
-                  <div key={plugin.id} className="config-card" style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', height: '100%' }}>
-                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: '1rem' }}>
+                  <div key={plugin.id} className="config-card" style={{ display: 'flex', flexDirection: 'column', gap: '0.625rem', height: '100%' }}>
+                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.875rem' }}>
                       <div style={{ 
                         fontSize: '2rem', width: '48px', height: '48px', 
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -273,8 +273,8 @@ function InstalledPluginItem({ plugin, onUninstall, isWorking, isNative }: { plu
   const { t } = useTranslation();
   
   return (
-    <div className="config-card" style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', height: '100%' }}>
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '1rem' }}>
+    <div className="config-card" style={{ display: 'flex', flexDirection: 'column', gap: '0.625rem', height: '100%' }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.875rem' }}>
         <div style={{ 
           fontSize: '2rem', width: '48px', height: '48px', 
           display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -294,11 +294,11 @@ function InstalledPluginItem({ plugin, onUninstall, isWorking, isNative }: { plu
         {plugin.description}
       </p>
 
-      <div style={{ fontSize: '0.8rem', color: 'var(--muted-fg)', marginTop: '0.5rem' }}>
+      <div style={{ fontSize: '0.8rem', color: 'var(--muted-fg)', marginTop: '0.35rem' }}>
         <strong>{t('plugins.installedAt')}:</strong> {new Date(plugin.installedAt).toLocaleString()}
       </div>
 
-      <div className="store-card-actions" style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '0.5rem' }}>
+      <div className="store-card-actions" style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '0.35rem' }}>
         <button 
           className="btn btn-secondary btn-sm btn-danger"
           onClick={(e) => {

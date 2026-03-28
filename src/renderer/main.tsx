@@ -11,6 +11,7 @@ if (!window.kairo) {
     invoke: (async (channel: string, ...args: unknown[]) => {
       console.log(`[Mock] invoke ${channel}`, args);
       if (channel === KAIRO_INVOKE.configGetAll) return { models: { providers: {} }, agents: { activeAgentId: 'mainAgent', list: [] }, plugins: { registry: [] }, skills: { registry: [] } };
+      if (channel === KAIRO_INVOKE.configGetAgents) return [];
       if (channel === KAIRO_INVOKE.chatListSessions) return [];
       if (channel === KAIRO_INVOKE.chatGetActiveSession) return null;
       if (channel === KAIRO_INVOKE.chatGetSession) return null;
@@ -18,6 +19,17 @@ if (!window.kairo) {
       if (channel === KAIRO_INVOKE.ollamaCheck) return { running: true, message: 'Mock Ollama' };
       if (channel === KAIRO_INVOKE.ollamaStart) return { success: true };
       if (channel === KAIRO_INVOKE.ollamaPull) return { success: true };
+      if (channel === KAIRO_INVOKE.skillsGetAll) return { public: [] };
+      if (channel === KAIRO_INVOKE.skillsGetRegistry) return [];
+      if (channel === KAIRO_INVOKE.skillsGetStore) return [
+        { id: 'research-brief', name: 'Research Brief', description: 'Mock research workflow', version: '1.0.0', author: 'KairoPilot', icon: '🔎', tags: ['research'], marketplace: 'KairoPilot Curated', installedScopes: [], source: { type: 'inline', content: 'mock' } },
+        { id: 'issue-triage', name: 'Issue Triage', description: 'Mock issue triage workflow', version: '1.0.0', author: 'KairoPilot', icon: '🛠️', tags: ['debug'], marketplace: 'KairoPilot Curated', installedScopes: [], source: { type: 'inline', content: 'mock' } }
+      ];
+      if (channel === KAIRO_INVOKE.skillsGetStoreByQuery) return [
+        { id: 'research-brief', name: 'Research Brief', description: 'Mock research workflow', version: '1.0.0', author: 'KairoPilot', icon: '🔎', tags: ['research'], marketplace: 'KairoPilot Curated', installedScopes: [], source: { type: 'inline', content: 'mock' } },
+        { id: 'issue-triage', name: 'Issue Triage', description: 'Mock issue triage workflow', version: '1.0.0', author: 'KairoPilot', icon: '🛠️', tags: ['debug'], marketplace: 'KairoPilot Curated', installedScopes: [], source: { type: 'inline', content: 'mock' } }
+      ];
+      if (channel === KAIRO_INVOKE.skillsInstall) return { success: true };
       if (channel === KAIRO_INVOKE.pluginsGetStore) return [
         { id: 'kairo-weather-plugin', name: 'Weather Forecaster', description: 'Mock Weather', version: '1.0', author: 'Kairo', icon: '🌤️' },
         { id: 'kairo-crypto-plugin', name: 'Crypto Tracker', description: 'Mock Crypto', version: '1.0', author: 'Kairo', icon: '₿' }

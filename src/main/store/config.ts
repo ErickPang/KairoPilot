@@ -6,6 +6,7 @@ import { getPromptWorkspaceLayout } from '../core/llm/prompt';
 import {
   type AgentConfig,
   type AgentPermissionConfig,
+  DEFAULT_SKILL_MARKETPLACE_PRESETS,
   type KairoPilotConfig,
   type LegacyAgentConfig,
   type ModelConfig,
@@ -254,7 +255,11 @@ const DEFAULT_CONFIG: KairoPilotConfig = {
     registry: []
   },
   skills: {
-    registry: []
+    registry: DEFAULT_SKILL_MARKETPLACE_PRESETS.map((preset) => ({
+      type: preset.type,
+      url: preset.url,
+      name: preset.name
+    }))
   }
 };
 

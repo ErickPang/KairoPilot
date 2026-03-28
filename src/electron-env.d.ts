@@ -77,6 +77,13 @@ interface KairoBridge {
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.pluginsInstall, args: { id: string; scope?: string }): Promise<InvokeSuccess>;
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.pluginsUninstall, args: { id: string; scope?: string }): Promise<InvokeSuccess>;
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.skillsGetAll): Promise<Record<string, import('./shared/contracts').SkillSummary[]>>;
+  invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.skillsGetRegistry): Promise<import('./shared/contracts').SkillsRegistryEntry[]>;
+  invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.skillsSetRegistry, args: import('./shared/contracts').SkillsRegistryEntry[]): Promise<InvokeSuccess>;
+  invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.skillsPrepareInstall, args: import('./shared/contracts').SkillInstallReviewArgs): Promise<import('./shared/contracts').SkillInstallReview>;
+  invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.skillsGetStore): Promise<import('./shared/contracts').SkillStoreEntry[]>;
+  invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.skillsGetStoreByQuery, args: import('./shared/contracts').SkillMarketplaceQuery): Promise<import('./shared/contracts').SkillStoreEntry[]>;
+  invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.skillsInstall, args: import('./shared/contracts').SkillInstallArgs): Promise<InvokeSuccess>;
+  invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.skillsDiscardInstall, args: import('./shared/contracts').SkillInstallArgs): Promise<InvokeSuccess>;
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.systemSelectDirectory): Promise<string | null>;
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.systemStats): Promise<import('./renderer/types').SystemStats | null>;
   on(channel: typeof import('./shared/ipc').KAIRO_EVENT.agentAskConfirmation, listener: (request: import('./renderer/types').ConfirmationRequest) => void): () => void;

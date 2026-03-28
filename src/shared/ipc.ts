@@ -34,6 +34,13 @@ export const KAIRO_INVOKE = {
   pluginsInstall: 'plugins:install',
   pluginsUninstall: 'plugins:uninstall',
   skillsGetAll: 'skills:getAll',
+  skillsGetRegistry: 'skills:getRegistry',
+  skillsSetRegistry: 'skills:setRegistry',
+  skillsPrepareInstall: 'skills:prepareInstall',
+  skillsGetStore: 'skills:getStore',
+  skillsGetStoreByQuery: 'skills:getStoreByQuery',
+  skillsInstall: 'skills:install',
+  skillsDiscardInstall: 'skills:discardInstall',
   systemSelectDirectory: 'system:selectDirectory',
   systemStats: 'system:stats'
 } as const
