@@ -128,6 +128,16 @@ body, html {
   position: relative;
 }
 
+.window-drag-strip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 18px;
+  z-index: 30;
+  -webkit-app-region: drag;
+}
+
 /* Subtle Noise Texture Overlay for Physical Material Feel */
 .app-container::before {
   content: "";

@@ -53,6 +53,7 @@ function App() {
 
   return (
     <div className="app-container">
+      <div className="window-drag-strip" aria-hidden="true" />
       <div className="nav-rail">
         <div 
           className={`nav-icon ${activeTab === 'chat' ? 'active' : ''}`}
