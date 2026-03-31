@@ -41,6 +41,8 @@ export const KAIRO_INVOKE = {
   skillsGetStoreByQuery: 'skills:getStoreByQuery',
   skillsInstall: 'skills:install',
   skillsDiscardInstall: 'skills:discardInstall',
+  skillsImport: 'skills:import',
+  systemSelectFile: 'system:selectFile',
   systemSelectDirectory: 'system:selectDirectory',
   systemStats: 'system:stats'
 } as const

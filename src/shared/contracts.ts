@@ -237,6 +237,30 @@ export interface SkillInstallArgs {
   requestId: string
 }
 
+export interface SkillImportArgs {
+  sourceFile: string
+  scope: string
+}
+
+export const SKILL_IMPORT_ERROR = {
+  invalidArchive: 'skills.importError.invalidArchive',
+  invalidArchivePath: 'skills.importError.invalidArchivePath',
+  zipRequired: 'skills.importError.zipRequired',
+  missingSkillFile: 'skills.importError.missingSkillFile',
+  multipleSkillFiles: 'skills.importError.multipleSkillFiles',
+  invalidFilePath: 'skills.importError.invalidFilePath',
+  duplicateSkill: 'skills.importError.duplicateSkill',
+  invalidSkillId: 'skills.importError.invalidSkillId',
+  invalidSkillPackage: 'skills.importError.invalidSkillPackage',
+  symbolicLinksNotSupported: 'skills.importError.symbolicLinksNotSupported',
+  unsupportedFileType: 'skills.importError.unsupportedFileType',
+  extractFailed: 'skills.importError.extractFailed',
+  selectArchiveFailed: 'skills.importError.selectArchiveFailed',
+  unknown: 'skills.importError.unknown'
+} as const
+
+export type SkillImportErrorCode = typeof SKILL_IMPORT_ERROR[keyof typeof SKILL_IMPORT_ERROR]
+
 export interface SkillInstallReviewArgs {
   id: string
   scope: string

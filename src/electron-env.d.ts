@@ -84,6 +84,8 @@ interface KairoBridge {
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.skillsGetStoreByQuery, args: import('./shared/contracts').SkillMarketplaceQuery): Promise<import('./shared/contracts').SkillStoreEntry[]>;
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.skillsInstall, args: import('./shared/contracts').SkillInstallArgs): Promise<InvokeSuccess>;
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.skillsDiscardInstall, args: import('./shared/contracts').SkillInstallArgs): Promise<InvokeSuccess>;
+  invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.skillsImport, args: import('./shared/contracts').SkillImportArgs): Promise<InvokeSuccess>;
+  invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.systemSelectFile, args?: { filters?: { name: string; extensions: string[] }[] }): Promise<string | null>;
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.systemSelectDirectory): Promise<string | null>;
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.systemStats): Promise<import('./renderer/types').SystemStats | null>;
   on(channel: typeof import('./shared/ipc').KAIRO_EVENT.agentAskConfirmation, listener: (request: import('./renderer/types').ConfirmationRequest) => void): () => void;

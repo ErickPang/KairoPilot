@@ -2,10 +2,13 @@ import { app } from 'electron'
 import fs from 'fs/promises'
 import path from 'path'
 import { createHash, randomUUID } from 'crypto'
+import { execFile } from 'child_process'
 import { OpenAIProvider } from '../llm/provider'
 import { getActiveAgentId, getAgent, getAgents, getKairoPilotConfig, getModelForAgent, saveKairoPilotConfig } from '../../store/config'
 import {
   DEFAULT_SKILL_MARKETPLACE_PRESETS,
+  SKILL_IMPORT_ERROR,
+  SkillImportArgs,
   SkillInstallArgs,
   SkillInstallReview,
   SkillInstallReviewArgs,
@@ -35,6 +38,10 @@ interface ClaudeMarketplaceCatalog {
   name?: string
   homepage?: string
   plugins?: unknown
+}
+
+function escapePowerShellLiteral(value: string) {
+  return value.replace(/'/g, "''")
 }
 
 interface MaterializedSkillFile {
@@ -1119,6 +1126,59 @@ export class SkillsManager {
     this.pendingInstalls.delete(requestId)
   }
 
+  async importSkill(args: SkillImportArgs) {
+    const sourceFile = typeof args.sourceFile === 'string' ? args.sourceFile.trim() : ''
+    if (!sourceFile) {
+      throw new Error(SKILL_IMPORT_ERROR.invalidArchive)
+    }
+
+    const scope = typeof args.scope === 'string' && args.scope.trim() ? args.scope.trim() : 'public'
+    const target = this.resolveInstallScope(scope)
+
+    await this.ensureSkillsDirectories()
+    let resolvedSourceFile = ''
+    let sourceStats: Awaited<ReturnType<typeof fs.stat>>
+    try {
+      resolvedSourceFile = await fs.realpath(sourceFile)
+      sourceStats = await fs.stat(resolvedSourceFile)
+    } catch {
+      throw new Error(SKILL_IMPORT_ERROR.invalidArchivePath)
+    }
+
+    if (!sourceStats.isFile()) {
+      throw new Error(SKILL_IMPORT_ERROR.invalidArchivePath)
+    }
+
+    if (path.extname(resolvedSourceFile).toLowerCase() !== '.zip') {
+      throw new Error(SKILL_IMPORT_ERROR.zipRequired)
+    }
+
+    const extractionDir = path.join(this.pendingInstallsDir, 'imports', randomUUID())
+
+    try {
+      await this.extractImportedSkillArchive(resolvedSourceFile, extractionDir)
+      const resolvedSourceDir = await this.resolveImportedSkillDirectory(extractionDir)
+      const targetBaseDir = target.type === 'public'
+        ? this.publicSkillsDir
+        : this.getAgentSkillsDirectoryPath(target.agentId)
+
+      await this.importPreparedSkillDirectory(
+        resolvedSourceDir,
+        targetBaseDir,
+        target.type === 'agent' ? target.agentId : undefined
+      )
+    } finally {
+      await fs.rm(extractionDir, { recursive: true, force: true })
+    }
+
+    if (target.type === 'public') {
+      await this.loadAllSkills()
+      return
+    }
+
+    await this.loadAgentSkills(target.agentId)
+  }
+
   async getMetadata(skillName: string, agentId?: string) {
     const skill = await this.findSkillRecord(skillName, agentId)
     return skill?.metadata ?? null
@@ -1218,6 +1278,175 @@ export class SkillsManager {
       fs.mkdir(this.publicSkillsDir, { recursive: true }),
       fs.mkdir(this.pendingInstallsDir, { recursive: true })
     ])
+  }
+
+  private async pathExists(targetPath: string) {
+    try {
+      await fs.access(targetPath)
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  private async importPreparedSkillDirectory(sourceDir: string, targetBaseDir: string, agentId?: string) {
+    const resolvedSourceDir = await fs.realpath(sourceDir)
+    const sourceSkillFilePath = path.join(resolvedSourceDir, 'SKILL.md')
+    let rawSkillContent = ''
+    let resolvedSourceSkillFilePath = ''
+
+    try {
+      [rawSkillContent, resolvedSourceSkillFilePath] = await Promise.all([
+        fs.readFile(sourceSkillFilePath, 'utf-8'),
+        fs.realpath(sourceSkillFilePath)
+      ])
+    } catch {
+      throw new Error(SKILL_IMPORT_ERROR.missingSkillFile)
+    }
+
+    if (resolvedSourceSkillFilePath !== path.join(resolvedSourceDir, 'SKILL.md')) {
+      throw new Error(SKILL_IMPORT_ERROR.missingSkillFile)
+    }
+
+    const sourceFolderName = path.basename(resolvedSourceDir)
+    const parsedSkill = parseSkillFrontmatter(rawSkillContent, sourceFolderName)
+    const skillId = normalizeSkillFolderId(sourceFolderName) ?? createSkillStoreId(parsedSkill.metadata.name)
+    if (!skillId) {
+      throw new Error(SKILL_IMPORT_ERROR.invalidSkillId)
+    }
+
+    const targetSkillDir = path.join(targetBaseDir, skillId)
+    if (await this.pathExists(targetSkillDir)) {
+      throw new Error(SKILL_IMPORT_ERROR.duplicateSkill)
+    }
+
+    try {
+      await this.copyImportedSkillDirectory(resolvedSourceDir, targetSkillDir)
+      const importedSkill = await this.readSkillRecord(
+        targetSkillDir,
+        agentId ? 'agent' : 'public',
+        skillId,
+        agentId
+      )
+
+      if (!importedSkill) {
+        throw new Error(SKILL_IMPORT_ERROR.invalidSkillPackage)
+      }
+    } catch (error) {
+      await fs.rm(targetSkillDir, { recursive: true, force: true })
+      throw error
+    }
+  }
+
+  private async extractImportedSkillArchive(sourceFile: string, targetDir: string) {
+    await fs.rm(targetDir, { recursive: true, force: true })
+    await fs.mkdir(targetDir, { recursive: true })
+
+    if (process.platform === 'win32') {
+      await this.execFileCommand('powershell.exe', [
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        `Expand-Archive -LiteralPath '${escapePowerShellLiteral(sourceFile)}' -DestinationPath '${escapePowerShellLiteral(targetDir)}' -Force`
+      ])
+      return
+    }
+
+    if (process.platform === 'darwin') {
+      await this.execFileCommand('ditto', ['-x', '-k', sourceFile, targetDir])
+      return
+    }
+
+    await this.execFileCommand('unzip', ['-q', sourceFile, '-d', targetDir])
+  }
+
+  private async resolveImportedSkillDirectory(extractionDir: string) {
+    const resolvedExtractionDir = await fs.realpath(extractionDir)
+    const skillFiles = await this.findImportedSkillFiles(resolvedExtractionDir, 'SKILL.md')
+
+    if (skillFiles.length === 0) {
+      throw new Error(SKILL_IMPORT_ERROR.missingSkillFile)
+    }
+
+    if (skillFiles.length > 1) {
+      throw new Error(SKILL_IMPORT_ERROR.multipleSkillFiles)
+    }
+
+    const skillDir = await fs.realpath(path.dirname(skillFiles[0]))
+    if (
+      skillDir !== resolvedExtractionDir
+      && !skillDir.startsWith(`${resolvedExtractionDir}${path.sep}`)
+    ) {
+      throw new Error(SKILL_IMPORT_ERROR.invalidFilePath)
+    }
+
+    return skillDir
+  }
+
+  private async findImportedSkillFiles(baseDir: string, fileName: string): Promise<string[]> {
+    const matches: string[] = []
+    const entries = await fs.readdir(baseDir, { withFileTypes: true })
+
+    for (const entry of entries) {
+      if (entry.name === '__MACOSX') {
+        continue
+      }
+
+      const entryPath = path.join(baseDir, entry.name)
+      if (entry.isSymbolicLink()) {
+        throw new Error(SKILL_IMPORT_ERROR.symbolicLinksNotSupported)
+      }
+
+      if (entry.isDirectory()) {
+        matches.push(...await this.findImportedSkillFiles(entryPath, fileName))
+        continue
+      }
+
+      if (entry.isFile() && entry.name === fileName) {
+        matches.push(entryPath)
+      }
+    }
+
+    return matches
+  }
+
+  private async execFileCommand(command: string, args: string[]) {
+    await new Promise<void>((resolve, reject) => {
+      execFile(command, args, { windowsHide: true }, (error) => {
+        if (error) {
+          reject(new Error(SKILL_IMPORT_ERROR.extractFailed))
+          return
+        }
+
+        resolve()
+      })
+    })
+  }
+
+  private async copyImportedSkillDirectory(sourceDir: string, targetDir: string) {
+    await fs.mkdir(targetDir, { recursive: true })
+    const entries = await fs.readdir(sourceDir, { withFileTypes: true })
+
+    for (const entry of entries) {
+      const sourcePath = path.join(sourceDir, entry.name)
+      const targetPath = path.join(targetDir, entry.name)
+
+      if (entry.isSymbolicLink()) {
+        throw new Error(SKILL_IMPORT_ERROR.symbolicLinksNotSupported)
+      }
+
+      if (entry.isDirectory()) {
+        await this.copyImportedSkillDirectory(sourcePath, targetPath)
+        continue
+      }
+
+      if (entry.isFile()) {
+        await fs.copyFile(sourcePath, targetPath)
+        continue
+      }
+
+      throw new Error(SKILL_IMPORT_ERROR.unsupportedFileType)
+    }
   }
 
   private async writeMaterializedSkillToDirectory(targetDir: string, materializedSkill: MaterializedSkill) {

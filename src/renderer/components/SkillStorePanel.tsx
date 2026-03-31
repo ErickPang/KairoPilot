@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { IconChevronDown, IconRefresh, IconSkill } from './Icons';
+import { IconChevronDown, IconFolder, IconRefresh, IconSkill } from './Icons';
 import './PluginStorePanel.css';
 import { useTranslation } from '../hooks/useTranslation';
+import type { TranslationKey } from '../i18n';
 import { Select, type SelectOption } from './Select';
 import type { AgentConfig, SkillSummary } from '../types';
 import {
   DEFAULT_SKILL_MARKETPLACE_PRESETS,
+  SKILL_IMPORT_ERROR,
   type SkillMarketplaceQuery,
   type SkillInstallReview,
+  type SkillImportErrorCode,
   type SkillReviewFinding,
   type SkillsRegistryEntry,
   type SkillsRegistrySourceType,
@@ -24,6 +27,7 @@ const DEFAULT_REGISTRY_URL_SET = new Set(DEFAULT_SKILL_MARKETPLACE_PRESETS.map((
 const MARKETPLACE_PAGE_SIZE = 12;
 
 const CURATED_MARKETPLACE_TAB_ID = 'curated-marketplace';
+const IMPORT_ERROR_KEYS = new Set<SkillImportErrorCode>(Object.values(SKILL_IMPORT_ERROR));
 
 interface MarketplaceSourceTab {
   id: string;
@@ -31,6 +35,17 @@ interface MarketplaceSourceTab {
   type: 'curated' | 'registry';
   url?: string;
   removable?: boolean;
+}
+
+function resolveImportErrorMessage(
+  t: (key: TranslationKey, params?: Record<string, string | number>) => string,
+  error?: string,
+) {
+  if (error && IMPORT_ERROR_KEYS.has(error as SkillImportErrorCode)) {
+    return t(error as TranslationKey);
+  }
+
+  return t(SKILL_IMPORT_ERROR.unknown);
 }
 
 export function SkillStorePanel() {
@@ -56,6 +71,11 @@ export function SkillStorePanel() {
   const [reviewSkill, setReviewSkill] = useState<SkillStoreEntry | null>(null);
   const [reviewScope, setReviewScope] = useState('public');
   const [reviewResult, setReviewResult] = useState<SkillInstallReview | null>(null);
+  const [importModalOpen, setImportModalOpen] = useState(false);
+  const [importScope, setImportScope] = useState('public');
+  const [importArchivePath, setImportArchivePath] = useState('');
+  const [importError, setImportError] = useState<string | null>(null);
+  const [importLoading, setImportLoading] = useState(false);
   const [marketplaceSearchText, setMarketplaceSearchText] = useState('');
   const [marketplacePage, setMarketplacePage] = useState(1);
 
@@ -245,6 +265,12 @@ export function SkillStorePanel() {
   }, [reviewScope, scopeOptions]);
 
   useEffect(() => {
+    if (!scopeOptions.some((option) => option.value === importScope)) {
+      setImportScope(scopeOptions[0]?.value ?? 'public');
+    }
+  }, [importScope, scopeOptions]);
+
+  useEffect(() => {
     if (!marketplaceTabs.some((tab) => tab.id === activeMarketplaceTabId)) {
       setActiveMarketplaceTabId(marketplaceTabs[0]?.id ?? CURATED_MARKETPLACE_TAB_ID);
     }
@@ -271,6 +297,13 @@ export function SkillStorePanel() {
     setReviewResult(null);
     setReviewLoading(false);
     setInstallingSkillId(null);
+  };
+
+  const resetImportState = () => {
+    setImportModalOpen(false);
+    setImportLoading(false);
+    setImportArchivePath('');
+    setImportError(null);
   };
 
   const discardPreparedReview = async (requestId?: string) => {
@@ -376,6 +409,54 @@ export function SkillStorePanel() {
     if (activeTab === 'store' && activeMarketplaceTab) {
       setLoadedMarketplaceTabIds([]);
       await loadMarketplaceData(activeMarketplaceTab.id, true);
+    }
+  };
+
+  const handleOpenImportModal = () => {
+    setError(null);
+    setImportScope(scopeOptions[0]?.value ?? 'public');
+    setImportArchivePath('');
+    setImportError(null);
+    setImportLoading(false);
+    setImportModalOpen(true);
+  };
+
+  const handleSelectImportArchive = async () => {
+    try {
+      const selectedFile = await window.kairo.invoke(KAIRO_INVOKE.systemSelectFile, {
+        filters: [{ name: 'ZIP', extensions: ['zip'] }]
+      });
+      if (typeof selectedFile === 'string' && selectedFile.trim()) {
+        setImportArchivePath(selectedFile);
+        setImportError(null);
+      }
+    } catch {
+      setImportError(resolveImportErrorMessage(t, SKILL_IMPORT_ERROR.selectArchiveFailed));
+    }
+  };
+
+  const handleConfirmImport = async () => {
+    if (!importArchivePath.trim()) {
+      setImportError(t('skills.importDirectoryRequired'));
+      return;
+    }
+
+    setImportLoading(true);
+    setImportError(null);
+    try {
+      const result = await window.kairo.invoke(KAIRO_INVOKE.skillsImport, {
+        sourceFile: importArchivePath,
+        scope: importScope
+      });
+      if (!result?.success) {
+        throw new Error(result?.error || SKILL_IMPORT_ERROR.unknown);
+      }
+      resetImportState();
+      await loadBaseData();
+    } catch (e) {
+      setImportError(resolveImportErrorMessage(t, e instanceof Error ? e.message : SKILL_IMPORT_ERROR.unknown));
+    } finally {
+      setImportLoading(false);
     }
   };
 
@@ -549,6 +630,22 @@ export function SkillStorePanel() {
                 <div className="skill-overview-label">{t('skills.agentInstalled')}</div>
                 <div className="skill-overview-value">{agentInstalled}</div>
               </div>
+            </div>
+
+            <div className="config-card skill-installed-toolbar">
+              <div className="skill-installed-toolbar-copy">
+                <div className="skill-card-title">{t('skills.importSkill')}</div>
+                <div className="config-subtitle">{t('skills.importSkillHint')}</div>
+              </div>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={handleOpenImportModal}
+                disabled={savingRegistry || reviewLoading || importLoading}
+              >
+                <IconFolder size={16} />
+                {t('skills.importSkill')}
+              </button>
             </div>
 
             <SkillSectionPanel
@@ -793,6 +890,75 @@ export function SkillStorePanel() {
                 </button>
                 <button type="button" className="btn btn-primary" onClick={() => { void handleAddRegistrySource(); }} disabled={savingRegistry}>
                   {savingRegistry ? t('skills.savingSource') : t('skills.saveSource')}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {importModalOpen && (
+        <div className="modal-overlay">
+          <div className="modal-content skill-install-modal">
+            <div className="skill-install-modal-header">
+              <div>
+                <div className="skill-card-title">{t('skills.importSkill')}</div>
+                <div className="config-subtitle skill-install-modal-subtitle">{t('skills.importSkillHint')}</div>
+              </div>
+            </div>
+            <div className="skill-install-modal-body">
+              <div className="skill-install-form-card">
+                <div className="skill-card-detail-label">{t('skills.installScope')}</div>
+                <div className="skill-install-form-help">{t('skills.importScopePrompt')}</div>
+                <Select
+                  value={importScope}
+                  onChange={setImportScope}
+                  options={scopeSelectOptions}
+                  style={{ width: '100%' }}
+                  dropdownTitle={t('skills.installScope')}
+                />
+              </div>
+              <div className="skill-install-form-card">
+                <div className="skill-card-detail-label">{t('skills.importDirectoryLabel')}</div>
+                <div className="skill-install-form-help">{t('skills.importDirectoryHelp')}</div>
+                <div className="skill-import-directory-row">
+                  <input
+                    className="form-control"
+                    value={importArchivePath}
+                    readOnly
+                    placeholder={t('skills.importDirectoryPlaceholder')}
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => { void handleSelectImportArchive(); }}
+                    disabled={importLoading}
+                  >
+                    {t('skills.selectImportDirectory')}
+                  </button>
+                </div>
+              </div>
+              {importError && (
+                <div className="skill-import-error" role="alert">
+                  {importError}
+                </div>
+              )}
+              <div className="skill-install-modal-actions">
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={resetImportState}
+                  disabled={importLoading}
+                >
+                  {t('common.cancel')}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={() => { void handleConfirmImport(); }}
+                  disabled={importLoading}
+                >
+                  {importLoading ? t('skills.importingSkill') : t('skills.confirmImportSkill')}
                 </button>
               </div>
             </div>

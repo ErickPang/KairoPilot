@@ -120,6 +120,19 @@ function registerAgentHandlers() {
     }
   });
 
+  ipcMain.handle(KAIRO_INVOKE.skillsImport, async (_, args) => {
+    try {
+      const payload = typeof args === 'object' && args ? args : { sourceFile: '', scope: 'public' };
+      await skillsManager.importSkill({
+        sourceFile: typeof payload.sourceFile === 'string' ? payload.sourceFile : '',
+        scope: typeof payload.scope === 'string' ? payload.scope : 'public'
+      });
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  });
+
   ipcMain.handle(KAIRO_INVOKE.agentChat, async (event, message) => {
     const activeAgentId = getActiveAgentId();
     if (!activeAgentId) {
