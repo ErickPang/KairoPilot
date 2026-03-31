@@ -4,7 +4,7 @@
   "description": "A user-friendly desktop AI Agent application based on OpenClaw architecture.",
   "author": "墨香异境",
   "private": true,
-  "version": "0.1.3",
+  "version": "0.1.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
