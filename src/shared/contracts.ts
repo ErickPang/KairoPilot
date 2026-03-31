@@ -186,9 +186,156 @@ export interface SkillSummary {
   skillFilePath: string
 }
 
-export interface SkillsRegistryEntry {
-  [key: string]: unknown
+export interface SkillStoreResource {
+  path: string
+  url?: string
+  content?: string
+  encoding?: 'utf-8' | 'base64'
 }
+
+export interface SkillStoreHttpSource {
+  type: 'http'
+  skillUrl: string
+  files?: SkillStoreResource[]
+}
+
+export interface SkillStoreGithubSource {
+  type: 'github'
+  repo: string
+  path: string
+  ref?: string
+  files?: SkillStoreResource[]
+}
+
+export interface SkillStoreInlineSource {
+  type: 'inline'
+  content: string
+  files?: SkillStoreResource[]
+}
+
+export type SkillStoreSource = SkillStoreHttpSource | SkillStoreGithubSource | SkillStoreInlineSource
+
+export type SkillsRegistrySourceType = 'manifest' | 'claude_marketplace'
+
+export interface SkillStoreEntry {
+  id: string
+  name: string
+  description: string
+  version?: string
+  author?: string
+  icon?: string
+  tags: string[]
+  homepage?: string
+  marketplace?: string
+  registryUrl?: string
+  sourceType?: SkillsRegistrySourceType
+  source: SkillStoreSource
+  installedScopes: string[]
+}
+
+export interface SkillInstallArgs {
+  requestId: string
+}
+
+export interface SkillImportArgs {
+  sourceFile: string
+  scope: string
+}
+
+export const SKILL_IMPORT_ERROR = {
+  invalidArchive: 'skills.importError.invalidArchive',
+  invalidArchivePath: 'skills.importError.invalidArchivePath',
+  zipRequired: 'skills.importError.zipRequired',
+  missingSkillFile: 'skills.importError.missingSkillFile',
+  multipleSkillFiles: 'skills.importError.multipleSkillFiles',
+  invalidFilePath: 'skills.importError.invalidFilePath',
+  duplicateSkill: 'skills.importError.duplicateSkill',
+  invalidSkillId: 'skills.importError.invalidSkillId',
+  invalidSkillPackage: 'skills.importError.invalidSkillPackage',
+  symbolicLinksNotSupported: 'skills.importError.symbolicLinksNotSupported',
+  unsupportedFileType: 'skills.importError.unsupportedFileType',
+  extractFailed: 'skills.importError.extractFailed',
+  selectArchiveFailed: 'skills.importError.selectArchiveFailed',
+  unknown: 'skills.importError.unknown'
+} as const
+
+export type SkillImportErrorCode = typeof SKILL_IMPORT_ERROR[keyof typeof SKILL_IMPORT_ERROR]
+
+export interface SkillInstallReviewArgs {
+  id: string
+  scope: string
+  marketplaceQuery?: SkillMarketplaceQuery
+}
+
+export type SkillReviewSeverity = 'low' | 'medium' | 'high'
+
+export interface SkillReviewFinding {
+  id: string
+  severity: SkillReviewSeverity
+  title: string
+  detail: string
+  filePath?: string
+}
+
+export interface SkillInstallReview {
+  requestId: string
+  skillId: string
+  skillName: string
+  scope: string
+  marketplace?: string
+  version?: string
+  author?: string
+  recommendation: 'allow' | 'caution' | 'block'
+  summary: string
+  report: string
+  findings: SkillReviewFinding[]
+  downloadedFiles: number
+  downloadedBytes: number
+  usedSkillVetter: boolean
+}
+
+export interface SkillsRegistryManifestEntry {
+  type: SkillsRegistrySourceType
+  url: string
+  name?: string
+  enabled?: boolean
+}
+
+export type SkillsRegistryEntry = string | SkillsRegistryManifestEntry
+
+export interface SkillMarketplacePreset {
+  id: string
+  type: SkillsRegistrySourceType
+  name: string
+  url: string
+  homepage?: string
+}
+
+export type SkillMarketplaceQuery =
+  | {
+    kind: 'curated'
+  }
+  | {
+    kind: 'registry'
+    url: string
+  }
+
+export const DEFAULT_SKILL_MARKETPLACE_PRESETS: SkillMarketplacePreset[] = [
+  {
+    id: 'n-skills',
+    type: 'claude_marketplace',
+    name: 'n-skills',
+    url: 'https://raw.githubusercontent.com/numman-ali/n-skills/main/.claude-plugin/marketplace.json',
+    homepage: 'https://github.com/numman-ali/n-skills'
+  },
+  {
+    id: 'claude-skills',
+    type: 'claude_marketplace',
+    name: 'claude-code-skills',
+    url: 'https://raw.githubusercontent.com/alirezarezvani/claude-skills/main/.claude-plugin/marketplace.json',
+    homepage: 'https://github.com/alirezarezvani/claude-skills'
+  }
+]
 
 export interface PluginRegistryEntry {
   id: string
