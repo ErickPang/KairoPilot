@@ -1,0 +1,246 @@
+import {
+  createApprovalRecord,
+  createRunStep,
+  getApprovalRecord,
+  getLatestContextSnapshot,
+  getRunById,
+  resolveApprovalRecord,
+  updateRun,
+  updateRunStep,
+  updateToolCallRecord
+} from '../../store/chat';
+import type { ContextAssemblyMetadata } from '../context/assembler';
+import type { ChatMessage } from '../llm/types';
+
+export interface PendingToolCallSnapshot {
+  callId: string;
+  toolName: string;
+  args: Record<string, unknown>;
+  toolRecordId?: string;
+  toolStepId?: string;
+  approvalStepId?: string;
+}
+
+export interface RuntimeSnapshot {
+  systemPrompt: string;
+  history: ChatMessage[];
+  iterations: number;
+  lastUserInput: string;
+  contextSummary?: ContextAssemblyMetadata;
+  pendingToolCall?: PendingToolCallSnapshot;
+}
+
+interface RuntimeSnapshotPatch {
+  iterations: number;
+  lastUserInput: string;
+  contextSummary?: ContextAssemblyMetadata;
+  pendingToolCall?: PendingToolCallSnapshot;
+  stepId?: string;
+}
+
+interface CreateApprovalRequestParams {
+  runId: string;
+  sessionId?: string;
+  toolName: string;
+  args: Record<string, unknown>;
+  displayArgs: Record<string, unknown>;
+  riskLevel?: string;
+  approvalMode?: string;
+  policyTags?: string[];
+  redacted?: boolean;
+  callId: string;
+  toolRecordId: string;
+  toolStepId: string;
+  iterations: number;
+  lastUserInput: string;
+  contextSummary?: ContextAssemblyMetadata;
+  persistSnapshot: (patch: RuntimeSnapshotPatch) => void;
+  emitUpdate: (update: Record<string, unknown>) => void;
+}
+
+type ApprovalRecord = NonNullable<ReturnType<typeof getApprovalRecord>>;
+type RunRecord = NonNullable<ReturnType<typeof getRunById>>;
+
+export function createApprovalRequest(params: CreateApprovalRequestParams) {
+  const {
+    runId,
+    sessionId,
+    toolName,
+    args,
+    displayArgs,
+    riskLevel,
+    approvalMode,
+    policyTags,
+    redacted,
+    callId,
+    toolRecordId,
+    toolStepId,
+    iterations,
+    lastUserInput,
+    contextSummary,
+    persistSnapshot,
+    emitUpdate
+  } = params;
+
+  updateRunStep(toolStepId, {
+    status: 'waiting_approval',
+    metadata: {
+      callId,
+      toolRecordId
+    }
+  });
+  updateToolCallRecord(toolRecordId, {
+    status: 'waiting_approval'
+  });
+
+  const approvalStep = createRunStep(runId, 'approval_wait', `等待确认 ${toolName}`, {
+    status: 'waiting_approval',
+    input: {
+      tool: toolName,
+      args: displayArgs
+    },
+    metadata: {
+      callId,
+      toolRecordId,
+      toolStepId,
+      redactedArgs: displayArgs,
+      riskLevel,
+      approvalMode,
+      policyTags,
+      redacted
+    }
+  });
+
+  const approval = createApprovalRecord({
+    runId,
+    stepId: approvalStep.id,
+    sessionId,
+    toolName,
+    toolArgs: args,
+    metadata: {
+      callId,
+      toolRecordId,
+      toolStepId,
+      approvalStepId: approvalStep.id,
+      redactedArgs: displayArgs,
+      riskLevel,
+      approvalMode,
+      policyTags,
+      redacted
+    }
+  });
+
+  updateRun(runId, {
+    status: 'waiting_approval',
+    waitingApprovalId: approval.id
+  });
+
+  persistSnapshot({
+    iterations,
+    lastUserInput,
+    contextSummary,
+    stepId: approvalStep.id,
+    pendingToolCall: {
+      callId,
+      toolName,
+      args,
+      toolRecordId,
+      toolStepId,
+      approvalStepId: approvalStep.id
+    }
+  });
+
+  emitUpdate({
+    type: 'approval-required',
+    tool: toolName,
+    args: displayArgs,
+    sessionId,
+    runId,
+    stepId: approvalStep.id,
+    approvalId: approval.id,
+    riskLevel,
+    approvalMode,
+    policyTags,
+    redacted,
+    status: 'waiting_approval'
+  });
+
+  return {
+    approvalId: approval.id
+  };
+}
+
+export function prepareApprovalResume(approvalId: string, approved: boolean):
+  | {
+    status: 'ready';
+    approval: ApprovalRecord;
+    run: RunRecord;
+    snapshot: RuntimeSnapshot;
+    pendingToolCall: PendingToolCallSnapshot;
+  }
+  | {
+    status: 'failed';
+    runId: string;
+    error: string;
+  } {
+  const approval = getApprovalRecord(approvalId);
+  if (!approval) {
+    throw new Error(`Approval record not found: ${approvalId}`);
+  }
+  if (approval.status !== 'pending') {
+    throw new Error(`Approval ${approvalId} has already been resolved.`);
+  }
+
+  const run = getRunById(approval.runId);
+  if (!run) {
+    throw new Error(`Run not found: ${approval.runId}`);
+  }
+
+  const snapshot = getLatestContextSnapshot<RuntimeSnapshot>(run.id);
+  if (!snapshot) {
+    throw new Error(`Context snapshot not found for run ${run.id}`);
+  }
+
+  resolveApprovalRecord(approvalId, approved);
+  updateRun(run.id, {
+    status: 'running',
+    error: null,
+    waitingApprovalId: null,
+    completedAt: null
+  });
+
+  if (approval.stepId) {
+    updateRunStep(approval.stepId, {
+      status: 'completed',
+      output: {
+        approved
+      },
+      metadata: {
+        ...(approval.metadata || {}),
+        approvalId
+      }
+    });
+  }
+
+  if (!snapshot.pendingToolCall) {
+    const error = 'Pending tool call snapshot not found.';
+    updateRun(run.id, {
+      status: 'failed',
+      error,
+      completedAt: Date.now()
+    });
+    return {
+      status: 'failed',
+      runId: run.id,
+      error
+    };
+  }
+
+  return {
+    status: 'ready',
+    approval,
+    run,
+    snapshot,
+    pendingToolCall: snapshot.pendingToolCall
+  };
+}

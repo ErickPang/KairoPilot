@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { ModelConfig, AgentConfig, FetchModelsResult } from '../types';
+import { ModelConfig, AgentConfig, FetchModelsResult, ProviderCapabilitySnapshot } from '../types';
 import { IconSettings } from './Icons';
 import { useTranslation } from '../hooks/useTranslation';
 import { ModelList } from './config/ModelList';
@@ -18,6 +18,7 @@ interface ConfigPanelProps {
   onSaveAgent: (agent: AgentConfig) => void;
   onDeleteAgent: (id: string) => void;
   onSetActiveAgent: (id: string) => void;
+  onDescribeProvider: (config: ModelConfig) => Promise<ProviderCapabilitySnapshot | null>;
   onFetchModels: (config: ModelConfig) => Promise<FetchModelsResult>;
   availableModels: string[];
   activeSection?: string;
@@ -37,7 +38,7 @@ export function ConfigPanel({
   models, agents, activeAgentId, 
   onSaveModel, onDeleteModel, 
   onSaveAgent, onDeleteAgent, onSetActiveAgent,
-  onFetchModels, availableModels, activeSection 
+  onDescribeProvider, onFetchModels, availableModels, activeSection 
 }: ConfigPanelProps) {
   const [view, setView] = useState<'list' | 'edit-model' | 'edit-agent'>('list');
   const [editingModel, setEditingModel] = useState<ModelConfig | null>(null);
@@ -165,6 +166,7 @@ export function ConfigPanel({
           setEditingModel={setEditingModel}
           isEditingExisting={isEditingExistingModel}
           availableModels={availableModels}
+          onDescribeProvider={onDescribeProvider}
           onFetchModels={onFetchModels}
           onSave={handleSaveModel}
           onCancel={() => {

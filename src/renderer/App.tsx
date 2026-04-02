@@ -21,7 +21,9 @@ function App() {
     agents,
     availableModels,
     confirmationRequest,
+    describeProvider,
     fetchModels,
+    handleCancelRun,
     handleClear,
     handleConfirm,
     handleCreateSession,
@@ -29,6 +31,9 @@ function App() {
     handleDeleteModel,
     handleDeleteSession,
     handleDeny,
+    handlePauseRun,
+    handleResumeRun,
+    handleRetryStep,
     handleSaveAgent,
     handleSaveModel,
     handleSelectSession,
@@ -125,9 +130,16 @@ function App() {
 
       {activeTab === 'chat' && (
         <ChatInterface 
+          activeRunSteps={sessionContext.activeRunSteps}
           messages={messages} 
           input={input} 
           setInput={setInput} 
+          latestContextSummary={sessionContext.latestContextSummary}
+          latestRun={sessionContext.latestRun}
+          handleCancelRun={handleCancelRun}
+          handlePauseRun={handlePauseRun}
+          handleResumeRun={handleResumeRun}
+          handleRetryStep={handleRetryStep}
           loading={loading} 
           handleSend={handleSend} 
           handleClear={handleClear} 
@@ -174,6 +186,7 @@ function App() {
             onSaveAgent={handleSaveAgent}
             onDeleteAgent={handleDeleteAgent}
             onSetActiveAgent={handleSetActiveAgent}
+            onDescribeProvider={describeProvider}
             onFetchModels={fetchModels}
             availableModels={availableModels}
             activeSection={activeConfigSection}

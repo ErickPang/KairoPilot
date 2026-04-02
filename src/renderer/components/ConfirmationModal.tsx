@@ -1,16 +1,33 @@
 import { IconShield } from './Icons';
 import { useTranslation } from '../hooks/useTranslation';
+import type { ConfirmationRequest } from '../types';
 
 interface ConfirmationModalProps {
-  request: { id: string; tool: string; args: Record<string, unknown>; sessionId?: string };
+  request: ConfirmationRequest;
   onConfirm: () => void;
   onDeny: () => void;
 }
 
 export function ConfirmationModal({ request, onConfirm, onDeny }: ConfirmationModalProps) {
   const { t } = useTranslation();
-  // Determine if it's a highly destructive action
-  const isDestructive = request.tool === 'delete_file' || request.tool === 'execute_command';
+  const riskLevel = request.riskLevel || (request.tool === 'delete_file' || request.tool === 'execute_command' ? 'high' : 'medium');
+  const isDestructive = riskLevel === 'high' || riskLevel === 'critical';
+  const riskLevelLabel = riskLevel === 'critical'
+    ? t('modal.risk.critical')
+    : riskLevel === 'high'
+      ? t('modal.risk.high')
+      : riskLevel === 'low'
+        ? t('modal.risk.low')
+        : t('modal.risk.medium');
+  const approvalModeLabel = request.approvalMode === 'never'
+    ? t('modal.approvalMode.never')
+    : request.approvalMode === 'on_write'
+      ? t('modal.approvalMode.on_write')
+      : request.approvalMode === 'on_external'
+        ? t('modal.approvalMode.on_external')
+        : request.approvalMode === 'always'
+          ? t('modal.approvalMode.always')
+          : null;
 
   return (
     <div className="modal-overlay">
@@ -48,6 +65,26 @@ export function ConfirmationModal({ request, onConfirm, onDeny }: ConfirmationMo
             }}>
               {JSON.stringify(request.args, null, 2)}
             </pre>
+            <div style={{ marginTop: '0.75rem', display: 'grid', gap: '0.5rem' }}>
+              <div>
+                <strong>{t('modal.riskLevel')}:</strong> {riskLevelLabel}
+              </div>
+              {approvalModeLabel && (
+                <div>
+                  <strong>{t('modal.approvalMode')}:</strong> {approvalModeLabel}
+                </div>
+              )}
+              {request.policyTags && request.policyTags.length > 0 && (
+                <div>
+                  <strong>{t('modal.policyTags')}:</strong> {request.policyTags.join(', ')}
+                </div>
+              )}
+              {request.redacted && (
+                <div style={{ color: 'var(--muted-fg)', fontSize: '0.85rem' }}>
+                  {t('modal.redactedNotice')}
+                </div>
+              )}
+            </div>
           </div>
           {isDestructive && (
             <p style={{ color: 'var(--danger)', fontSize: '0.85rem', marginTop: '1rem', backgroundColor: 'rgba(239, 68, 68, 0.1)', padding: '8px', borderRadius: '4px' }}>

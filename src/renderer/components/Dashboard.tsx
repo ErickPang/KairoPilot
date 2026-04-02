@@ -62,6 +62,12 @@ export function Dashboard({ agents, systemStats }: DashboardProps) {
   const totalTokens = stats.reduce((acc, stat) => acc + stat.totalTokens, 0);
   const totalMessages = stats.reduce((acc, stat) => acc + stat.totalMessages, 0);
   const totalSessions = stats.reduce((acc, stat) => acc + stat.totalSessions, 0);
+  const totalRuns = stats.reduce((acc, stat) => acc + stat.totalRuns, 0);
+  const totalCompletedRuns = stats.reduce((acc, stat) => acc + stat.completedRuns, 0);
+  const totalApprovalRequests = stats.reduce((acc, stat) => acc + stat.approvalRequests, 0);
+  const totalApprovalApproved = stats.reduce((acc, stat) => acc + stat.approvalApproved, 0);
+  const totalToolCalls = stats.reduce((acc, stat) => acc + stat.toolCalls, 0);
+  const totalSuccessfulToolCalls = stats.reduce((acc, stat) => acc + stat.successfulToolCalls, 0);
   const selectedAgentName = selectedAgentId ? getAgentName(selectedAgentId) : '';
   const modelSelectOptions = useMemo(() => (
     [
@@ -128,6 +134,13 @@ export function Dashboard({ agents, systemStats }: DashboardProps) {
       minute: '2-digit'
     }).format(timestamp)
   );
+
+  const formatRate = (value: number, total: number) => {
+    if (total <= 0) {
+      return '—';
+    }
+    return `${((value / total) * 100).toFixed(1)}%`;
+  };
 
   const refreshTokenDetails = async () => {
     await fetchTokenDetails();
@@ -614,6 +627,54 @@ export function Dashboard({ agents, systemStats }: DashboardProps) {
                 {totalSessions.toLocaleString()}
               </div>
             </div>
+
+            <div className="stat-card">
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ color: 'var(--muted-fg)', fontWeight: 600, fontSize: '0.9rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('dashboard.totalRuns')}</div>
+                <div className="stat-icon-wrapper" style={{ background: 'linear-gradient(135deg, #60a5fa 0%, #2563eb 100%)', color: '#ffffff' }}>
+                  <IconRefresh size={22} />
+                </div>
+              </div>
+              <div style={{ fontSize: '2.75rem', fontWeight: 800, letterSpacing: '-0.03em', background: 'linear-gradient(135deg, #1d4ed8 0%, #60a5fa 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+                {totalRuns.toLocaleString()}
+              </div>
+            </div>
+
+            <div className="stat-card">
+              <div style={{ color: 'var(--muted-fg)', fontWeight: 600, fontSize: '0.9rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                {t('dashboard.runCompletionRate')}
+              </div>
+              <div style={{ fontSize: '2.5rem', fontWeight: 800, letterSpacing: '-0.03em', color: 'var(--foreground)' }}>
+                {formatRate(totalCompletedRuns, totalRuns)}
+              </div>
+              <div style={{ color: 'var(--muted-fg)', fontSize: '0.85rem' }}>
+                {t('dashboard.completedRunsMeta', { completed: totalCompletedRuns, total: totalRuns })}
+              </div>
+            </div>
+
+            <div className="stat-card">
+              <div style={{ color: 'var(--muted-fg)', fontWeight: 600, fontSize: '0.9rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                {t('dashboard.approvalAcceptRate')}
+              </div>
+              <div style={{ fontSize: '2.5rem', fontWeight: 800, letterSpacing: '-0.03em', color: 'var(--foreground)' }}>
+                {formatRate(totalApprovalApproved, totalApprovalRequests)}
+              </div>
+              <div style={{ color: 'var(--muted-fg)', fontSize: '0.85rem' }}>
+                {t('dashboard.approvalMeta', { approved: totalApprovalApproved, total: totalApprovalRequests })}
+              </div>
+            </div>
+
+            <div className="stat-card">
+              <div style={{ color: 'var(--muted-fg)', fontWeight: 600, fontSize: '0.9rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                {t('dashboard.toolSuccessRate')}
+              </div>
+              <div style={{ fontSize: '2.5rem', fontWeight: 800, letterSpacing: '-0.03em', color: 'var(--foreground)' }}>
+                {formatRate(totalSuccessfulToolCalls, totalToolCalls)}
+              </div>
+              <div style={{ color: 'var(--muted-fg)', fontSize: '0.85rem' }}>
+                {t('dashboard.toolMeta', { success: totalSuccessfulToolCalls, total: totalToolCalls })}
+              </div>
+            </div>
           </div>
 
           <div className="animate-stagger-3" style={{ marginBottom: '3rem' }}>
@@ -626,7 +687,11 @@ export function Dashboard({ agents, systemStats }: DashboardProps) {
                   <tr>
                     <th>{t('dashboard.agentName')}</th>
                     <th>{t('dashboard.sessions')}</th>
+                    <th>{t('dashboard.runs')}</th>
                     <th>{t('dashboard.messages')}</th>
+                    <th>{t('dashboard.runCompletionRate')}</th>
+                    <th>{t('dashboard.approvalAcceptRate')}</th>
+                    <th>{t('dashboard.toolSuccessRate')}</th>
                     <th>{t('dashboard.promptTokens')}</th>
                     <th>{t('dashboard.completionTokens')}</th>
                     <th>{t('dashboard.totalTokens')}</th>
@@ -635,7 +700,7 @@ export function Dashboard({ agents, systemStats }: DashboardProps) {
                 <tbody>
                   {stats.length === 0 ? (
                     <tr>
-                      <td colSpan={6} style={{ padding: '4rem', textAlign: 'center', color: 'var(--muted-fg)', fontSize: '1.1rem' }}>
+                      <td colSpan={9} style={{ padding: '4rem', textAlign: 'center', color: 'var(--muted-fg)', fontSize: '1.1rem' }}>
                         <div style={{ opacity: 0.8, marginBottom: '1rem', display: 'flex', justifyContent: 'center' }}>
                           <div style={{
                             background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.1) 0%, rgba(16, 185, 129, 0.2) 100%)',
@@ -663,7 +728,11 @@ export function Dashboard({ agents, systemStats }: DashboardProps) {
                           </div>
                         </td>
                         <td style={{ fontWeight: 500 }}>{stat.totalSessions}</td>
+                        <td style={{ fontWeight: 500 }}>{stat.totalRuns}</td>
                         <td style={{ fontWeight: 500 }}>{stat.totalMessages}</td>
+                        <td style={{ fontWeight: 500 }}>{formatRate(stat.completedRuns, stat.totalRuns)}</td>
+                        <td style={{ fontWeight: 500 }}>{formatRate(stat.approvalApproved, stat.approvalRequests)}</td>
+                        <td style={{ fontWeight: 500 }}>{formatRate(stat.successfulToolCalls, stat.toolCalls)}</td>
                         <td style={{ color: 'var(--muted-fg)' }}>{stat.promptTokens.toLocaleString()}</td>
                         <td style={{ color: 'var(--muted-fg)' }}>{stat.completionTokens.toLocaleString()}</td>
                         <td>

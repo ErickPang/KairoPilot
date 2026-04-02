@@ -5,7 +5,10 @@ function createDefaultSessionContext(): SessionContextState {
   return {
     activeAgentId: null,
     activeSessionId: null,
-    confirmationRequest: null
+    confirmationRequest: null,
+    latestContextSummary: null,
+    latestRun: null,
+    activeRunSteps: []
   };
 }
 

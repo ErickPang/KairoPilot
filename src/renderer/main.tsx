@@ -14,6 +14,8 @@ if (!window.kairo) {
       if (channel === KAIRO_INVOKE.configGetAgents) return [];
       if (channel === KAIRO_INVOKE.chatListSessions) return [];
       if (channel === KAIRO_INVOKE.chatGetActiveSession) return null;
+      if (channel === KAIRO_INVOKE.chatGetLatestContextSummary) return null;
+      if (channel === KAIRO_INVOKE.chatGetRunTrace) return null;
       if (channel === KAIRO_INVOKE.chatGetSession) return null;
       if (channel === KAIRO_INVOKE.chatClearAllSessions) return { success: true };
       if (channel === KAIRO_INVOKE.ollamaCheck) return { running: true, message: 'Mock Ollama' };

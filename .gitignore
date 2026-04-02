@@ -27,3 +27,7 @@ demo.json
 *.sln
 *.sw?
 name.md
+guihua.md
+ceshi.md
+.claude/*
+.qwen/*

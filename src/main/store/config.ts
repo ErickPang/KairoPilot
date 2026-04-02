@@ -2,11 +2,14 @@ import { app } from 'electron';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { getPromptWorkspaceLayout } from '../core/llm/prompt';
+import { getPromptWorkspaceLayout } from '../workspace/layout';
 import {
+  applyExecutionProfileConstraints,
   type AgentConfig,
   type AgentPermissionConfig,
+  createDefaultPolicyConfig,
   DEFAULT_SKILL_MARKETPLACE_PRESETS,
+  type ExecutionProfile,
   type KairoPilotConfig,
   type LegacyAgentConfig,
   type ModelConfig,
@@ -153,6 +156,76 @@ function normalizePermissionFlag(value: unknown): boolean | undefined {
   return typeof value === 'boolean' ? value : undefined;
 }
 
+function normalizeExecutionProfile(value: unknown): ExecutionProfile | undefined {
+  return value === 'chat_only'
+    || value === 'read_only_workspace'
+    || value === 'approved_execution'
+    || value === 'trusted_automation'
+    ? value
+    : undefined;
+}
+
+function normalizeApprovalMode(value: unknown): AgentPermissionConfig['policy']['approvalMode'] | undefined {
+  return value === 'never'
+    || value === 'on_write'
+    || value === 'on_external'
+    || value === 'always'
+    ? value
+    : undefined;
+}
+
+function normalizeEnvironmentScope(value: unknown): AgentPermissionConfig['policy']['environmentScope'] | undefined {
+  return value === 'workspace'
+    || value === 'allowed_paths'
+    || value === 'isolated_env'
+    ? value
+    : undefined;
+}
+
+function normalizeDataClass(value: unknown): AgentPermissionConfig['policy']['dataClass'] | undefined {
+  return value === 'public'
+    || value === 'project'
+    || value === 'sensitive'
+    ? value
+    : undefined;
+}
+
+function inferExecutionProfile(seed: Partial<AgentConfig> & {
+  permissions?: Partial<AgentPermissionConfig>;
+  enableShell?: boolean;
+  enableNetwork?: boolean;
+  enableFileSystemRead?: boolean;
+  enableFileSystemWrite?: boolean;
+}) {
+  const explicitProfile = normalizeExecutionProfile(seed?.permissions?.executionProfile);
+  if (explicitProfile) {
+    return explicitProfile;
+  }
+
+  const shellEnabled = normalizePermissionFlag(seed?.permissions?.shell?.enabled)
+    ?? normalizePermissionFlag(seed?.enableShell)
+    ?? false;
+  const writeEnabled = normalizePermissionFlag(seed?.permissions?.fileSystem?.write)
+    ?? normalizePermissionFlag(seed?.enableFileSystemWrite)
+    ?? false;
+  const readEnabled = normalizePermissionFlag(seed?.permissions?.fileSystem?.read)
+    ?? normalizePermissionFlag(seed?.enableFileSystemRead)
+    ?? false;
+  const networkEnabled = normalizePermissionFlag(seed?.permissions?.network?.enabled)
+    ?? normalizePermissionFlag(seed?.enableNetwork)
+    ?? false;
+
+  if (shellEnabled || writeEnabled) {
+    return 'approved_execution';
+  }
+
+  if (readEnabled || networkEnabled) {
+    return 'read_only_workspace';
+  }
+
+  return createDefaultAgentPermissions().executionProfile;
+}
+
 function normalizeAgentPermissions(seed?: Partial<AgentConfig> & {
   permissions?: Partial<AgentPermissionConfig>;
   allowedPaths?: string[];
@@ -164,7 +237,20 @@ function normalizeAgentPermissions(seed?: Partial<AgentConfig> & {
   enableFileSystemWrite?: boolean;
 }): AgentPermissionConfig {
   const defaults = createDefaultAgentPermissions();
-  return {
+  const executionProfile = inferExecutionProfile(seed ?? {});
+  const policyDefaults = createDefaultPolicyConfig(executionProfile);
+  return applyExecutionProfileConstraints({
+    executionProfile,
+    policy: {
+      approvalMode: normalizeApprovalMode(seed?.permissions?.policy?.approvalMode)
+        ?? policyDefaults.approvalMode,
+      environmentScope: normalizeEnvironmentScope(seed?.permissions?.policy?.environmentScope)
+        ?? policyDefaults.environmentScope,
+      dataClass: normalizeDataClass(seed?.permissions?.policy?.dataClass)
+        ?? policyDefaults.dataClass,
+      redactSensitiveOutput: normalizePermissionFlag(seed?.permissions?.policy?.redactSensitiveOutput)
+        ?? policyDefaults.redactSensitiveOutput
+    },
     fileSystem: {
       read: normalizePermissionFlag(seed?.permissions?.fileSystem?.read)
         ?? normalizePermissionFlag(seed?.enableFileSystemRead)
@@ -186,7 +272,7 @@ function normalizeAgentPermissions(seed?: Partial<AgentConfig> & {
         ?? defaults.shell.enabled,
       allowedCommands: normalizePermissionList(seed?.permissions?.shell?.allowedCommands ?? seed?.allowedCommands)
     }
-  };
+  });
 }
 
 export function createAgentDraft(seed?: Partial<AgentConfig>): AgentConfig {

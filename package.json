@@ -1,15 +1,16 @@
 {
   "name": "KairoPilot",
   "productName": "KairoPilot",
-  "description": "A user-friendly desktop AI Agent application based on OpenClaw architecture.",
+  "description": "A user-friendly desktop AI Agent application",
   "author": "墨香异境",
   "private": true,
-  "version": "0.1.2",
+  "version": "0.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build && electron-builder",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
+    "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "preview": "vite preview",
     "postinstall": "electron-builder install-app-deps"
@@ -49,7 +50,8 @@
     "typescript": "^5.5.4",
     "vite": "^5.1.6",
     "vite-plugin-electron": "^0.28.6",
-    "vite-plugin-electron-renderer": "^0.14.5"
+    "vite-plugin-electron-renderer": "^0.14.5",
+    "vitest": "^3.2.4"
   },
   "main": "dist-electron/index.js"
 }

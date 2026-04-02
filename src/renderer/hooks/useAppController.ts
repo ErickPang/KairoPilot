@@ -11,11 +11,12 @@ export function useAppController() {
   const [activeConfigSection, setActiveConfigSection] = useState<string>('general');
   const { t } = useTranslation();
   const { sessionContext, updateSessionContext } = useSessionContextState();
-  const { loadActiveSession, loadSessions, messages, messagesEndRef, sessions, setMessages, setSessions } = useSessionData(updateSessionContext);
+  const { loadActiveSession, loadRunState, loadSessions, messages, messagesEndRef, sessions, setMessages, setSessions } = useSessionData(updateSessionContext);
   const {
     activeAgentName,
     agents,
     availableModels,
+    describeProvider,
     fetchModels,
     handleDeleteAgent,
     handleDeleteModel,
@@ -33,11 +34,15 @@ export function useAppController() {
   const systemStats = useSystemStats();
   const [agentLoading, setAgentLoading] = useState(false);
   const {
+    handleCancelRun,
     handleClear,
     handleConfirm,
     handleCreateSession,
     handleDeleteSession,
     handleDeny,
+    handlePauseRun,
+    handleResumeRun,
+    handleRetryStep,
     handleSelectSession,
     handleSend,
     handleUpdateSessionTitle,
@@ -47,6 +52,7 @@ export function useAppController() {
   } = useChatController({
     agentCount: agents.length,
     loadActiveSession,
+    loadRunState,
     loadSessions,
     messages,
     messagesEndRef,
@@ -73,7 +79,9 @@ export function useAppController() {
     agents,
     availableModels,
     confirmationRequest: sessionContext.confirmationRequest,
+    describeProvider,
     fetchModels,
+    handleCancelRun,
     handleClear,
     handleConfirm,
     handleCreateSession,
@@ -81,6 +89,9 @@ export function useAppController() {
     handleDeleteModel,
     handleDeleteSession,
     handleDeny,
+    handlePauseRun,
+    handleResumeRun,
+    handleRetryStep,
     handleSaveAgent,
     handleSaveModel,
     handleSelectSession,

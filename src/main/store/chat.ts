@@ -6,12 +6,25 @@ import { app } from 'electron';
 import fs from 'fs';
 import Store from 'electron-store'; // Only for migration
 import { getAgents } from './config';
+import { queryAuditLogs } from './audit';
+import { buildRunTraceAggregations, normalizeRunTraceQuery, paginateRunSteps } from './chat_trace_utils';
 import type {
   AgentStats,
+  ApprovalRecord,
   MonitoringTokenQuery,
   MonitoringTokenQueryResult,
   MonitoringTokenUsageItem,
-  TokenMetricFacet
+  RunContextSummary,
+  RunStatus,
+  RunStep,
+  RunStepStatus,
+  RunStepType,
+  RunTrace,
+  RunTraceAggregations,
+  RunTraceQuery,
+  RunSummary,
+  TokenMetricFacet,
+  ToolCallRecord
 } from '../../shared/contracts';
 
 export interface Session {
@@ -48,6 +61,22 @@ function ensureIndexes(database: Database.Database) {
       ON sessions(agent_id, updated_at DESC);
     CREATE INDEX IF NOT EXISTS idx_messages_session_timestamp
       ON messages(session_id, timestamp ASC);
+    CREATE INDEX IF NOT EXISTS idx_runs_session_updated_at
+      ON runs(session_id, updated_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_run_steps_run_step_index
+      ON run_steps(run_id, step_index ASC);
+    CREATE INDEX IF NOT EXISTS idx_tool_call_records_run_step
+      ON tool_call_records(run_id, step_id);
+    CREATE INDEX IF NOT EXISTS idx_approval_records_run_status
+      ON approval_records(run_id, status, updated_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_approval_records_session_status
+      ON approval_records(session_id, status, updated_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_context_snapshots_run_created_at
+      ON context_snapshots(run_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_context_summaries_run_created_at
+      ON context_summaries(run_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_context_summaries_session_created_at
+      ON context_summaries(session_id, created_at DESC);
   `);
 }
 
@@ -65,6 +94,7 @@ function getDb(): Database.Database {
 
     db = new Database(dbPath);
     db.pragma('journal_mode = WAL'); // Enable Write-Ahead Logging for performance
+    db.pragma('foreign_keys = ON');
     
     initTables(db);
     ensureIndexes(db);
@@ -139,6 +169,93 @@ function initTables(db: Database.Database) {
     CREATE TABLE IF NOT EXISTS app_state (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS runs (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      agent_id TEXT NOT NULL,
+      goal TEXT NOT NULL,
+      user_input TEXT NOT NULL,
+      status TEXT NOT NULL,
+      final_response TEXT,
+      error TEXT,
+      waiting_approval_id TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      started_at INTEGER,
+      completed_at INTEGER,
+      FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS run_steps (
+      id TEXT PRIMARY KEY,
+      run_id TEXT NOT NULL,
+      step_index INTEGER NOT NULL,
+      type TEXT NOT NULL,
+      status TEXT NOT NULL,
+      title TEXT NOT NULL,
+      input TEXT,
+      output TEXT,
+      error TEXT,
+      metadata TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS tool_call_records (
+      id TEXT PRIMARY KEY,
+      run_id TEXT NOT NULL,
+      step_id TEXT,
+      tool_name TEXT NOT NULL,
+      args TEXT,
+      result TEXT,
+      error TEXT,
+      status TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE,
+      FOREIGN KEY (step_id) REFERENCES run_steps(id) ON DELETE SET NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS approval_records (
+      id TEXT PRIMARY KEY,
+      run_id TEXT NOT NULL,
+      step_id TEXT,
+      session_id TEXT,
+      tool_name TEXT NOT NULL,
+      args TEXT NOT NULL,
+      status TEXT NOT NULL,
+      metadata TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      resolved_at INTEGER,
+      FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE,
+      FOREIGN KEY (step_id) REFERENCES run_steps(id) ON DELETE SET NULL,
+      FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS context_snapshots (
+      id TEXT PRIMARY KEY,
+      run_id TEXT NOT NULL,
+      step_id TEXT,
+      snapshot TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE,
+      FOREIGN KEY (step_id) REFERENCES run_steps(id) ON DELETE SET NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS context_summaries (
+      id TEXT PRIMARY KEY,
+      run_id TEXT NOT NULL,
+      session_id TEXT,
+      step_id TEXT,
+      summary TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE,
+      FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
+      FOREIGN KEY (step_id) REFERENCES run_steps(id) ON DELETE SET NULL
     );
   `);
 }
@@ -286,6 +403,30 @@ function parseUsage(value: string | null | undefined) {
   }
 }
 
+function serializeJson(value: unknown) {
+  if (typeof value === 'undefined') {
+    return null;
+  }
+
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return JSON.stringify(String(value));
+  }
+}
+
+function parseJsonValue<T>(value: string | null | undefined): T | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return undefined;
+  }
+}
+
 function serializeComparableMessage(message: ChatMessage): string {
   return JSON.stringify({
     role: message.role,
@@ -326,6 +467,159 @@ function mapSessionRowToSummary(session: {
     agentId: session.agent_id,
     createdAt: session.created_at,
     updatedAt: session.updated_at
+  };
+}
+
+function mapRunRowToSummary(run: {
+  id: string;
+  session_id: string;
+  agent_id: string;
+  goal: string;
+  user_input: string;
+  status: RunStatus;
+  final_response: string | null;
+  error: string | null;
+  waiting_approval_id: string | null;
+  created_at: number;
+  updated_at: number;
+  started_at: number | null;
+  completed_at: number | null;
+}): RunSummary {
+  return {
+    id: run.id,
+    sessionId: run.session_id,
+    agentId: run.agent_id,
+    goal: run.goal,
+    userInput: run.user_input,
+    status: run.status,
+    finalResponse: run.final_response || undefined,
+    error: run.error || undefined,
+    waitingApprovalId: run.waiting_approval_id || undefined,
+    createdAt: run.created_at,
+    updatedAt: run.updated_at,
+    startedAt: run.started_at || undefined,
+    completedAt: run.completed_at || undefined
+  };
+}
+
+function mapRunStepRow(step: {
+  id: string;
+  run_id: string;
+  step_index: number;
+  type: RunStepType;
+  status: RunStepStatus;
+  title: string;
+  input: string | null;
+  output: string | null;
+  error: string | null;
+  metadata: string | null;
+  created_at: number;
+  updated_at: number;
+}): RunStep {
+  return {
+    id: step.id,
+    runId: step.run_id,
+    stepIndex: step.step_index,
+    type: step.type,
+    status: step.status,
+    title: step.title,
+    input: parseJsonValue(step.input),
+    output: parseJsonValue(step.output),
+    error: step.error || undefined,
+    metadata: parseJsonValue<Record<string, unknown>>(step.metadata),
+    createdAt: step.created_at,
+    updatedAt: step.updated_at
+  };
+}
+
+function mapApprovalRowToRecord(row: {
+  id: string;
+  run_id: string;
+  step_id: string | null;
+  session_id: string | null;
+  tool_name: string;
+  args: string;
+  status: 'pending' | 'approved' | 'denied';
+  metadata: string | null;
+  created_at: number;
+  updated_at: number;
+  resolved_at: number | null;
+}): ApprovalRecord {
+  return {
+    id: row.id,
+    runId: row.run_id,
+    stepId: row.step_id || undefined,
+    sessionId: row.session_id || undefined,
+    toolName: row.tool_name,
+    args: parseJsonValue<Record<string, unknown>>(row.args) || {},
+    status: row.status,
+    metadata: parseJsonValue<Record<string, unknown>>(row.metadata),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    resolvedAt: row.resolved_at || undefined
+  };
+}
+
+function mapToolCallRecordRow(row: {
+  id: string;
+  run_id: string;
+  step_id: string | null;
+  tool_name: string;
+  args: string | null;
+  result: string | null;
+  error: string | null;
+  status: 'running' | 'waiting_approval' | 'success' | 'failed' | 'cancelled';
+  created_at: number;
+  updated_at: number;
+}): ToolCallRecord {
+  return {
+    id: row.id,
+    runId: row.run_id,
+    stepId: row.step_id || undefined,
+    toolName: row.tool_name,
+    args: parseJsonValue(row.args),
+    result: parseJsonValue(row.result),
+    error: row.error || undefined,
+    status: row.status,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+function mapContextSummaryRow(row: {
+  id: string;
+  run_id: string;
+  session_id: string | null;
+  step_id: string | null;
+  summary: string;
+  created_at: number;
+}): RunContextSummary | null {
+  const parsedSummary = parseJsonValue<Omit<RunContextSummary, 'id' | 'runId' | 'sessionId' | 'stepId' | 'createdAt'>>(row.summary);
+  if (!parsedSummary) {
+    return null;
+  }
+
+  return {
+    id: row.id,
+    runId: row.run_id,
+    sessionId: row.session_id || undefined,
+    stepId: row.step_id || undefined,
+    activeTaskSummary: parsedSummary.activeTaskSummary || '',
+    compactedHistorySummary: parsedSummary.compactedHistorySummary || '',
+    unresolvedApprovals: parsedSummary.unresolvedApprovals || '',
+    selectedToolResults: parsedSummary.selectedToolResults || '',
+    workspaceRetrieval: parsedSummary.workspaceRetrieval || '',
+    memoryDigest: parsedSummary.memoryDigest || '',
+    recentMessageCount: Number.isFinite(parsedSummary.recentMessageCount) ? parsedSummary.recentMessageCount : 0,
+    omittedMessageCount: Number.isFinite(parsedSummary.omittedMessageCount) ? parsedSummary.omittedMessageCount : 0,
+    budget: {
+      maxContextChars: parsedSummary.budget?.maxContextChars || 0,
+      systemPromptChars: parsedSummary.budget?.systemPromptChars || 0,
+      supportChars: parsedSummary.budget?.supportChars || 0,
+      recentHistoryChars: parsedSummary.budget?.recentHistoryChars || 0,
+      totalChars: parsedSummary.budget?.totalChars || 0
+    },
+    createdAt: row.created_at
   };
 }
 
@@ -579,22 +873,43 @@ export function getAgentStats(): AgentStats[] {
   const db = getDb();
   const sessions = db.prepare('SELECT id, agent_id FROM sessions').all() as {id: string, agent_id: string}[];
   const messages = db.prepare('SELECT session_id, role, usage FROM messages').all() as {session_id: string, role: string, usage: string | null}[];
+  const runs = db.prepare('SELECT agent_id, status FROM runs').all() as {agent_id: string, status: RunStatus}[];
+  const approvals = db.prepare('SELECT run_id, status FROM approval_records').all() as {run_id: string, status: ApprovalRecord['status']}[];
+  const toolCalls = db.prepare('SELECT run_id, status FROM tool_call_records').all() as {
+    run_id: string,
+    status: ToolCallRecord['status']
+  }[];
   const statsMap = new Map<string, AgentStats>();
   const sessionAgentMap = new Map(sessions.map(session => [session.id, session.agent_id || DEFAULT_AGENT_ID]));
+  const runAgentMap = new Map<string, string>();
 
-  for (const session of sessions) {
-    const agentId = session.agent_id || DEFAULT_AGENT_ID;
-    if (!statsMap.has(agentId)) {
-      statsMap.set(agentId, {
-        agentId,
+  const ensureAgentStats = (agentId: string) => {
+    const normalizedAgentId = agentId || DEFAULT_AGENT_ID;
+    if (!statsMap.has(normalizedAgentId)) {
+      statsMap.set(normalizedAgentId, {
+        agentId: normalizedAgentId,
         totalSessions: 0,
         totalMessages: 0,
         promptTokens: 0,
         completionTokens: 0,
-        totalTokens: 0
+        totalTokens: 0,
+        totalRuns: 0,
+        completedRuns: 0,
+        failedRuns: 0,
+        cancelledRuns: 0,
+        waitingApprovalRuns: 0,
+        approvalRequests: 0,
+        approvalApproved: 0,
+        toolCalls: 0,
+        successfulToolCalls: 0
       });
     }
-    const stat = statsMap.get(agentId)!;
+    return statsMap.get(normalizedAgentId)!;
+  };
+
+  for (const session of sessions) {
+    const agentId = session.agent_id || DEFAULT_AGENT_ID;
+    const stat = ensureAgentStats(agentId);
     stat.totalSessions += 1;
   }
 
@@ -604,11 +919,7 @@ export function getAgentStats(): AgentStats[] {
       continue;
     }
 
-    const stat = statsMap.get(agentId);
-    if (!stat) {
-      continue;
-    }
-
+    const stat = ensureAgentStats(agentId);
     stat.totalMessages += 1;
     const usage = parseUsage(msg.usage);
     if (usage) {
@@ -618,7 +929,761 @@ export function getAgentStats(): AgentStats[] {
     }
   }
 
+  for (const run of runs) {
+    const agentId = run.agent_id || DEFAULT_AGENT_ID;
+    const stat = ensureAgentStats(agentId);
+    stat.totalRuns += 1;
+    if (run.status === 'completed') {
+      stat.completedRuns += 1;
+    } else if (run.status === 'failed') {
+      stat.failedRuns += 1;
+    } else if (run.status === 'cancelled') {
+      stat.cancelledRuns += 1;
+    } else if (run.status === 'waiting_approval') {
+      stat.waitingApprovalRuns += 1;
+    }
+  }
+
+  const runRows = db.prepare('SELECT id, agent_id FROM runs').all() as { id: string; agent_id: string }[];
+  for (const run of runRows) {
+    runAgentMap.set(run.id, run.agent_id || DEFAULT_AGENT_ID);
+  }
+
+  for (const approval of approvals) {
+    const agentId = runAgentMap.get(approval.run_id);
+    if (!agentId) {
+      continue;
+    }
+    const stat = ensureAgentStats(agentId);
+    stat.approvalRequests += 1;
+    if (approval.status === 'approved') {
+      stat.approvalApproved += 1;
+    }
+  }
+
+  for (const toolCall of toolCalls) {
+    const agentId = runAgentMap.get(toolCall.run_id);
+    if (!agentId) {
+      continue;
+    }
+    const stat = ensureAgentStats(agentId);
+    stat.toolCalls += 1;
+    if (toolCall.status === 'success') {
+      stat.successfulToolCalls += 1;
+    }
+  }
+
   return Array.from(statsMap.values());
+}
+
+function getNextRunStepIndex(database: Database.Database, runId: string) {
+  const row = database.prepare(
+    'SELECT COALESCE(MAX(step_index), -1) AS max_step_index FROM run_steps WHERE run_id = ?'
+  ).get(runId) as { max_step_index: number };
+  return (row?.max_step_index ?? -1) + 1;
+}
+
+export function createRun(sessionId: string, agentId: string, userInput: string, goal?: string): RunSummary {
+  const database = getDb();
+  const now = Date.now();
+  const id = uuidv4();
+  database.prepare(`
+    INSERT INTO runs (
+      id, session_id, agent_id, goal, user_input, status, created_at, updated_at, started_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(id, sessionId, normalizeAgentId(agentId), goal || userInput, userInput, 'running', now, now, now);
+  database.prepare('UPDATE sessions SET updated_at = ? WHERE id = ?').run(now, sessionId);
+  return getRunById(id)!;
+}
+
+export function getRunById(runId: string): RunSummary | null {
+  const database = getDb();
+  const row = database.prepare(`
+    SELECT
+      id,
+      session_id,
+      agent_id,
+      goal,
+      user_input,
+      status,
+      final_response,
+      error,
+      waiting_approval_id,
+      created_at,
+      updated_at,
+      started_at,
+      completed_at
+    FROM runs
+    WHERE id = ?
+  `).get(runId) as {
+    id: string;
+    session_id: string;
+    agent_id: string;
+    goal: string;
+    user_input: string;
+    status: RunStatus;
+    final_response: string | null;
+    error: string | null;
+    waiting_approval_id: string | null;
+    created_at: number;
+    updated_at: number;
+    started_at: number | null;
+    completed_at: number | null;
+  } | undefined;
+
+  return row ? mapRunRowToSummary(row) : null;
+}
+
+export function getLatestRun(sessionId: string): RunSummary | null {
+  const database = getDb();
+  const row = database.prepare(`
+    SELECT
+      id,
+      session_id,
+      agent_id,
+      goal,
+      user_input,
+      status,
+      final_response,
+      error,
+      waiting_approval_id,
+      created_at,
+      updated_at,
+      started_at,
+      completed_at
+    FROM runs
+    WHERE session_id = ?
+    ORDER BY updated_at DESC, created_at DESC
+    LIMIT 1
+  `).get(sessionId) as {
+    id: string;
+    session_id: string;
+    agent_id: string;
+    goal: string;
+    user_input: string;
+    status: RunStatus;
+    final_response: string | null;
+    error: string | null;
+    waiting_approval_id: string | null;
+    created_at: number;
+    updated_at: number;
+    started_at: number | null;
+    completed_at: number | null;
+  } | undefined;
+
+  return row ? mapRunRowToSummary(row) : null;
+}
+
+export function updateRun(
+  runId: string,
+  patch: Partial<{
+    status: RunStatus;
+    finalResponse: string | null;
+    error: string | null;
+    waitingApprovalId: string | null;
+    startedAt: number | null;
+    completedAt: number | null;
+  }>
+) {
+  const database = getDb();
+  const current = getRunById(runId);
+  if (!current) {
+    return null;
+  }
+
+  const nextStatus = patch.status ?? current.status;
+  const nextFinalResponse = patch.finalResponse === undefined ? current.finalResponse || null : patch.finalResponse;
+  const nextError = patch.error === undefined ? current.error || null : patch.error;
+  const nextWaitingApprovalId = patch.waitingApprovalId === undefined ? current.waitingApprovalId || null : patch.waitingApprovalId;
+  const nextStartedAt = patch.startedAt === undefined ? current.startedAt || null : patch.startedAt;
+  const nextCompletedAt = patch.completedAt === undefined ? current.completedAt || null : patch.completedAt;
+  const updatedAt = Date.now();
+
+  database.prepare(`
+    UPDATE runs
+    SET
+      status = ?,
+      final_response = ?,
+      error = ?,
+      waiting_approval_id = ?,
+      started_at = ?,
+      completed_at = ?,
+      updated_at = ?
+    WHERE id = ?
+  `).run(
+    nextStatus,
+    nextFinalResponse,
+    nextError,
+    nextWaitingApprovalId,
+    nextStartedAt,
+    nextCompletedAt,
+    updatedAt,
+    runId
+  );
+
+  database.prepare('UPDATE sessions SET updated_at = ? WHERE id = ?').run(updatedAt, current.sessionId);
+  return getRunById(runId);
+}
+
+export function createRunStep(
+  runId: string,
+  type: RunStepType,
+  title: string,
+  options: {
+    status?: RunStepStatus;
+    input?: unknown;
+    output?: unknown;
+    error?: string;
+    metadata?: Record<string, unknown>;
+  } = {}
+): RunStep {
+  const database = getDb();
+  const now = Date.now();
+  const id = uuidv4();
+  const stepIndex = getNextRunStepIndex(database, runId);
+  database.prepare(`
+    INSERT INTO run_steps (
+      id, run_id, step_index, type, status, title, input, output, error, metadata, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    id,
+    runId,
+    stepIndex,
+    type,
+    options.status || 'pending',
+    title,
+    serializeJson(options.input),
+    serializeJson(options.output),
+    options.error || null,
+    serializeJson(options.metadata),
+    now,
+    now
+  );
+  updateRun(runId, {});
+  return getRunSteps(runId).find((step) => step.id === id)!;
+}
+
+export function updateRunStep(
+  stepId: string,
+  patch: Partial<{
+    status: RunStepStatus;
+    title: string;
+    input: unknown;
+    output: unknown;
+    error: string | null;
+    metadata: Record<string, unknown> | null;
+  }>
+) {
+  const database = getDb();
+  const current = database.prepare(`
+    SELECT
+      id,
+      run_id,
+      step_index,
+      type,
+      status,
+      title,
+      input,
+      output,
+      error,
+      metadata,
+      created_at,
+      updated_at
+    FROM run_steps
+    WHERE id = ?
+  `).get(stepId) as {
+    id: string;
+    run_id: string;
+    step_index: number;
+    type: RunStepType;
+    status: RunStepStatus;
+    title: string;
+    input: string | null;
+    output: string | null;
+    error: string | null;
+    metadata: string | null;
+    created_at: number;
+    updated_at: number;
+  } | undefined;
+
+  if (!current) {
+    return null;
+  }
+
+  database.prepare(`
+    UPDATE run_steps
+    SET
+      status = ?,
+      title = ?,
+      input = ?,
+      output = ?,
+      error = ?,
+      metadata = ?,
+      updated_at = ?
+    WHERE id = ?
+  `).run(
+    patch.status ?? current.status,
+    patch.title ?? current.title,
+    patch.input === undefined ? current.input : serializeJson(patch.input),
+    patch.output === undefined ? current.output : serializeJson(patch.output),
+    patch.error === undefined ? current.error : patch.error,
+    patch.metadata === undefined ? current.metadata : serializeJson(patch.metadata),
+    Date.now(),
+    stepId
+  );
+
+  updateRun(current.run_id, {});
+  return getRunSteps(current.run_id).find((step) => step.id === stepId) || null;
+}
+
+export function getRunSteps(runId: string): RunStep[] {
+  const database = getDb();
+  const rows = database.prepare(`
+    SELECT
+      id,
+      run_id,
+      step_index,
+      type,
+      status,
+      title,
+      input,
+      output,
+      error,
+      metadata,
+      created_at,
+      updated_at
+    FROM run_steps
+    WHERE run_id = ?
+    ORDER BY step_index ASC
+  `).all(runId) as Array<{
+    id: string;
+    run_id: string;
+    step_index: number;
+    type: RunStepType;
+    status: RunStepStatus;
+    title: string;
+    input: string | null;
+    output: string | null;
+    error: string | null;
+    metadata: string | null;
+    created_at: number;
+    updated_at: number;
+  }>;
+
+  return rows.map(mapRunStepRow);
+}
+
+export function getLatestRunSteps(sessionId: string): RunStep[] {
+  const latestRun = getLatestRun(sessionId);
+  if (!latestRun) {
+    return [];
+  }
+  return getRunSteps(latestRun.id);
+}
+
+export function createToolCallRecord(runId: string, stepId: string | null, toolName: string, args: unknown) {
+  const database = getDb();
+  const now = Date.now();
+  const id = uuidv4();
+  database.prepare(`
+    INSERT INTO tool_call_records (
+      id, run_id, step_id, tool_name, args, status, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(id, runId, stepId, toolName, serializeJson(args), 'running', now, now);
+  return id;
+}
+
+export function updateToolCallRecord(
+  recordId: string,
+  patch: Partial<{
+    result: unknown;
+    error: string | null;
+    status: 'running' | 'waiting_approval' | 'success' | 'failed' | 'cancelled';
+  }>
+) {
+  const database = getDb();
+  const current = database.prepare(`
+    SELECT result, error, status
+    FROM tool_call_records
+    WHERE id = ?
+  `).get(recordId) as {
+    result: string | null;
+    error: string | null;
+    status: string;
+  } | undefined;
+
+  if (!current) {
+    return;
+  }
+
+  database.prepare(`
+    UPDATE tool_call_records
+    SET result = ?, error = ?, status = ?, updated_at = ?
+    WHERE id = ?
+  `).run(
+    patch.result === undefined ? current.result : serializeJson(patch.result),
+    patch.error === undefined ? current.error : patch.error,
+    patch.status ?? current.status,
+    Date.now(),
+    recordId
+  );
+}
+
+export function getToolCallRecords(runId: string): ToolCallRecord[] {
+  const database = getDb();
+  const rows = database.prepare(`
+    SELECT
+      id,
+      run_id,
+      step_id,
+      tool_name,
+      args,
+      result,
+      error,
+      status,
+      created_at,
+      updated_at
+    FROM tool_call_records
+    WHERE run_id = ?
+    ORDER BY created_at ASC, updated_at ASC
+  `).all(runId) as Array<{
+    id: string;
+    run_id: string;
+    step_id: string | null;
+    tool_name: string;
+    args: string | null;
+    result: string | null;
+    error: string | null;
+    status: 'running' | 'waiting_approval' | 'success' | 'failed' | 'cancelled';
+    created_at: number;
+    updated_at: number;
+  }>;
+
+  return rows.map(mapToolCallRecordRow);
+}
+
+export function createApprovalRecord(args: {
+  runId: string;
+  stepId?: string;
+  sessionId?: string;
+  toolName: string;
+  toolArgs: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+}): ApprovalRecord {
+  const database = getDb();
+  const now = Date.now();
+  const id = uuidv4();
+  database.prepare(`
+    INSERT INTO approval_records (
+      id, run_id, step_id, session_id, tool_name, args, status, metadata, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    id,
+    args.runId,
+    args.stepId || null,
+    args.sessionId || null,
+    args.toolName,
+    serializeJson(args.toolArgs) || '{}',
+    'pending',
+    serializeJson(args.metadata),
+    now,
+    now
+  );
+  return getApprovalRecord(id)!;
+}
+
+export function getApprovalRecord(approvalId: string): ApprovalRecord | null {
+  const database = getDb();
+  const row = database.prepare(`
+    SELECT
+      id,
+      run_id,
+      step_id,
+      session_id,
+      tool_name,
+      args,
+      status,
+      metadata,
+      created_at,
+      updated_at,
+      resolved_at
+    FROM approval_records
+    WHERE id = ?
+  `).get(approvalId) as {
+    id: string;
+    run_id: string;
+    step_id: string | null;
+    session_id: string | null;
+    tool_name: string;
+    args: string;
+    status: 'pending' | 'approved' | 'denied';
+    metadata: string | null;
+    created_at: number;
+    updated_at: number;
+    resolved_at: number | null;
+  } | undefined;
+
+  return row ? mapApprovalRowToRecord(row) : null;
+}
+
+export function resolveApprovalRecord(approvalId: string, approved: boolean) {
+  const database = getDb();
+  const now = Date.now();
+  database.prepare(`
+    UPDATE approval_records
+    SET status = ?, updated_at = ?, resolved_at = ?
+    WHERE id = ?
+  `).run(approved ? 'approved' : 'denied', now, now, approvalId);
+  return getApprovalRecord(approvalId);
+}
+
+export function getPendingApproval(sessionId?: string): ApprovalRecord | null {
+  const database = getDb();
+  const row = sessionId
+    ? database.prepare(`
+        SELECT
+          id,
+          run_id,
+          step_id,
+          session_id,
+          tool_name,
+          args,
+          status,
+          metadata,
+          created_at,
+          updated_at,
+          resolved_at
+        FROM approval_records
+        WHERE session_id = ? AND status = 'pending'
+        ORDER BY updated_at DESC, created_at DESC
+        LIMIT 1
+      `).get(sessionId)
+    : database.prepare(`
+        SELECT
+          id,
+          run_id,
+          step_id,
+          session_id,
+          tool_name,
+          args,
+          status,
+          metadata,
+          created_at,
+          updated_at,
+          resolved_at
+        FROM approval_records
+        WHERE status = 'pending'
+        ORDER BY updated_at DESC, created_at DESC
+        LIMIT 1
+      `).get();
+
+  return row
+    ? mapApprovalRowToRecord(row as {
+        id: string;
+        run_id: string;
+        step_id: string | null;
+        session_id: string | null;
+        tool_name: string;
+        args: string;
+        status: 'pending' | 'approved' | 'denied';
+        metadata: string | null;
+        created_at: number;
+        updated_at: number;
+        resolved_at: number | null;
+      })
+    : null;
+}
+
+export function getApprovalRecords(runId: string): ApprovalRecord[] {
+  const database = getDb();
+  const rows = database.prepare(`
+    SELECT
+      id,
+      run_id,
+      step_id,
+      session_id,
+      tool_name,
+      args,
+      status,
+      metadata,
+      created_at,
+      updated_at,
+      resolved_at
+    FROM approval_records
+    WHERE run_id = ?
+    ORDER BY created_at ASC, updated_at ASC
+  `).all(runId) as Array<{
+    id: string;
+    run_id: string;
+    step_id: string | null;
+    session_id: string | null;
+    tool_name: string;
+    args: string;
+    status: 'pending' | 'approved' | 'denied';
+    metadata: string | null;
+    created_at: number;
+    updated_at: number;
+    resolved_at: number | null;
+  }>;
+
+  return rows.map(mapApprovalRowToRecord);
+}
+
+export function getRunTrace(query: RunTraceQuery | string): RunTrace | null {
+  const normalizedQuery = normalizeRunTraceQuery(query);
+  const { runId, page, pageSize, includeToolCalls, includeApprovalRecords, includeAuditLogs, includeContextSummary } = normalizedQuery;
+  const run = getRunById(runId);
+  if (!run) {
+    return null;
+  }
+
+  const allSteps = getRunSteps(runId);
+  const pagination = paginateRunSteps(allSteps, page, pageSize);
+  const toolCalls = includeToolCalls ? getToolCallRecords(runId) : [];
+  const approvals = includeApprovalRecords ? getApprovalRecords(runId) : [];
+  const auditLogs = includeAuditLogs
+    ? queryAuditLogs({ runId, page: 1, pageSize: 1000 }).items.sort((left, right) => left.timestamp - right.timestamp)
+    : [];
+  const aggregations: RunTraceAggregations = buildRunTraceAggregations(allSteps, toolCalls, approvals, auditLogs);
+
+  return {
+    run,
+    steps: pagination.steps,
+    total: pagination.total,
+    page: pagination.page,
+    pageSize: pagination.pageSize,
+    totalPages: pagination.totalPages,
+    aggregations,
+    toolCalls,
+    approvals,
+    auditLogs,
+    latestContextSummary: includeContextSummary ? getLatestRunContextSummary(runId) : null
+  };
+}
+
+export function saveContextSnapshot(runId: string, snapshot: unknown, stepId?: string) {
+  const database = getDb();
+  database.prepare(`
+    INSERT INTO context_snapshots (id, run_id, step_id, snapshot, created_at)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(uuidv4(), runId, stepId || null, serializeJson(snapshot) || '{}', Date.now());
+}
+
+export function getLatestContextSnapshot<T>(runId: string): T | null {
+  const database = getDb();
+  const row = database.prepare(`
+    SELECT snapshot
+    FROM context_snapshots
+    WHERE run_id = ?
+    ORDER BY created_at DESC
+    LIMIT 1
+  `).get(runId) as { snapshot: string } | undefined;
+
+  return row ? parseJsonValue<T>(row.snapshot) || null : null;
+}
+
+export function getLatestContextSnapshotByStep<T>(runId: string, stepId: string): T | null {
+  const database = getDb();
+  const row = database.prepare(`
+    SELECT snapshot
+    FROM context_snapshots
+    WHERE run_id = ? AND step_id = ?
+    ORDER BY created_at DESC
+    LIMIT 1
+  `).get(runId, stepId) as { snapshot: string } | undefined;
+
+  return row ? parseJsonValue<T>(row.snapshot) || null : null;
+}
+
+export function saveRunContextSummary(
+  runId: string,
+  summary: Omit<RunContextSummary, 'id' | 'runId' | 'sessionId' | 'stepId' | 'createdAt'>,
+  stepId?: string
+) {
+  const database = getDb();
+  const run = getRunById(runId);
+  database.prepare(`
+    INSERT INTO context_summaries (id, run_id, session_id, step_id, summary, created_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(
+    uuidv4(),
+    runId,
+    run?.sessionId || null,
+    stepId || null,
+    serializeJson(summary) || '{}',
+    Date.now()
+  );
+}
+
+export function getLatestRunContextSummary(runId: string): RunContextSummary | null {
+  const database = getDb();
+  const row = database.prepare(`
+    SELECT id, run_id, session_id, step_id, summary, created_at
+    FROM context_summaries
+    WHERE run_id = ?
+    ORDER BY created_at DESC
+    LIMIT 1
+  `).get(runId) as {
+    id: string;
+    run_id: string;
+    session_id: string | null;
+    step_id: string | null;
+    summary: string;
+    created_at: number;
+  } | undefined;
+
+  return row ? mapContextSummaryRow(row) : null;
+}
+
+export function getLatestSessionContextSummary(sessionId: string): RunContextSummary | null {
+  const database = getDb();
+  const row = database.prepare(`
+    SELECT id, run_id, session_id, step_id, summary, created_at
+    FROM context_summaries
+    WHERE session_id = ?
+    ORDER BY created_at DESC
+    LIMIT 1
+  `).get(sessionId) as {
+    id: string;
+    run_id: string;
+    session_id: string | null;
+    step_id: string | null;
+    summary: string;
+    created_at: number;
+  } | undefined;
+
+  return row ? mapContextSummaryRow(row) : null;
+}
+
+export function getRecentSessionContextSummaries(sessionId: string, limit = 3, excludeRunId?: string): RunContextSummary[] {
+  const database = getDb();
+  const safeLimit = Math.max(1, Math.min(limit, 10));
+  const rows = excludeRunId
+    ? database.prepare(`
+        SELECT id, run_id, session_id, step_id, summary, created_at
+        FROM context_summaries
+        WHERE session_id = ? AND run_id != ?
+        ORDER BY created_at DESC
+        LIMIT ?
+      `).all(sessionId, excludeRunId, safeLimit)
+    : database.prepare(`
+        SELECT id, run_id, session_id, step_id, summary, created_at
+        FROM context_summaries
+        WHERE session_id = ?
+        ORDER BY created_at DESC
+        LIMIT ?
+      `).all(sessionId, safeLimit);
+
+  return (rows as Array<{
+    id: string;
+    run_id: string;
+    session_id: string | null;
+    step_id: string | null;
+    summary: string;
+    created_at: number;
+  }>)
+    .map((row) => mapContextSummaryRow(row))
+    .filter((summary): summary is RunContextSummary => Boolean(summary));
 }
 
 function buildMonitoringWhereClause(query: MonitoringTokenQuery) {

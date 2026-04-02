@@ -1,5 +1,5 @@
-import { memo, useEffect, useMemo, useRef, useState } from 'react';
-import { FetchModelsResult, ModelConfig } from '../../types';
+import { memo, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { FetchModelsResult, ModelConfig, ProviderCapabilitySnapshot } from '../../types';
 import { IconArrowLeft, IconRefresh, IconChevronDown, IconCheck, IconX } from '../Icons';
 import { Select, type SelectOption } from '../Select';
 import { OllamaManager } from './OllamaManager';
@@ -10,22 +10,47 @@ interface ModelEditorProps {
   setEditingModel: (model: ModelConfig) => void;
   isEditingExisting: boolean;
   availableModels: string[];
+  onDescribeProvider: (model: ModelConfig) => Promise<ProviderCapabilitySnapshot | null>;
   onFetchModels: (model: ModelConfig) => Promise<FetchModelsResult>;
   onSave: () => void;
   onCancel: () => void;
 }
+
+const PROVIDER_DEFAULT_BASE_URLS: Partial<Record<ModelConfig['provider'], string>> = {
+  openai: 'https://api.openai.com/v1',
+  deepseek: 'https://api.deepseek.com/v1',
+  zhipu: 'https://open.bigmodel.cn/api/paas/v4',
+  kimi: 'https://api.moonshot.cn/v1',
+  qianwen: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+  ollama: 'http://localhost:11434/v1',
+  custom: 'https://api.openai.com/v1'
+};
+
+const BASE_URL_NOTICE_STYLE: CSSProperties = {
+  marginTop: '0.75rem',
+  padding: '0.75rem 0.875rem',
+  borderRadius: 'var(--radius-md)',
+  border: '1px solid var(--border)',
+  background: '#fffbeb',
+  color: '#b45309',
+  fontSize: '0.875rem',
+  lineHeight: 1.5
+};
 
 export const ModelEditor = memo(function ModelEditor({ 
   editingModel, 
   setEditingModel, 
   isEditingExisting,
   availableModels, 
+  onDescribeProvider,
   onFetchModels, 
   onSave, 
   onCancel 
 }: ModelEditorProps) {
   const { t } = useTranslation();
-  const canFetchModels = editingModel.baseUrl.trim().length > 0;
+  const [providerSnapshot, setProviderSnapshot] = useState<ProviderCapabilitySnapshot | null>(null);
+  const [isLoadingProviderSnapshot, setIsLoadingProviderSnapshot] = useState(false);
+  const canFetchModels = Boolean(providerSnapshot?.capabilities.modelListing) && editingModel.baseUrl.trim().length > 0;
   const [isModelDropdownOpen, setIsModelDropdownOpen] = useState(false);
   const [activeModelIndex, setActiveModelIndex] = useState(-1);
   const [modelDropdownPlacement, setModelDropdownPlacement] = useState<'top' | 'bottom'>('bottom');
@@ -103,6 +128,7 @@ export const ModelEditor = memo(function ModelEditor({
 
   const providerOptions: SelectOption[] = [
     { value: 'openai', label: 'OpenAI' },
+    { value: 'anthropic', label: 'Anthropic' },
     { value: 'deepseek', label: 'DeepSeek' },
     { value: 'zhipu', label: '智谱 (Zhipu)' },
     { value: 'kimi', label: 'Kimi (Moonshot)' },
@@ -111,13 +137,57 @@ export const ModelEditor = memo(function ModelEditor({
     { value: 'custom', label: t('config.providerCustom') }
   ];
 
+  useEffect(() => {
+    let cancelled = false;
+    setIsLoadingProviderSnapshot(true);
+    void onDescribeProvider(editingModel)
+      .then((snapshot) => {
+        if (!cancelled) {
+          setProviderSnapshot(snapshot);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsLoadingProviderSnapshot(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [editingModel, onDescribeProvider]);
+
   const handleProviderChange = (value: string) => {
     const provider = value as ModelConfig['provider'];
+    const previousDefaultBaseUrl = PROVIDER_DEFAULT_BASE_URLS[editingModel.provider];
+    const nextDefaultBaseUrl = PROVIDER_DEFAULT_BASE_URLS[provider] || '';
+    const shouldReplaceBaseUrl = !editingModel.baseUrl.trim()
+      || (previousDefaultBaseUrl ? editingModel.baseUrl.trim() === previousDefaultBaseUrl : false);
     setEditingModel({
       ...editingModel,
-      provider
+      provider,
+      baseUrl: shouldReplaceBaseUrl ? nextDefaultBaseUrl : editingModel.baseUrl
     });
   };
+
+  const baseUrlProtocolNotice = useMemo(() => {
+    if (!providerSnapshot) {
+      return null;
+    }
+    if (providerSnapshot.protocol === 'native') {
+      return {
+        tone: providerSnapshot.supported ? 'warning' : 'muted',
+        message: providerSnapshot.supported
+          ? t('config.baseUrlNoticeAnthropic')
+          : providerSnapshot.notes || t('config.baseUrlNoticeNativePending')
+      };
+    }
+    return {
+      tone: 'info',
+      message: editingModel.provider === 'custom'
+        ? t('config.baseUrlNoticeCustomOpenAICompatible')
+        : t('config.baseUrlNoticeOpenAICompatible')
+    };
+  }, [editingModel.provider, providerSnapshot, t]);
 
   const toggleModelSelection = (id: string) => {
     const selected = selectedModelIds.includes(id);
@@ -229,6 +299,14 @@ export const ModelEditor = memo(function ModelEditor({
           <div className="form-help">
             {editingModel.provider === 'custom' ? t('config.baseUrlHelpCustom') : t('config.baseUrlHelp')}
           </div>
+          {isLoadingProviderSnapshot && (
+            <div className="form-help">{t('config.providerCapabilitiesLoading')}</div>
+          )}
+          {baseUrlProtocolNotice && (
+            <div style={BASE_URL_NOTICE_STYLE}>
+              {baseUrlProtocolNotice.message}
+            </div>
+          )}
         </div>
 
         <div className="form-group">

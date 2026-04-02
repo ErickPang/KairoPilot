@@ -2,17 +2,27 @@ export type {
   AgentConfig,
   AgentStats,
   AgentPermissionConfig,
+  ApprovalRecord,
   AuditLogEntry,
   AuditLogQuery,
   AuditLogQueryResult,
+  ContextAssemblyBudget,
   KairoPilotConfig,
   LegacyAgentConfig,
   ModelConfig,
   MonitoringTokenQuery,
   MonitoringTokenQueryResult,
+  ProviderCapabilitySnapshot,
   ProviderConfig,
   ProviderType,
-  SkillSummary
+  RunContextSummary,
+  RunStep,
+  RunTraceAggregations,
+  RunTraceQuery,
+  RunTrace,
+  RunSummary,
+  SkillSummary,
+  ToolCallRecord
 } from '../shared/contracts';
 
 export interface Message {
@@ -62,10 +72,18 @@ export interface ConfirmationRequest {
   tool: string;
   args: Record<string, unknown>;
   sessionId?: string;
+  runId?: string;
+  riskLevel?: string;
+  approvalMode?: string;
+  policyTags?: string[];
+  redacted?: boolean;
 }
 
 export interface SessionContextState {
   activeAgentId: string | null;
   activeSessionId: string | null;
   confirmationRequest: ConfirmationRequest | null;
+  latestContextSummary: import('../shared/contracts').RunContextSummary | null;
+  latestRun: import('../shared/contracts').RunSummary | null;
+  activeRunSteps: import('../shared/contracts').RunStep[];
 }

@@ -3,7 +3,7 @@ import type { AgentConfig, AgentPermissionConfig, ModelConfig } from '../../type
 import { IconArrowLeft, IconFolder, IconShield, IconTerminal } from '../Icons';
 import { Select } from '../Select';
 import { useTranslation } from '../../hooks/useTranslation';
-import { DEFAULT_SHELL_COMMANDS } from '../../../shared/contracts';
+import { applyExecutionProfileConstraints, createDefaultPolicyConfig, DEFAULT_SHELL_COMMANDS } from '../../../shared/contracts';
 
 const SHELL_COMMAND_DESCRIPTIONS: Record<string, { zh: string; en: string }> = {
   ls: { zh: '列出目录内容', en: 'List directory contents' },
@@ -85,8 +85,34 @@ export const AgentEditor = memo(function AgentEditor({
     () => new Set(permissions.shell.allowedCommands.map(item => item.trim()).filter(Boolean)),
     [permissions.shell.allowedCommands]
   );
+  const executionProfileOptions = useMemo(() => ([
+    { value: 'chat_only', label: t('config.executionProfile.chat_only') },
+    { value: 'read_only_workspace', label: t('config.executionProfile.read_only_workspace') },
+    { value: 'approved_execution', label: t('config.executionProfile.approved_execution') },
+    { value: 'trusted_automation', label: t('config.executionProfile.trusted_automation') }
+  ]), [t]);
+  const approvalModeOptions = useMemo(() => ([
+    { value: 'never', label: t('config.approvalMode.never') },
+    { value: 'on_write', label: t('config.approvalMode.on_write') },
+    { value: 'on_external', label: t('config.approvalMode.on_external') },
+    { value: 'always', label: t('config.approvalMode.always') }
+  ]), [t]);
+  const environmentScopeOptions = useMemo(() => ([
+    { value: 'workspace', label: t('config.environmentScope.workspace') },
+    { value: 'allowed_paths', label: t('config.environmentScope.allowed_paths') },
+    { value: 'isolated_env', label: t('config.environmentScope.isolated_env') }
+  ]), [t]);
+  const dataClassOptions = useMemo(() => ([
+    { value: 'public', label: t('config.dataClass.public') },
+    { value: 'project', label: t('config.dataClass.project') },
+    { value: 'sensitive', label: t('config.dataClass.sensitive') }
+  ]), [t]);
   const allowedPathsValue = permissions.fileSystem.allowedPaths.join('\n');
   const allowedDomainsValue = permissions.network.allowedDomains.join('\n');
+  const fileReadLocked = permissions.executionProfile === 'chat_only';
+  const fileWriteLocked = permissions.executionProfile === 'chat_only' || permissions.executionProfile === 'read_only_workspace';
+  const networkLocked = permissions.executionProfile === 'chat_only';
+  const shellLocked = permissions.executionProfile === 'chat_only' || permissions.executionProfile === 'read_only_workspace';
   const updatePermissions = (updater: (current: AgentPermissionConfig) => AgentPermissionConfig) => {
     setEditingAgent({
       ...editingAgent,
@@ -286,12 +312,130 @@ export const AgentEditor = memo(function AgentEditor({
 
         <div className="form-section-title">{t('config.security')}</div>
 
+        <div className="permission-settings-grid" style={{ marginBottom: '1rem' }}>
+          <div className="shell-command-panel">
+            <div className="shell-command-panel-header">
+              <span>{t('config.executionProfile')}</span>
+            </div>
+            <div className="form-help shell-command-help">
+              {t('config.executionProfileHelp')}
+            </div>
+            <Select
+              value={permissions.executionProfile}
+              onChange={(executionProfile) => updatePermissions(current => ({
+                ...applyExecutionProfileConstraints({
+                  ...current,
+                  executionProfile: executionProfile as AgentPermissionConfig['executionProfile'],
+                  policy: createDefaultPolicyConfig(executionProfile as AgentPermissionConfig['executionProfile'])
+                })
+              }))}
+              options={executionProfileOptions}
+              placeholder={t('config.executionProfile')}
+            />
+          </div>
+
+          <div className="shell-command-panel">
+            <div className="shell-command-panel-header">
+              <span>{t('config.approvalPolicy')}</span>
+            </div>
+            <div className="form-help shell-command-help">
+              {t('config.approvalPolicyHelp')}
+            </div>
+            <Select
+              value={permissions.policy.approvalMode}
+              onChange={(approvalMode) => updatePermissions(current => ({
+                ...current,
+                policy: {
+                  ...current.policy,
+                  approvalMode: approvalMode as AgentPermissionConfig['policy']['approvalMode']
+                }
+              }))}
+              options={approvalModeOptions}
+              placeholder={t('config.approvalPolicy')}
+            />
+          </div>
+        </div>
+
+        <div className="permission-settings-grid" style={{ marginBottom: '1rem' }}>
+          <div className="shell-command-panel">
+            <div className="shell-command-panel-header">
+              <span>{t('config.environmentScope')}</span>
+            </div>
+            <div className="form-help shell-command-help">
+              {t('config.environmentScopeHelp')}
+            </div>
+            <Select
+              value={permissions.policy.environmentScope}
+              onChange={(environmentScope) => updatePermissions(current => ({
+                ...current,
+                policy: {
+                  ...current.policy,
+                  environmentScope: environmentScope as AgentPermissionConfig['policy']['environmentScope']
+                }
+              }))}
+              options={environmentScopeOptions}
+              placeholder={t('config.environmentScope')}
+            />
+          </div>
+
+          <div className="shell-command-panel">
+            <div className="shell-command-panel-header">
+              <span>{t('config.dataClass')}</span>
+            </div>
+            <div className="form-help shell-command-help">
+              {t('config.dataClassHelp')}
+            </div>
+            <Select
+              value={permissions.policy.dataClass}
+              onChange={(dataClass) => updatePermissions(current => ({
+                ...current,
+                policy: {
+                  ...current.policy,
+                  dataClass: dataClass as AgentPermissionConfig['policy']['dataClass']
+                }
+              }))}
+              options={dataClassOptions}
+              placeholder={t('config.dataClass')}
+            />
+          </div>
+        </div>
+
+        <div className="shell-access-card" style={{ marginBottom: '1rem' }}>
+          <label className="form-checkbox shell-access-toggle">
+            <input
+              type="checkbox"
+              checked={permissions.policy.redactSensitiveOutput}
+              onChange={e => updatePermissions(current => ({
+                ...current,
+                policy: {
+                  ...current.policy,
+                  redactSensitiveOutput: e.target.checked
+                }
+              }))}
+            />
+            <div>
+              <div style={{ fontWeight: 500, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <IconShield size={16} /> {t('config.redactSensitiveOutput')}
+              </div>
+              <div className="form-help" style={{ marginTop: '0.25rem', marginBottom: 0 }}>
+                {t('config.redactSensitiveOutputHelp')}
+              </div>
+            </div>
+          </label>
+          <div className="shell-access-actions">
+            <span className={`shell-status-badge ${permissions.policy.redactSensitiveOutput ? 'enabled' : 'disabled'}`}>
+              {permissions.policy.redactSensitiveOutput ? t('config.shellEnabled') : t('config.shellDisabled')}
+            </span>
+          </div>
+        </div>
+
         <div className="permission-card-grid">
           <div className="shell-access-card">
             <label className="form-checkbox shell-access-toggle">
               <input
                 type="checkbox"
                 checked={permissions.fileSystem.read}
+                disabled={fileReadLocked}
                 onChange={e => updatePermissions(current => ({
                   ...current,
                   fileSystem: {
@@ -321,6 +465,7 @@ export const AgentEditor = memo(function AgentEditor({
               <input
                 type="checkbox"
                 checked={permissions.fileSystem.write}
+                disabled={fileWriteLocked}
                 onChange={e => updatePermissions(current => ({
                   ...current,
                   fileSystem: {
@@ -350,6 +495,7 @@ export const AgentEditor = memo(function AgentEditor({
               <input
                 type="checkbox"
                 checked={permissions.network.enabled}
+                disabled={networkLocked}
                 onChange={e => updatePermissions(current => ({
                   ...current,
                   network: {
@@ -379,6 +525,7 @@ export const AgentEditor = memo(function AgentEditor({
               <input
                 type="checkbox"
                 checked={permissions.shell.enabled}
+                disabled={shellLocked}
                 onChange={e => updatePermissions(current => ({
                   ...current,
                   shell: {

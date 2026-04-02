@@ -23,6 +23,7 @@ function getDb(): Database.Database {
 
     db = new Database(dbPath);
     db.pragma('journal_mode = WAL');
+    db.pragma('foreign_keys = ON');
     db.exec(`
       CREATE TABLE IF NOT EXISTS audit_logs (
         id TEXT PRIMARY KEY,
@@ -32,6 +33,8 @@ function getDb(): Database.Database {
         result TEXT,
         error TEXT,
         session_id TEXT,
+        run_id TEXT,
+        step_id TEXT,
         policy_tags TEXT
       );
 
@@ -44,7 +47,21 @@ function getDb(): Database.Database {
         ON audit_logs(timestamp DESC);
       CREATE INDEX IF NOT EXISTS idx_audit_logs_session_id
         ON audit_logs(session_id);
+      CREATE INDEX IF NOT EXISTS idx_audit_logs_run_id
+        ON audit_logs(run_id);
     `);
+
+    try {
+      const columns = db.pragma('table_info(audit_logs)') as { name: string }[];
+      if (!columns.some((column) => column.name === 'run_id')) {
+        db.prepare('ALTER TABLE audit_logs ADD COLUMN run_id TEXT').run();
+      }
+      if (!columns.some((column) => column.name === 'step_id')) {
+        db.prepare('ALTER TABLE audit_logs ADD COLUMN step_id TEXT').run();
+      }
+    } catch (error) {
+      console.error('[Audit DB] Failed to migrate audit_logs columns:', error);
+    }
 
     migrateFromElectronStore(db);
   }
@@ -116,8 +133,10 @@ function migrateFromElectronStore(database: Database.Database) {
           result,
           error,
           session_id,
+          run_id,
+          step_id,
           policy_tags
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
 
       const transaction = database.transaction(() => {
@@ -130,6 +149,8 @@ function migrateFromElectronStore(database: Database.Database) {
             serializeValue(log.result),
             log.error ?? null,
             log.sessionId ?? null,
+            log.runId ?? null,
+            log.stepId ?? null,
             serializeValue(log.policyTags)
           );
         }
@@ -164,8 +185,10 @@ export function addAuditLog(entry: Omit<AuditLogEntry, 'id' | 'timestamp'>) {
       result,
       error,
       session_id,
+      run_id,
+      step_id,
       policy_tags
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     newLog.id,
     newLog.timestamp,
@@ -174,6 +197,8 @@ export function addAuditLog(entry: Omit<AuditLogEntry, 'id' | 'timestamp'>) {
     serializeValue(newLog.result),
     newLog.error ?? null,
     newLog.sessionId ?? null,
+    newLog.runId ?? null,
+    newLog.stepId ?? null,
     serializeValue(newLog.policyTags)
   );
   trimAuditLogs(database);
@@ -191,6 +216,8 @@ function mapAuditRows(rows: Array<{
   result: string | null;
   error: string | null;
   session_id: string | null;
+  run_id: string | null;
+  step_id: string | null;
   policy_tags: string | null;
 }>): AuditLogEntry[] {
   return rows.map((row) => ({
@@ -201,6 +228,8 @@ function mapAuditRows(rows: Array<{
     result: parseValue<unknown>(row.result),
     error: row.error ?? undefined,
     sessionId: row.session_id ?? undefined,
+    runId: row.run_id ?? undefined,
+    stepId: row.step_id ?? undefined,
     policyTags: parseValue<string[]>(row.policy_tags) ?? undefined
   }));
 }
@@ -213,6 +242,8 @@ function buildAuditQueryWhere(query: AuditLogQuery) {
   const tool = query.tool?.trim();
   const tag = query.tag?.trim();
   const sessionId = query.sessionId?.trim();
+  const runId = query.runId?.trim();
+  const stepId = query.stepId?.trim();
   const startTime = Number.isFinite(query.startTime) ? Number(query.startTime) : undefined;
   const endTime = Number.isFinite(query.endTime) ? Number(query.endTime) : undefined;
 
@@ -235,6 +266,16 @@ function buildAuditQueryWhere(query: AuditLogQuery) {
   if (sessionId) {
     clauses.push('session_id = ?');
     params.push(sessionId);
+  }
+
+  if (runId) {
+    clauses.push('run_id = ?');
+    params.push(runId);
+  }
+
+  if (stepId) {
+    clauses.push('step_id = ?');
+    params.push(stepId);
   }
 
   if (typeof startTime === 'number') {
@@ -302,6 +343,7 @@ export function queryAuditLogs(query: AuditLogQuery = {}): AuditLogQueryResult {
   const offset = (safePage - 1) * pageSize;
   const itemRows = database.prepare(`
     SELECT id, timestamp, tool, args, result, error, session_id, policy_tags
+    , run_id, step_id
     FROM audit_logs
     ${whereClause}
     ORDER BY timestamp DESC, rowid DESC
@@ -314,6 +356,8 @@ export function queryAuditLogs(query: AuditLogQuery = {}): AuditLogQueryResult {
     result: string | null;
     error: string | null;
     session_id: string | null;
+    run_id: string | null;
+    step_id: string | null;
     policy_tags: string | null;
   }>;
   const items = mapAuditRows(itemRows);
@@ -332,7 +376,7 @@ export function queryAuditLogs(query: AuditLogQuery = {}): AuditLogQueryResult {
     ORDER BY count DESC, value ASC
   `).all(...params) as QueryFacet[];
   const tagRows = database.prepare(`
-    SELECT id, timestamp, tool, args, result, error, session_id, policy_tags
+    SELECT id, timestamp, tool, args, result, error, session_id, run_id, step_id, policy_tags
     FROM audit_logs
     ${whereClause}
   `).all(...params) as Array<{
@@ -343,6 +387,8 @@ export function queryAuditLogs(query: AuditLogQuery = {}): AuditLogQueryResult {
     result: string | null;
     error: string | null;
     session_id: string | null;
+    run_id: string | null;
+    step_id: string | null;
     policy_tags: string | null;
   }>;
   const aggregateEntries = mapAuditRows(tagRows);
