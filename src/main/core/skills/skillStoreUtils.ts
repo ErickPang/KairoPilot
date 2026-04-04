@@ -66,6 +66,77 @@ function parseInlineArray(value: string) {
     .filter(Boolean)
 }
 
+const TOOL_NAME_ALIAS_MAP: Record<string, string[]> = {
+  read_file: ['Read', 'ReadFile'],
+  write_file: ['Write', 'WriteFile'],
+  list_directory: ['LS', 'ListDirectory', 'ListDir'],
+  delete_file: ['Delete', 'DeleteFile', 'RemoveFile'],
+  execute_command: ['RunCommand', 'ExecuteCommand', 'Bash', 'Shell', 'Command'],
+  system_info: ['SystemInfo'],
+  web_search: ['WebSearch', 'SearchWeb', 'Search'],
+  fetch_webpage: ['WebFetch', 'FetchWebpage', 'FetchPage'],
+  load_skill: ['Skill', 'LoadSkill'],
+  read_skill_resource: ['ReadSkillResource'],
+  run_skill_script: ['RunSkillScript'],
+  search_codebase: ['SearchCodebase'],
+  grep: ['Grep'],
+  get_diagnostics: ['GetDiagnostics']
+}
+
+const TOOL_NAME_ALIAS_INDEX = new Map<string, string>()
+
+for (const [canonicalName, aliases] of Object.entries(TOOL_NAME_ALIAS_MAP)) {
+  TOOL_NAME_ALIAS_INDEX.set(normalizeToolCapabilityName(canonicalName), canonicalName)
+  for (const alias of aliases) {
+    TOOL_NAME_ALIAS_INDEX.set(normalizeToolCapabilityName(alias), canonicalName)
+  }
+}
+
+export function normalizeToolCapabilityName(value: string) {
+  const normalized = value.trim()
+  if (!normalized) {
+    return ''
+  }
+  if (normalized === '*') {
+    return '*'
+  }
+  return normalized.toLowerCase().replace(/[^a-z0-9]/g, '')
+}
+
+export function resolveCanonicalToolCapabilityName(value: string) {
+  const normalized = normalizeToolCapabilityName(value)
+  if (!normalized || normalized === '*') {
+    return normalized
+  }
+  return TOOL_NAME_ALIAS_INDEX.get(normalized) ?? normalized
+}
+
+export function matchesAllowedToolName(allowedToolName: string, toolName: string) {
+  const normalizedAllowedToolName = resolveCanonicalToolCapabilityName(allowedToolName)
+  if (!normalizedAllowedToolName) {
+    return false
+  }
+  if (normalizedAllowedToolName === '*') {
+    return true
+  }
+  return normalizedAllowedToolName === resolveCanonicalToolCapabilityName(toolName)
+}
+
+export function resolveAllowedToolToRegisteredNames(
+  allowedToolName: string,
+  registeredToolNames: Iterable<string>
+) {
+  const matches = new Set<string>()
+
+  for (const registeredToolName of registeredToolNames) {
+    if (matchesAllowedToolName(allowedToolName, registeredToolName)) {
+      matches.add(registeredToolName)
+    }
+  }
+
+  return Array.from(matches)
+}
+
 function collectBlockValue(lines: string[], startIndex: number, parentIndent: number, mode: '|' | '>') {
   const blockLines: string[] = []
   let index = startIndex

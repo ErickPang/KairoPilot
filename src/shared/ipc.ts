@@ -15,6 +15,7 @@ export const KAIRO_INVOKE = {
   chatGetLatestContextSummary: 'chat:getLatestContextSummary',
   chatGetLatestRun: 'chat:getLatestRun',
   chatGetPendingApproval: 'chat:getPendingApproval',
+  chatQueryRuns: 'chat:queryRuns',
   chatGetRunTrace: 'chat:getRunTrace',
   chatGetSession: 'chat:getSession',
   chatGetSessionRuns: 'chat:getSessionRuns',

@@ -273,6 +273,30 @@ export interface RunSummary {
   completedAt?: number
 }
 
+export type RunQueryStatus = 'all' | RunStatus
+
+export interface RunQuery {
+  page?: number
+  pageSize?: number
+  search?: string
+  status?: RunQueryStatus
+  sessionId?: string
+  agentId?: string
+}
+
+export interface RunQueryAggregations {
+  totalRuns: number
+  runningRuns: number
+  waitingApprovalRuns: number
+  pausedRuns: number
+  completedRuns: number
+  failedRuns: number
+  cancelledRuns: number
+  statuses: QueryFacet[]
+}
+
+export type RunQueryResult = PagedQueryResult<RunSummary, RunQueryAggregations>
+
 export interface RunStep {
   id: string
   runId: string
@@ -323,17 +347,30 @@ export interface ContextAssemblyBudget {
   totalChars: number
 }
 
+export interface ContextAssemblyLayerSummary {
+  id: string
+  title: string
+  kind: 'system' | 'support' | 'history'
+  messageCount: number
+  charCount: number
+  summary: string
+}
+
 export interface RunContextSummary {
   id: string
   runId: string
   sessionId?: string
   stepId?: string
   activeTaskSummary: string
+  activeSkillsSummary: string
+  availableSkillsSummary: string
+  availableToolsSummary: string
   compactedHistorySummary: string
   unresolvedApprovals: string
   selectedToolResults: string
   workspaceRetrieval: string
   memoryDigest: string
+  layers: ContextAssemblyLayerSummary[]
   recentMessageCount: number
   omittedMessageCount: number
   budget: ContextAssemblyBudget

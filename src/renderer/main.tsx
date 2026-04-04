@@ -15,6 +15,23 @@ if (!window.kairo) {
       if (channel === KAIRO_INVOKE.chatListSessions) return [];
       if (channel === KAIRO_INVOKE.chatGetActiveSession) return null;
       if (channel === KAIRO_INVOKE.chatGetLatestContextSummary) return null;
+      if (channel === KAIRO_INVOKE.chatQueryRuns) return {
+        items: [],
+        total: 0,
+        page: 1,
+        pageSize: 20,
+        totalPages: 1,
+        aggregations: {
+          totalRuns: 0,
+          runningRuns: 0,
+          waitingApprovalRuns: 0,
+          pausedRuns: 0,
+          completedRuns: 0,
+          failedRuns: 0,
+          cancelledRuns: 0,
+          statuses: []
+        }
+      };
       if (channel === KAIRO_INVOKE.chatGetRunTrace) return null;
       if (channel === KAIRO_INVOKE.chatGetSession) return null;
       if (channel === KAIRO_INVOKE.chatClearAllSessions) return { success: true };

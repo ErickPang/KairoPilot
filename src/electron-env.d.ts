@@ -62,6 +62,10 @@ interface KairoBridge {
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.chatGetLatestRun, sessionId?: string): Promise<import('./renderer/types').RunSummary | null>;
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.chatGetPendingApproval, sessionId?: string): Promise<import('./renderer/types').ApprovalRecord | null>;
   invoke(
+    channel: typeof import('./shared/ipc').KAIRO_INVOKE.chatQueryRuns,
+    query?: import('./renderer/types').RunQuery
+  ): Promise<import('./renderer/types').RunQueryResult>;
+  invoke(
     channel: typeof import('./shared/ipc').KAIRO_INVOKE.chatGetRunTrace,
     runId: string | import('./renderer/types').RunTraceQuery
   ): Promise<import('./renderer/types').RunTrace | null>;

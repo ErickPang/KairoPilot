@@ -239,7 +239,7 @@ function normalizeAgentPermissions(seed?: Partial<AgentConfig> & {
   const defaults = createDefaultAgentPermissions();
   const executionProfile = inferExecutionProfile(seed ?? {});
   const policyDefaults = createDefaultPolicyConfig(executionProfile);
-  return applyExecutionProfileConstraints({
+  const normalizedPermissions = applyExecutionProfileConstraints({
     executionProfile,
     policy: {
       approvalMode: normalizeApprovalMode(seed?.permissions?.policy?.approvalMode)
@@ -273,6 +273,13 @@ function normalizeAgentPermissions(seed?: Partial<AgentConfig> & {
       allowedCommands: normalizePermissionList(seed?.permissions?.shell?.allowedCommands ?? seed?.allowedCommands)
     }
   });
+  return {
+    ...normalizedPermissions,
+    shell: {
+      ...normalizedPermissions.shell,
+      allowedCommands: normalizedPermissions.shell.enabled ? normalizedPermissions.shell.allowedCommands : []
+    }
+  };
 }
 
 export function createAgentDraft(seed?: Partial<AgentConfig>): AgentConfig {

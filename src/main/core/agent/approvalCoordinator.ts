@@ -11,6 +11,8 @@ import {
 } from '../../store/chat';
 import type { ContextAssemblyMetadata } from '../context/assembler';
 import type { ChatMessage } from '../llm/types';
+import type { LoadedSkillCapability } from './capabilityOrchestrator';
+import type { RuntimeSupportSnapshot } from './runtimeHelpers';
 
 export interface PendingToolCallSnapshot {
   callId: string;
@@ -26,13 +28,16 @@ export interface RuntimeSnapshot {
   history: ChatMessage[];
   iterations: number;
   lastUserInput: string;
+  loadedSkills?: LoadedSkillCapability[];
   contextSummary?: ContextAssemblyMetadata;
   pendingToolCall?: PendingToolCallSnapshot;
+  runtimeSupportSnapshot?: RuntimeSupportSnapshot;
 }
 
 interface RuntimeSnapshotPatch {
   iterations: number;
   lastUserInput: string;
+  loadedSkills?: LoadedSkillCapability[];
   contextSummary?: ContextAssemblyMetadata;
   pendingToolCall?: PendingToolCallSnapshot;
   stepId?: string;

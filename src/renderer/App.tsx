@@ -130,16 +130,9 @@ function App() {
 
       {activeTab === 'chat' && (
         <ChatInterface 
-          activeRunSteps={sessionContext.activeRunSteps}
           messages={messages} 
           input={input} 
           setInput={setInput} 
-          latestContextSummary={sessionContext.latestContextSummary}
-          latestRun={sessionContext.latestRun}
-          handleCancelRun={handleCancelRun}
-          handlePauseRun={handlePauseRun}
-          handleResumeRun={handleResumeRun}
-          handleRetryStep={handleRetryStep}
           loading={loading} 
           handleSend={handleSend} 
           handleClear={handleClear} 
@@ -196,7 +189,14 @@ function App() {
 
       {activeTab === 'audit' && (
         <div className="main-content" style={{ padding: 0, height: '100%', overflow: 'hidden' }}>
-          <AuditLogViewer />
+          <AuditLogViewer
+            latestRun={sessionContext.latestRun}
+            activeRunSteps={sessionContext.activeRunSteps}
+            handleCancelRun={handleCancelRun}
+            handlePauseRun={handlePauseRun}
+            handleResumeRun={handleResumeRun}
+            handleRetryStep={handleRetryStep}
+          />
         </div>
       )}
       

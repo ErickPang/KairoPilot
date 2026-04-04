@@ -130,6 +130,31 @@ export class PermissionGuard {
     return this.config.policy.redactSensitiveOutput ?? createDefaultPolicyConfig(this.config.executionProfile).redactSensitiveOutput;
   }
 
+  canReadFileSystem(): boolean {
+    if (this.config.executionProfile === 'chat_only') {
+      return false;
+    }
+    return this.config.fileSystem.read;
+  }
+
+  canWriteFileSystem(): boolean {
+    if (this.config.executionProfile === 'chat_only' || this.config.executionProfile === 'read_only_workspace') {
+      return false;
+    }
+    return this.config.fileSystem.write;
+  }
+
+  isNetworkEnabled(): boolean {
+    if (this.config.executionProfile === 'chat_only') {
+      return false;
+    }
+    return this.config.network.enabled;
+  }
+
+  isShellEnabled(): boolean {
+    return this.getShellExecutionPolicy().enabled;
+  }
+
   getShellExecutionPolicy(): ShellExecutionPolicy {
     const approvalMode = this.getApprovalMode();
     if (!this.config.shell.enabled) {
@@ -319,6 +344,23 @@ export class PermissionGuard {
     return this.config.shell.allowedCommands.includes(command.trim());
   }
 
+  private matchesAllowedNetworkTarget(targetUrl: URL, allowedTarget: string): boolean {
+    const normalizedAllowedTarget = allowedTarget.trim();
+    if (!normalizedAllowedTarget) {
+      return false;
+    }
+
+    try {
+      const allowedUrl = new URL(normalizedAllowedTarget);
+      const allowedPrefix = allowedUrl.href;
+      const targetPrefix = targetUrl.href;
+      return targetPrefix === allowedPrefix || targetPrefix.startsWith(allowedPrefix);
+    } catch {
+      const hostname = targetUrl.hostname;
+      return hostname === normalizedAllowedTarget || hostname.endsWith('.' + normalizedAllowedTarget);
+    }
+  }
+
   /**
    * Check if a network domain is allowed.
    */
@@ -332,9 +374,9 @@ export class PermissionGuard {
     }
 
     try {
-      const hostname = new URL(url).hostname;
-      return this.config.network.allowedDomains.some(domain => 
-        hostname === domain || hostname.endsWith('.' + domain)
+      const targetUrl = new URL(url);
+      return this.config.network.allowedDomains.some(domain =>
+        this.matchesAllowedNetworkTarget(targetUrl, domain)
       );
     } catch {
       return false; // Invalid URL

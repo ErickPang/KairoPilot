@@ -331,7 +331,7 @@ export function checkPermission(
   }
 
   if (toolName === 'web_search' || toolName === 'fetch_webpage') {
-    const urlToCheck = (args.url || 'https://duckduckgo.com') as string;
+    const urlToCheck = (args.url || 'https://html.duckduckgo.com/html/') as string;
     if (!permissionGuard.checkNetwork(urlToCheck)) {
       return {
         kind: 'deny',

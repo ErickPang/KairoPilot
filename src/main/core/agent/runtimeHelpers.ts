@@ -1,6 +1,55 @@
 import path from 'path';
 import type { ChatMessage } from '../llm/types';
 import { normalizeExecuteCommandInput } from '../tools/shell';
+import type { LoadedSkillCapability } from './capabilityOrchestrator';
+
+export interface SkillCatalogEntry {
+  id: string;
+  summary: string;
+}
+
+export interface SkillCatalogSnapshot {
+  fingerprint: string;
+  fullSummary: string;
+  entries: SkillCatalogEntry[];
+}
+
+export interface SessionSkillCatalogState {
+  fingerprint: string;
+  announcedSkillIds: string[];
+}
+
+export interface ActiveSkillSnapshot {
+  fingerprint: string;
+  fullSummary: string;
+  skillNames: string[];
+  entries: Array<{
+    skillName: string;
+    summary: string;
+  }>;
+}
+
+export interface SessionActiveSkillState {
+  fingerprint: string;
+  announcedSkillNames: string[];
+}
+
+export interface ToolCatalogSnapshot {
+  fingerprint: string;
+  fullSummary: string;
+  toolNames: string[];
+}
+
+export interface SessionToolCatalogState {
+  fingerprint: string;
+  announcedToolNames: string[];
+}
+
+export interface RuntimeSupportSnapshot {
+  activeSkillSessions?: Record<string, SessionActiveSkillState>;
+  skillCatalogSessions?: Record<string, SessionSkillCatalogState>;
+  toolCatalogSessions?: Record<string, SessionToolCatalogState>;
+}
 
 export function repairToolArgs(toolName: string, args: Record<string, unknown>, context: ChatMessage[]): Record<string, unknown> {
   if (toolName === 'execute_command') {
@@ -128,6 +177,378 @@ export function parseToolArgs(toolName: string, rawArgs: string) {
       error: `Invalid JSON arguments for ${toolName}: ${error instanceof Error ? error.message : 'Unknown error'}`
     };
   }
+}
+
+export function computeSkillCatalogUpdate(
+  snapshot: SkillCatalogSnapshot | undefined,
+  previousState?: SessionSkillCatalogState,
+  maxChars: number = 2200
+): {
+  summary: string;
+  nextState?: SessionSkillCatalogState;
+} {
+  if (!snapshot || !snapshot.fullSummary.trim()) {
+    return {
+      summary: '',
+      nextState: previousState
+    };
+  }
+
+  const nextState: SessionSkillCatalogState = {
+    fingerprint: snapshot.fingerprint,
+    announcedSkillIds: snapshot.entries.map((entry) => entry.id)
+  };
+
+  if (!previousState || !previousState.fingerprint) {
+    return {
+      summary: snapshot.fullSummary,
+      nextState
+    };
+  }
+
+  if (previousState.fingerprint === snapshot.fingerprint) {
+    return {
+      summary: '',
+      nextState: previousState
+    };
+  }
+
+  const previousIds = new Set(previousState.announcedSkillIds);
+  const currentIds = new Set(nextState.announcedSkillIds);
+  const addedEntries = snapshot.entries.filter((entry) => !previousIds.has(entry.id));
+  const removedCount = previousState.announcedSkillIds.filter((id) => !currentIds.has(id)).length;
+
+  if (addedEntries.length === 0 && removedCount === 0) {
+    return {
+      summary: '',
+      nextState
+    };
+  }
+
+  const lines: string[] = [];
+  if (addedEntries.length > 0) {
+    lines.push('Skills catalog update:');
+    const includedEntries: string[] = [];
+    for (const entry of addedEntries) {
+      const candidateEntries = [...includedEntries, entry.summary];
+      const omittedCount = addedEntries.length - candidateEntries.length;
+      const suffix = omittedCount > 0
+        ? [`- ${omittedCount} more new skills omitted from this update.`]
+        : [];
+      const removedLines = removedCount > 0
+        ? [`- ${removedCount} previously announced skills are no longer available.`]
+        : [];
+      const candidate = [...lines, ...candidateEntries, ...suffix, ...removedLines].join('\n');
+      if (candidate.length > maxChars) {
+        break;
+      }
+      includedEntries.push(entry.summary);
+    }
+
+    lines.push(...includedEntries);
+    const omittedCount = addedEntries.length - includedEntries.length;
+    if (omittedCount > 0) {
+      lines.push(`- ${omittedCount} more new skills omitted from this update.`);
+    }
+  }
+
+  if (removedCount > 0) {
+    lines.push(`- ${removedCount} previously announced skills are no longer available.`);
+  }
+
+  const summary = lines.join('\n').trim();
+  if (!summary || summary.length > maxChars) {
+    const compactSummary = buildCompactCatalogUpdateSummary(
+      'Skills catalog update:',
+      'new_skills',
+      addedEntries.map((entry) => entry.id),
+      'removed_skills',
+      previousState.announcedSkillIds.filter((id) => !currentIds.has(id)),
+      maxChars
+    );
+    if (compactSummary) {
+      return {
+        summary: compactSummary,
+        nextState
+      };
+    }
+
+    return {
+      summary: snapshot.fullSummary,
+      nextState
+    };
+  }
+
+  return {
+    summary,
+    nextState
+  };
+}
+
+export function createToolCatalogSnapshot(
+  toolNames: string[],
+  maxChars: number = 1800
+): ToolCatalogSnapshot | undefined {
+  const uniqueToolNames = Array.from(new Set(toolNames.map((name) => name.trim()).filter(Boolean)));
+  if (uniqueToolNames.length === 0) {
+    return undefined;
+  }
+
+  const fullSummary = trimToMaxChars(uniqueToolNames.join(', '), maxChars);
+  return {
+    fingerprint: JSON.stringify(uniqueToolNames),
+    fullSummary,
+    toolNames: uniqueToolNames
+  };
+}
+
+export function createActiveSkillsSnapshot(
+  loadedSkills: LoadedSkillCapability[],
+  maxChars: number = 2200
+): ActiveSkillSnapshot | undefined {
+  const normalizedSkills = loadedSkills
+    .slice()
+    .sort((left, right) => right.loadedAt - left.loadedAt)
+    .map((skill) => {
+      const normalizedSkillName = skill.skillName.trim();
+      const allowedTools = Array.from(new Set(skill.allowedTools.map((toolName) => toolName.trim()).filter(Boolean)));
+      const allowedToolsSummary = allowedTools.length > 0
+        ? allowedTools.join(', ')
+        : 'none';
+      return {
+        skillName: normalizedSkillName,
+        summary: `- ${normalizedSkillName} | allowed_tools: ${allowedToolsSummary}`
+      };
+    })
+    .filter((skill) => skill.skillName);
+
+  if (normalizedSkills.length === 0) {
+    return undefined;
+  }
+
+  const fullSummary = trimToMaxChars(normalizedSkills.map((skill) => skill.summary).join('\n'), maxChars);
+  return {
+    fingerprint: JSON.stringify(normalizedSkills.map((skill) => skill.summary)),
+    fullSummary,
+    skillNames: normalizedSkills.map((skill) => skill.skillName),
+    entries: normalizedSkills
+  };
+}
+
+export function computeActiveSkillsUpdate(
+  snapshot: ActiveSkillSnapshot | undefined,
+  previousState?: SessionActiveSkillState,
+  maxChars: number = 1800
+): {
+  summary: string;
+  nextState?: SessionActiveSkillState;
+} {
+  if (!snapshot || !snapshot.fullSummary.trim()) {
+    return {
+      summary: '',
+      nextState: previousState
+    };
+  }
+
+  const nextState: SessionActiveSkillState = {
+    fingerprint: snapshot.fingerprint,
+    announcedSkillNames: snapshot.skillNames
+  };
+
+  if (!previousState || !previousState.fingerprint) {
+    return {
+      summary: snapshot.fullSummary,
+      nextState
+    };
+  }
+
+  if (previousState.fingerprint === snapshot.fingerprint) {
+    return {
+      summary: '',
+      nextState: previousState
+    };
+  }
+
+  const previousSkillNames = new Set(previousState.announcedSkillNames);
+  const currentSkillNames = new Set(nextState.announcedSkillNames);
+  const addedEntries = snapshot.entries.filter((entry) => !previousSkillNames.has(entry.skillName));
+  const removedSkills = previousState.announcedSkillNames.filter((skillName) => !currentSkillNames.has(skillName));
+
+  const detailedSummary = [
+    addedEntries.length > 0 ? 'Active skills update:' : '',
+    ...addedEntries.map((entry) => entry.summary),
+    removedSkills.length > 0 ? `- removed_skills: ${removedSkills.join(', ')}` : ''
+  ].filter(Boolean).join('\n').trim();
+
+  if (detailedSummary && detailedSummary.length <= maxChars) {
+    return {
+      summary: detailedSummary,
+      nextState
+    };
+  }
+
+  const compactSummary = buildCompactCatalogUpdateSummary(
+    'Active skills update:',
+    'new_active_skills',
+    addedEntries.map((entry) => entry.skillName),
+    'removed_active_skills',
+    removedSkills,
+    maxChars
+  );
+  if (compactSummary) {
+    return {
+      summary: compactSummary,
+      nextState
+    };
+  }
+
+  return {
+    summary: trimToMaxChars(snapshot.fullSummary, maxChars),
+    nextState
+  };
+}
+
+export function computeToolCatalogUpdate(
+  snapshot: ToolCatalogSnapshot | undefined,
+  previousState?: SessionToolCatalogState,
+  maxChars: number = 1400
+): {
+  summary: string;
+  nextState?: SessionToolCatalogState;
+} {
+  if (!snapshot || !snapshot.fullSummary.trim()) {
+    return {
+      summary: '',
+      nextState: previousState
+    };
+  }
+
+  const nextState: SessionToolCatalogState = {
+    fingerprint: snapshot.fingerprint,
+    announcedToolNames: snapshot.toolNames
+  };
+
+  if (!previousState || !previousState.fingerprint) {
+    return {
+      summary: snapshot.fullSummary,
+      nextState
+    };
+  }
+
+  if (previousState.fingerprint === snapshot.fingerprint) {
+    return {
+      summary: '',
+      nextState: previousState
+    };
+  }
+
+  const previousToolNames = new Set(previousState.announcedToolNames);
+  const currentToolNames = new Set(nextState.announcedToolNames);
+  const addedTools = snapshot.toolNames.filter((name) => !previousToolNames.has(name));
+  const removedTools = previousState.announcedToolNames.filter((name) => !currentToolNames.has(name));
+  const compactSummary = buildCompactCatalogUpdateSummary(
+    'Tools catalog update:',
+    'new_tools',
+    addedTools,
+    'removed_tools',
+    removedTools,
+    maxChars
+  );
+
+  if (!compactSummary) {
+    return {
+      summary: trimToMaxChars(snapshot.fullSummary, maxChars),
+      nextState
+    };
+  }
+
+  return {
+    summary: compactSummary,
+    nextState
+  };
+}
+
+function buildCompactCatalogUpdateSummary(
+  title: string,
+  addedLabel: string,
+  addedItems: string[],
+  removedLabel: string,
+  removedItems: string[],
+  maxChars: number
+) {
+  const lines = [title];
+
+  if (addedItems.length > 0) {
+    const addedList = buildCommaSeparatedList(addedItems, `${addedLabel}: `, maxChars);
+    if (addedList) {
+      lines.push(`- ${addedLabel}: ${addedList}`);
+    } else {
+      lines.push(`- ${addedLabel}_count: ${addedItems.length}`);
+    }
+  }
+
+  if (removedItems.length > 0) {
+    const removedList = buildCommaSeparatedList(removedItems, `${removedLabel}: `, maxChars);
+    if (removedList) {
+      lines.push(`- ${removedLabel}: ${removedList}`);
+    } else {
+      lines.push(`- ${removedLabel}_count: ${removedItems.length}`);
+    }
+  }
+
+  const summary = lines.join('\n').trim();
+  if (!summary) {
+    return '';
+  }
+  if (summary.length <= maxChars) {
+    return summary;
+  }
+
+  const compactCountLines = [
+    title,
+    addedItems.length > 0 ? `- ${addedLabel}_count: ${addedItems.length}` : '',
+    removedItems.length > 0 ? `- ${removedLabel}_count: ${removedItems.length}` : ''
+  ].filter(Boolean).join('\n').trim();
+  if (compactCountLines.length <= maxChars) {
+    return compactCountLines;
+  }
+
+  return '';
+}
+
+function buildCommaSeparatedList(items: string[], prefix: string, maxChars: number) {
+  if (items.length === 0) {
+    return '';
+  }
+
+  const included: string[] = [];
+  for (const item of items) {
+    const candidateItems = [...included, item];
+    const omittedCount = items.length - candidateItems.length;
+    const suffix = omittedCount > 0 ? ` (+${omittedCount} more)` : '';
+    const candidate = `${prefix}${candidateItems.join(', ')}${suffix}`;
+    if (candidate.length > maxChars) {
+      break;
+    }
+    included.push(item);
+  }
+
+  if (included.length === 0) {
+    return '';
+  }
+
+  const omittedCount = items.length - included.length;
+  return omittedCount > 0
+    ? `${included.join(', ')} (+${omittedCount} more)`
+    : included.join(', ');
+}
+
+function trimToMaxChars(value: string, maxChars: number) {
+  const normalized = value.replace(/\s+/g, ' ').trim();
+  if (normalized.length <= maxChars) {
+    return normalized;
+  }
+  return `${normalized.slice(0, Math.max(0, maxChars - 1)).trimEnd()}…`;
 }
 
 function getLatestUserQuery(context: ChatMessage[]): string {

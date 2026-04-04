@@ -85,6 +85,10 @@ export const AgentEditor = memo(function AgentEditor({
     () => new Set(permissions.shell.allowedCommands.map(item => item.trim()).filter(Boolean)),
     [permissions.shell.allowedCommands]
   );
+  const effectiveSelectedCommands = useMemo(
+    () => (permissions.shell.enabled ? selectedCommands : new Set<string>()),
+    [permissions.shell.enabled, selectedCommands]
+  );
   const executionProfileOptions = useMemo(() => ([
     { value: 'chat_only', label: t('config.executionProfile.chat_only') },
     { value: 'read_only_workspace', label: t('config.executionProfile.read_only_workspace') },
@@ -113,6 +117,12 @@ export const AgentEditor = memo(function AgentEditor({
   const fileWriteLocked = permissions.executionProfile === 'chat_only' || permissions.executionProfile === 'read_only_workspace';
   const networkLocked = permissions.executionProfile === 'chat_only';
   const shellLocked = permissions.executionProfile === 'chat_only' || permissions.executionProfile === 'read_only_workspace';
+  const enabledCapabilityCount = [
+    permissions.fileSystem.read,
+    permissions.fileSystem.write,
+    permissions.network.enabled,
+    permissions.shell.enabled
+  ].filter(Boolean).length;
   const updatePermissions = (updater: (current: AgentPermissionConfig) => AgentPermissionConfig) => {
     setEditingAgent({
       ...editingAgent,
@@ -125,10 +135,10 @@ export const AgentEditor = memo(function AgentEditor({
     .filter(Boolean)));
   const toggleCommand = (command: string, checked: boolean) => {
     const normalizedCommand = command.trim();
-    if (!normalizedCommand) {
+    if (!normalizedCommand || !permissions.shell.enabled) {
       return;
     }
-    const nextSet = new Set(selectedCommands);
+    const nextSet = new Set(effectiveSelectedCommands);
     if (checked) {
       nextSet.add(normalizedCommand);
     } else {
@@ -142,6 +152,31 @@ export const AgentEditor = memo(function AgentEditor({
         allowedCommands: nextAllowedCommands
       }
     }));
+  };
+  const enableAllPermissions = () => {
+    updatePermissions(current => ({
+      ...current,
+      executionProfile: 'trusted_automation',
+      policy: {
+        ...createDefaultPolicyConfig('trusted_automation'),
+        environmentScope: 'workspace'
+      },
+      fileSystem: {
+        ...current.fileSystem,
+        read: true,
+        write: true
+      },
+      network: {
+        ...current.network,
+        enabled: true
+      },
+      shell: {
+        ...current.shell,
+        enabled: true,
+        allowedCommands: shellCommands
+      }
+    }));
+    setIsShellCommandsExpanded(true);
   };
 
   return (
@@ -312,352 +347,394 @@ export const AgentEditor = memo(function AgentEditor({
 
         <div className="form-section-title">{t('config.security')}</div>
 
-        <div className="permission-settings-grid" style={{ marginBottom: '1rem' }}>
-          <div className="shell-command-panel">
-            <div className="shell-command-panel-header">
-              <span>{t('config.executionProfile')}</span>
+        <div className="permission-overview-card">
+          <div className="permission-overview-content">
+            <div className="permission-overview-title-row">
+              <div className="permission-overview-title">{t('config.permissionOverview')}</div>
+              <span className="shell-status-badge enabled">
+                {t('config.permissionSummary', { enabled: enabledCapabilityCount, total: 4 })}
+              </span>
             </div>
-            <div className="form-help shell-command-help">
-              {t('config.executionProfileHelp')}
+            <div className="form-help permission-overview-help">
+              {t('config.permissionOverviewHelp')}
             </div>
-            <Select
-              value={permissions.executionProfile}
-              onChange={(executionProfile) => updatePermissions(current => ({
-                ...applyExecutionProfileConstraints({
-                  ...current,
-                  executionProfile: executionProfile as AgentPermissionConfig['executionProfile'],
-                  policy: createDefaultPolicyConfig(executionProfile as AgentPermissionConfig['executionProfile'])
-                })
-              }))}
-              options={executionProfileOptions}
-              placeholder={t('config.executionProfile')}
-            />
+            <div className="permission-overview-note">
+              <IconShield size={16} /> {t('config.permissionsDefaultClosedHelp')}
+            </div>
           </div>
-
-          <div className="shell-command-panel">
-            <div className="shell-command-panel-header">
-              <span>{t('config.approvalPolicy')}</span>
-            </div>
-            <div className="form-help shell-command-help">
-              {t('config.approvalPolicyHelp')}
-            </div>
-            <Select
-              value={permissions.policy.approvalMode}
-              onChange={(approvalMode) => updatePermissions(current => ({
-                ...current,
-                policy: {
-                  ...current.policy,
-                  approvalMode: approvalMode as AgentPermissionConfig['policy']['approvalMode']
-                }
-              }))}
-              options={approvalModeOptions}
-              placeholder={t('config.approvalPolicy')}
-            />
+          <div className="permission-overview-actions">
+            <button type="button" className="btn btn-primary" onClick={enableAllPermissions}>
+              {t('config.enableAllPermissions')}
+            </button>
           </div>
         </div>
 
-        <div className="permission-settings-grid" style={{ marginBottom: '1rem' }}>
-          <div className="shell-command-panel">
-            <div className="shell-command-panel-header">
-              <span>{t('config.environmentScope')}</span>
-            </div>
-            <div className="form-help shell-command-help">
-              {t('config.environmentScopeHelp')}
-            </div>
-            <Select
-              value={permissions.policy.environmentScope}
-              onChange={(environmentScope) => updatePermissions(current => ({
-                ...current,
-                policy: {
-                  ...current.policy,
-                  environmentScope: environmentScope as AgentPermissionConfig['policy']['environmentScope']
-                }
-              }))}
-              options={environmentScopeOptions}
-              placeholder={t('config.environmentScope')}
-            />
-          </div>
-
-          <div className="shell-command-panel">
-            <div className="shell-command-panel-header">
-              <span>{t('config.dataClass')}</span>
-            </div>
-            <div className="form-help shell-command-help">
-              {t('config.dataClassHelp')}
-            </div>
-            <Select
-              value={permissions.policy.dataClass}
-              onChange={(dataClass) => updatePermissions(current => ({
-                ...current,
-                policy: {
-                  ...current.policy,
-                  dataClass: dataClass as AgentPermissionConfig['policy']['dataClass']
-                }
-              }))}
-              options={dataClassOptions}
-              placeholder={t('config.dataClass')}
-            />
-          </div>
-        </div>
-
-        <div className="shell-access-card" style={{ marginBottom: '1rem' }}>
-          <label className="form-checkbox shell-access-toggle">
-            <input
-              type="checkbox"
-              checked={permissions.policy.redactSensitiveOutput}
-              onChange={e => updatePermissions(current => ({
-                ...current,
-                policy: {
-                  ...current.policy,
-                  redactSensitiveOutput: e.target.checked
-                }
-              }))}
-            />
+        <div className="permission-category-panel">
+          <div className="permission-category-header">
             <div>
-              <div style={{ fontWeight: 500, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <IconShield size={16} /> {t('config.redactSensitiveOutput')}
-              </div>
-              <div className="form-help" style={{ marginTop: '0.25rem', marginBottom: 0 }}>
-                {t('config.redactSensitiveOutputHelp')}
-              </div>
+              <div className="permission-category-title">{t('config.permissionBoundaryTitle')}</div>
+              <div className="form-help permission-category-help">{t('config.permissionBoundaryHelp')}</div>
             </div>
-          </label>
-          <div className="shell-access-actions">
-            <span className={`shell-status-badge ${permissions.policy.redactSensitiveOutput ? 'enabled' : 'disabled'}`}>
-              {permissions.policy.redactSensitiveOutput ? t('config.shellEnabled') : t('config.shellDisabled')}
-            </span>
+          </div>
+          <div className="permission-settings-grid">
+            <div className="shell-command-panel">
+              <div className="shell-command-panel-header">
+                <span>{t('config.executionProfile')}</span>
+              </div>
+              <div className="form-help shell-command-help">
+                {t('config.executionProfileHelp')}
+              </div>
+              <Select
+                value={permissions.executionProfile}
+                onChange={(executionProfile) => updatePermissions(current => ({
+                  ...applyExecutionProfileConstraints({
+                    ...current,
+                    executionProfile: executionProfile as AgentPermissionConfig['executionProfile'],
+                    policy: createDefaultPolicyConfig(executionProfile as AgentPermissionConfig['executionProfile'])
+                  })
+                }))}
+                options={executionProfileOptions}
+                placeholder={t('config.executionProfile')}
+              />
+            </div>
+
+            <div className="shell-command-panel">
+              <div className="shell-command-panel-header">
+                <span>{t('config.approvalPolicy')}</span>
+              </div>
+              <div className="form-help shell-command-help">
+                {t('config.approvalPolicyHelp')}
+              </div>
+              <Select
+                value={permissions.policy.approvalMode}
+                onChange={(approvalMode) => updatePermissions(current => ({
+                  ...current,
+                  policy: {
+                    ...current.policy,
+                    approvalMode: approvalMode as AgentPermissionConfig['policy']['approvalMode']
+                  }
+                }))}
+                options={approvalModeOptions}
+                placeholder={t('config.approvalPolicy')}
+              />
+            </div>
+
+            <div className="shell-command-panel">
+              <div className="shell-command-panel-header">
+                <span>{t('config.environmentScope')}</span>
+              </div>
+              <div className="form-help shell-command-help">
+                {t('config.environmentScopeHelp')}
+              </div>
+              <Select
+                value={permissions.policy.environmentScope}
+                onChange={(environmentScope) => updatePermissions(current => ({
+                  ...current,
+                  policy: {
+                    ...current.policy,
+                    environmentScope: environmentScope as AgentPermissionConfig['policy']['environmentScope']
+                  }
+                }))}
+                options={environmentScopeOptions}
+                placeholder={t('config.environmentScope')}
+              />
+            </div>
+
+            <div className="shell-command-panel">
+              <div className="shell-command-panel-header">
+                <span>{t('config.dataClass')}</span>
+              </div>
+              <div className="form-help shell-command-help">
+                {t('config.dataClassHelp')}
+              </div>
+              <Select
+                value={permissions.policy.dataClass}
+                onChange={(dataClass) => updatePermissions(current => ({
+                  ...current,
+                  policy: {
+                    ...current.policy,
+                    dataClass: dataClass as AgentPermissionConfig['policy']['dataClass']
+                  }
+                }))}
+                options={dataClassOptions}
+                placeholder={t('config.dataClass')}
+              />
+            </div>
+          </div>
+
+          <div className="shell-access-card permission-inline-card">
+            <label className="form-checkbox shell-access-toggle">
+              <input
+                type="checkbox"
+                checked={permissions.policy.redactSensitiveOutput}
+                onChange={e => updatePermissions(current => ({
+                  ...current,
+                  policy: {
+                    ...current.policy,
+                    redactSensitiveOutput: e.target.checked
+                  }
+                }))}
+              />
+              <div>
+                <div style={{ fontWeight: 500, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <IconShield size={16} /> {t('config.redactSensitiveOutput')}
+                </div>
+                <div className="form-help" style={{ marginTop: '0.25rem', marginBottom: 0 }}>
+                  {t('config.redactSensitiveOutputHelp')}
+                </div>
+              </div>
+            </label>
+            <div className="shell-access-actions">
+              <span className={`shell-status-badge ${permissions.policy.redactSensitiveOutput ? 'enabled' : 'disabled'}`}>
+                {permissions.policy.redactSensitiveOutput ? t('config.shellEnabled') : t('config.shellDisabled')}
+              </span>
+            </div>
           </div>
         </div>
 
-        <div className="permission-card-grid">
-          <div className="shell-access-card">
-            <label className="form-checkbox shell-access-toggle">
-              <input
-                type="checkbox"
-                checked={permissions.fileSystem.read}
-                disabled={fileReadLocked}
+        <div className="permission-category-panel">
+          <div className="permission-category-header">
+            <div>
+              <div className="permission-category-title">{t('config.permissionCapabilitiesTitle')}</div>
+              <div className="form-help permission-category-help">{t('config.permissionCapabilitiesHelp')}</div>
+            </div>
+          </div>
+          <div className="permission-card-grid">
+            <div className="shell-access-card">
+              <label className="form-checkbox shell-access-toggle">
+                <input
+                  type="checkbox"
+                  checked={permissions.fileSystem.read}
+                  disabled={fileReadLocked}
+                  onChange={e => updatePermissions(current => ({
+                    ...current,
+                    fileSystem: {
+                      ...current.fileSystem,
+                      read: e.target.checked
+                    }
+                  }))}
+                />
+                <div>
+                  <div style={{ fontWeight: 500, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <IconFolder size={16} /> {t('config.allowFileRead')}
+                  </div>
+                  <div className="form-help" style={{ marginTop: '0.25rem', marginBottom: 0 }}>
+                    {t('config.allowFileReadHelp')}
+                  </div>
+                </div>
+              </label>
+              <div className="shell-access-actions">
+                <span className={`shell-status-badge ${permissions.fileSystem.read ? 'enabled' : 'disabled'}`}>
+                  {permissions.fileSystem.read ? t('config.shellEnabled') : t('config.shellDisabled')}
+                </span>
+              </div>
+            </div>
+
+            <div className="shell-access-card">
+              <label className="form-checkbox shell-access-toggle">
+                <input
+                  type="checkbox"
+                  checked={permissions.fileSystem.write}
+                  disabled={fileWriteLocked}
+                  onChange={e => updatePermissions(current => ({
+                    ...current,
+                    fileSystem: {
+                      ...current.fileSystem,
+                      write: e.target.checked
+                    }
+                  }))}
+                />
+                <div>
+                  <div style={{ fontWeight: 500, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <IconFolder size={16} /> {t('config.allowFileWrite')}
+                  </div>
+                  <div className="form-help" style={{ marginTop: '0.25rem', marginBottom: 0 }}>
+                    {t('config.allowFileWriteHelp')}
+                  </div>
+                </div>
+              </label>
+              <div className="shell-access-actions">
+                <span className={`shell-status-badge ${permissions.fileSystem.write ? 'enabled' : 'disabled'}`}>
+                  {permissions.fileSystem.write ? t('config.shellEnabled') : t('config.shellDisabled')}
+                </span>
+              </div>
+            </div>
+
+            <div className="shell-access-card">
+              <label className="form-checkbox shell-access-toggle">
+                <input
+                  type="checkbox"
+                  checked={permissions.network.enabled}
+                  disabled={networkLocked}
+                  onChange={e => updatePermissions(current => ({
+                    ...current,
+                    network: {
+                      ...current.network,
+                      enabled: e.target.checked
+                    }
+                  }))}
+                />
+                <div>
+                  <div style={{ fontWeight: 500, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <IconShield size={16} /> {t('config.allowNetwork')}
+                  </div>
+                  <div className="form-help" style={{ marginTop: '0.25rem', marginBottom: 0 }}>
+                    {t('config.allowNetworkHelp')}
+                  </div>
+                </div>
+              </label>
+              <div className="shell-access-actions">
+                <span className={`shell-status-badge ${permissions.network.enabled ? 'enabled' : 'disabled'}`}>
+                  {permissions.network.enabled ? t('config.shellEnabled') : t('config.shellDisabled')}
+                </span>
+              </div>
+            </div>
+
+            <div className="shell-access-card">
+              <label className="form-checkbox shell-access-toggle">
+                <input
+                  type="checkbox"
+                  checked={permissions.shell.enabled}
+                  disabled={shellLocked}
+                  onChange={e => updatePermissions(current => ({
+                    ...current,
+                    shell: {
+                      ...current.shell,
+                      enabled: e.target.checked,
+                      allowedCommands: e.target.checked ? current.shell.allowedCommands : []
+                    }
+                  }))}
+                />
+                <div>
+                  <div style={{ fontWeight: 500, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <IconTerminal size={16} /> {t('config.allowShell')}
+                  </div>
+                  <div className="form-help" style={{ marginTop: '0.25rem', marginBottom: 0 }}>
+                    {t('config.allowShellHelp')}
+                  </div>
+                </div>
+              </label>
+              <div className="shell-access-actions">
+                <span className={`shell-status-badge ${permissions.shell.enabled ? 'enabled' : 'disabled'}`}>
+                  {permissions.shell.enabled ? t('config.shellEnabled') : t('config.shellDisabled')}
+                </span>
+                <button
+                  type="button"
+                  className="btn btn-secondary shell-expand-btn"
+                  onClick={() => setIsShellCommandsExpanded(prev => !prev)}
+                >
+                  {isShellCommandsExpanded ? t('config.collapseCommands') : t('config.expandCommands')}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {isShellCommandsExpanded && (
+            <div className="shell-command-panel permission-command-panel">
+              <div className="permission-category-header">
+                <div>
+                  <div className="permission-category-title">{t('config.permissionCommandsTitle')}</div>
+                  <div className="form-help permission-category-help">{t('config.permissionCommandsHelp')}</div>
+                </div>
+              </div>
+              <div className="shell-command-panel-header">
+                <span>{t('config.allowedCommandsTitle')}</span>
+                <span className="shell-command-count">{t('config.selectedCommandsCount', { count: effectiveSelectedCommands.size })}</span>
+              </div>
+              <div className="form-help shell-command-help">
+                {t('config.allowedCommandsHelp')}
+              </div>
+              <div className="shell-command-grid">
+                {shellCommands.map(command => {
+                  const checked = effectiveSelectedCommands.has(command);
+                  return (
+                    <label
+                      key={command}
+                      className={`shell-command-item ${checked ? 'selected' : ''} ${permissions.shell.enabled ? '' : 'disabled'}`.trim()}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        disabled={!permissions.shell.enabled}
+                        onChange={e => toggleCommand(command, e.target.checked)}
+                      />
+                      <div className="shell-command-content">
+                        <div className="shell-command-name">{command}</div>
+                        <div className="shell-command-description">
+                          {SHELL_COMMAND_DESCRIPTIONS[command]?.[commandDescriptionLocale] || t('config.allowedCommandUnknown')}
+                        </div>
+                      </div>
+                    </label>
+                  );
+                })}
+              </div>
+              {effectiveSelectedCommands.size === 0 && (
+                <div className="form-help shell-command-help">
+                  {t('config.noCommandsSelectedHelp')}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="permission-category-panel">
+          <div className="permission-category-header">
+            <div>
+              <div className="permission-category-title">{t('config.permissionScopeTitle')}</div>
+              <div className="form-help permission-category-help">{t('config.permissionScopeHelp')}</div>
+            </div>
+          </div>
+          <div className="permission-settings-grid">
+            <div className="shell-command-panel">
+              <div className="shell-command-panel-header">
+                <span>{t('config.allowedPaths')}</span>
+              </div>
+              <div className="form-help shell-command-help">
+                {t('config.allowedPathsHelp')}
+              </div>
+              <textarea
+                className="form-control permission-textarea"
+                value={allowedPathsValue}
                 onChange={e => updatePermissions(current => ({
                   ...current,
                   fileSystem: {
                     ...current.fileSystem,
-                    read: e.target.checked
+                    allowedPaths: parseListInput(e.target.value)
                   }
                 }))}
+                rows={5}
+                placeholder={t('config.placeholder.allowedPaths')}
               />
-              <div>
-                <div style={{ fontWeight: 500, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <IconFolder size={16} /> {t('config.allowFileRead')}
-                </div>
-                <div className="form-help" style={{ marginTop: '0.25rem', marginBottom: 0 }}>
-                  {t('config.allowFileReadHelp')}
-                </div>
-              </div>
-            </label>
-            <div className="shell-access-actions">
-              <span className={`shell-status-badge ${permissions.fileSystem.read ? 'enabled' : 'disabled'}`}>
-                {permissions.fileSystem.read ? t('config.shellEnabled') : t('config.shellDisabled')}
-              </span>
             </div>
-          </div>
 
-          <div className="shell-access-card">
-            <label className="form-checkbox shell-access-toggle">
-              <input
-                type="checkbox"
-                checked={permissions.fileSystem.write}
-                disabled={fileWriteLocked}
-                onChange={e => updatePermissions(current => ({
-                  ...current,
-                  fileSystem: {
-                    ...current.fileSystem,
-                    write: e.target.checked
-                  }
-                }))}
-              />
-              <div>
-                <div style={{ fontWeight: 500, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <IconFolder size={16} /> {t('config.allowFileWrite')}
-                </div>
-                <div className="form-help" style={{ marginTop: '0.25rem', marginBottom: 0 }}>
-                  {t('config.allowFileWriteHelp')}
-                </div>
+            <div className="shell-command-panel">
+              <div className="shell-command-panel-header">
+                <span>{t('config.allowedDomains')}</span>
               </div>
-            </label>
-            <div className="shell-access-actions">
-              <span className={`shell-status-badge ${permissions.fileSystem.write ? 'enabled' : 'disabled'}`}>
-                {permissions.fileSystem.write ? t('config.shellEnabled') : t('config.shellDisabled')}
-              </span>
-            </div>
-          </div>
-
-          <div className="shell-access-card">
-            <label className="form-checkbox shell-access-toggle">
-              <input
-                type="checkbox"
-                checked={permissions.network.enabled}
-                disabled={networkLocked}
+              <div className="form-help shell-command-help">
+                {t('config.allowedDomainsHelp')}
+              </div>
+              <textarea
+                className="form-control permission-textarea"
+                value={allowedDomainsValue}
                 onChange={e => updatePermissions(current => ({
                   ...current,
                   network: {
                     ...current.network,
-                    enabled: e.target.checked
+                    allowedDomains: parseListInput(e.target.value)
                   }
                 }))}
+                rows={5}
+                placeholder={t('config.placeholder.allowedDomains')}
               />
-              <div>
-                <div style={{ fontWeight: 500, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <IconShield size={16} /> {t('config.allowNetwork')}
+              {permissions.network.enabled && permissions.network.allowedDomains.length === 0 && (
+                <div className="form-help shell-command-help">
+                  {t('config.noDomainsSelectedHelp')}
                 </div>
-                <div className="form-help" style={{ marginTop: '0.25rem', marginBottom: 0 }}>
-                  {t('config.allowNetworkHelp')}
-                </div>
-              </div>
-            </label>
-            <div className="shell-access-actions">
-              <span className={`shell-status-badge ${permissions.network.enabled ? 'enabled' : 'disabled'}`}>
-                {permissions.network.enabled ? t('config.shellEnabled') : t('config.shellDisabled')}
-              </span>
-            </div>
-          </div>
-
-          <div className="shell-access-card">
-            <label className="form-checkbox shell-access-toggle">
-              <input
-                type="checkbox"
-                checked={permissions.shell.enabled}
-                disabled={shellLocked}
-                onChange={e => updatePermissions(current => ({
-                  ...current,
-                  shell: {
-                    ...current.shell,
-                    enabled: e.target.checked
-                  }
-                }))}
-              />
-              <div>
-                <div style={{ fontWeight: 500, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <IconTerminal size={16} /> {t('config.allowShell')}
-                </div>
-                <div className="form-help" style={{ marginTop: '0.25rem', marginBottom: 0 }}>
-                  {t('config.allowShellHelp')}
-                </div>
-              </div>
-            </label>
-            <div className="shell-access-actions">
-              <span className={`shell-status-badge ${permissions.shell.enabled ? 'enabled' : 'disabled'}`}>
-                {permissions.shell.enabled ? t('config.shellEnabled') : t('config.shellDisabled')}
-              </span>
-              <button
-                type="button"
-                className="btn btn-secondary shell-expand-btn"
-                onClick={() => setIsShellCommandsExpanded(prev => !prev)}
-              >
-                {isShellCommandsExpanded ? t('config.collapseCommands') : t('config.expandCommands')}
-              </button>
+              )}
             </div>
           </div>
         </div>
-
-        <div className="permission-settings-grid">
-          <div className="shell-command-panel">
-            <div className="shell-command-panel-header">
-              <span>{t('config.allowedPaths')}</span>
-            </div>
-            <div className="form-help shell-command-help">
-              {t('config.allowedPathsHelp')}
-            </div>
-            <textarea
-              className="form-control permission-textarea"
-              value={allowedPathsValue}
-              onChange={e => updatePermissions(current => ({
-                ...current,
-                fileSystem: {
-                  ...current.fileSystem,
-                  allowedPaths: parseListInput(e.target.value)
-                }
-              }))}
-              rows={5}
-              placeholder={t('config.placeholder.allowedPaths')}
-            />
-          </div>
-
-          <div className="shell-command-panel">
-            <div className="shell-command-panel-header">
-              <span>{t('config.allowedDomains')}</span>
-            </div>
-            <div className="form-help shell-command-help">
-              {t('config.allowedDomainsHelp')}
-            </div>
-            <textarea
-              className="form-control permission-textarea"
-              value={allowedDomainsValue}
-              onChange={e => updatePermissions(current => ({
-                ...current,
-                network: {
-                  ...current.network,
-                  allowedDomains: parseListInput(e.target.value)
-                }
-              }))}
-              rows={5}
-              placeholder={t('config.placeholder.allowedDomains')}
-            />
-            {permissions.network.enabled && permissions.network.allowedDomains.length === 0 && (
-              <div className="form-help shell-command-help">
-                {t('config.noDomainsSelectedHelp')}
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div className="shell-access-card">
-          <label className="form-checkbox shell-access-toggle">
-            <div>
-              <div style={{ fontWeight: 500, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <IconShield size={16} /> {t('config.permissionsDefaultClosed')}
-              </div>
-              <div className="form-help" style={{ marginTop: '0.25rem', marginBottom: 0 }}>
-                {t('config.permissionsDefaultClosedHelp')}
-              </div>
-            </div>
-          </label>
-        </div>
-
-        {isShellCommandsExpanded && (
-          <div className="shell-command-panel">
-            <div className="shell-command-panel-header">
-              <span>{t('config.allowedCommandsTitle')}</span>
-              <span className="shell-command-count">{t('config.selectedCommandsCount', { count: selectedCommands.size })}</span>
-            </div>
-            <div className="form-help shell-command-help">
-              {t('config.allowedCommandsHelp')}
-            </div>
-            <div className="shell-command-grid">
-              {shellCommands.map(command => {
-                const checked = selectedCommands.has(command);
-                return (
-                  <label key={command} className={`shell-command-item ${checked ? 'selected' : ''}`}>
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={e => toggleCommand(command, e.target.checked)}
-                    />
-                    <div className="shell-command-content">
-                      <div className="shell-command-name">{command}</div>
-                      <div className="shell-command-description">
-                        {SHELL_COMMAND_DESCRIPTIONS[command]?.[commandDescriptionLocale] || t('config.allowedCommandUnknown')}
-                      </div>
-                    </div>
-                  </label>
-                );
-              })}
-            </div>
-            {selectedCommands.size === 0 && (
-              <div className="form-help shell-command-help">
-                {t('config.noCommandsSelectedHelp')}
-              </div>
-            )}
-          </div>
-        )}
 
         <div className="form-actions">
           <button className="btn btn-secondary" onClick={onCancel}>{t('common.cancel')}</button>

@@ -5,6 +5,7 @@ import { promisify } from 'util';
 import { z } from 'zod';
 import { WebContents } from 'electron';
 import { AgentRuntime } from '../core/agent/runtime';
+import type { SkillCatalogSnapshot } from '../core/agent/runtimeHelpers';
 import { ToolDefinition } from '../core/llm/types';
 import { createLLMProvider } from '../core/llm/provider';
 import { PromptBuilder } from '../core/llm/prompt';
@@ -25,6 +26,8 @@ type RuntimeRegistryEntry = {
 };
 
 const runtimeRegistry = new Map<string, RuntimeRegistryEntry>();
+const AVAILABLE_SKILLS_MAX_CHARS = 3600;
+const AVAILABLE_SKILL_ENTRY_MAX_CHARS = 180;
 
 function createRuntimeSignature(config: ResolvedAgentConfig) {
   const { agent, model } = config;
@@ -107,25 +110,70 @@ function isInternalSkillResource(resourcePath: string) {
     .some((segment) => segment === '_meta.json' || segment.startsWith('.'));
 }
 
-async function buildSkillCatalogSection(agentId: string) {
+async function buildSkillCatalogSnapshot(agentId: string): Promise<SkillCatalogSnapshot> {
   const skills = await skillsManager.listMergedSkills(agentId);
   if (skills.length === 0) {
-    return '<available_skills>\nNo skills available.\n</available_skills>';
+    return {
+      fingerprint: 'empty',
+      fullSummary: 'No skills available.',
+      entries: []
+    };
   }
 
-  const entries = skills
-    .map((skill) => {
-      const versionText = skill.version ? ` | version: ${skill.version}` : '';
-      const sourceText = ` | scope: ${skill.source}`;
-      return `- ${skill.id}: ${skill.description}${versionText}${sourceText}`;
-    })
-    .join('\n');
+  const prioritizedSkills = skills
+    .slice()
+    .sort((left, right) => {
+      if (left.source !== right.source) {
+        return left.source === 'agent' ? -1 : 1;
+      }
+      return left.id.localeCompare(right.id);
+    });
 
-  return `<available_skills>\n${entries}\n</available_skills>`;
+  const entryRecords = prioritizedSkills.map((skill) => {
+    const description = skill.description.replace(/\s+/g, ' ').trim();
+    const trimmedDescription = description.length > AVAILABLE_SKILL_ENTRY_MAX_CHARS
+      ? `${description.slice(0, AVAILABLE_SKILL_ENTRY_MAX_CHARS - 1).trimEnd()}…`
+      : description;
+    const versionText = skill.version ? ` | version: ${skill.version}` : '';
+    const sourceText = ` | scope: ${skill.source}`;
+    return {
+      id: skill.id,
+      summary: `- ${skill.id}: ${trimmedDescription}${versionText}${sourceText}`
+    };
+  });
+  const entries: string[] = [];
+
+  for (const record of entryRecords) {
+    const entry = record.summary;
+    const nextEntries = [...entries, entry];
+    const remainingCount = entryRecords.length - nextEntries.length;
+    const suffix = remainingCount > 0 ? `\n- ${remainingCount} more skills omitted from this summary.` : '';
+    const candidate = `${nextEntries.join('\n')}${suffix}`;
+    if (candidate.length > AVAILABLE_SKILLS_MAX_CHARS) {
+      if (entries.length === 0) {
+        return {
+          fingerprint: JSON.stringify(entryRecords.map((record) => record.summary)),
+          fullSummary: entry.slice(0, AVAILABLE_SKILLS_MAX_CHARS).trimEnd(),
+          entries: entryRecords
+        };
+      }
+      break;
+    }
+    entries.push(entry);
+  }
+
+  const omittedCount = entryRecords.length - entries.length;
+  return {
+    fingerprint: JSON.stringify(entryRecords.map((record) => record.summary)),
+    fullSummary: omittedCount > 0
+      ? `${entries.join('\n')}\n- ${omittedCount} more skills omitted from this summary.`
+      : entries.join('\n'),
+    entries: entryRecords
+  };
 }
 
-async function buildSystemPromptWithSkills(agent: AgentConfig, workspace: string) {
-  const basePrompt = PromptBuilder.buildSystemPrompt({
+async function buildBaseSystemPrompt(agent: AgentConfig, workspace: string) {
+  return PromptBuilder.buildSystemPrompt({
     workspace,
     kairopilotPrompt: agent.systemPrompt,
     identityPrompt: agent.identityPrompt,
@@ -136,11 +184,12 @@ async function buildSystemPromptWithSkills(agent: AgentConfig, workspace: string
     includeMemory: false,
     includeEnvironment: true
   });
-  const skillCatalog = await buildSkillCatalogSection(agent.id);
-  return `${basePrompt}\n\n${skillCatalog}`;
 }
 
-async function createLoadSkillTool(agentId: string): Promise<ToolDefinition> {
+async function createLoadSkillTool(
+  agentId: string,
+  onSkillLoaded?: (payload: { skillName: string; allowedTools: string[]; loadedAt: number }) => void
+): Promise<ToolDefinition> {
   return {
     name: 'load_skill',
     description: 'Load the instructions of a matching skill by name before executing a skill-guided workflow.',
@@ -157,6 +206,13 @@ async function createLoadSkillTool(agentId: string): Promise<ToolDefinition> {
         throw new Error(`Skill not found: ${name}`);
       }
 
+      const loadedAt = Date.now();
+      onSkillLoaded?.({
+        skillName: metadata.name || name,
+        allowedTools: metadata.metadata.allowedTools,
+        loadedAt
+      });
+
       const entries = await fs.readdir(skillPath, { withFileTypes: true });
       const resources = entries
         .filter((entry) => entry.name !== 'SKILL.md' && !entry.name.startsWith('.') && entry.name !== '_meta.json')
@@ -170,6 +226,7 @@ async function createLoadSkillTool(agentId: string): Promise<ToolDefinition> {
         description: metadata.description,
         version: metadata.metadata.version,
         allowedTools: metadata.metadata.allowedTools,
+        loadedAt,
         skillPath,
         content,
         resources
@@ -286,15 +343,16 @@ async function initializeAgent(config: ResolvedAgentConfig, sender?: WebContents
     model: model.model || 'gpt-3.5-turbo'
   });
 
-  const systemPromptWithContext = await buildSystemPromptWithSkills(agent, workspace);
+  let availableSkillsCatalog = await buildSkillCatalogSnapshot(agent.id);
+  const baseSystemPrompt = await buildBaseSystemPrompt(agent, workspace);
 
-  console.log(`[Agent] System prompt assembled. Length=${systemPromptWithContext.length}`);
+  console.log(`[Agent] System prompt assembled. Length=${baseSystemPrompt.length}; availableSkillsSummaryLength=${availableSkillsCatalog.fullSummary.length}`);
 
   const runtime = new AgentRuntime(
     llm,
     permissions,
     workspace,
-    systemPromptWithContext,
+    baseSystemPrompt,
     (log) => {
       addAuditLog({
         tool: log.tool,
@@ -307,7 +365,17 @@ async function initializeAgent(config: ResolvedAgentConfig, sender?: WebContents
         stepId: log.stepId
       });
     },
-    () => buildSystemPromptWithSkills(agent, workspace)
+    async () => {
+      const [nextPrompt, nextAvailableSkillsCatalog] = await Promise.all([
+        buildBaseSystemPrompt(agent, workspace),
+        buildSkillCatalogSnapshot(agent.id)
+      ]);
+      availableSkillsCatalog = nextAvailableSkillsCatalog;
+      return nextPrompt;
+    },
+    () => ({
+      availableSkillsCatalog
+    })
   );
 
   runtime.registerTool(ReadFileTool as unknown as ToolDefinition);
@@ -321,7 +389,9 @@ async function initializeAgent(config: ResolvedAgentConfig, sender?: WebContents
   runtime.registerTool(SystemInfoTool as unknown as ToolDefinition);
   runtime.registerTool(WebSearchTool as unknown as ToolDefinition);
   runtime.registerTool(FetchWebpageTool as unknown as ToolDefinition);
-  runtime.registerTool(await createLoadSkillTool(agent.id));
+  runtime.registerTool(await createLoadSkillTool(agent.id, ({ skillName, allowedTools, loadedAt }) => {
+    runtime.activateLoadedSkill(skillName, allowedTools, loadedAt);
+  }));
   runtime.registerTool(createReadSkillResourceTool(agent.id));
   runtime.registerTool(createRunSkillScriptTool(agent.id));
 

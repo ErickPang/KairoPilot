@@ -31,16 +31,32 @@ import {
   RuntimeUpdate
 } from './runEngine';
 import {
+  computeActiveSkillsUpdate,
+  computeToolCatalogUpdate,
+  computeSkillCatalogUpdate,
+  createActiveSkillsSnapshot,
+  createToolCatalogSnapshot,
+  SessionActiveSkillState,
+  RuntimeSupportSnapshot,
+  SessionSkillCatalogState,
+  SessionToolCatalogState,
+  SkillCatalogSnapshot,
   shouldBlockSensitiveDisclosure
 } from './runtimeHelpers';
 import {
   handleToolCall,
   resumePendingToolCall
 } from './toolCallCoordinator';
+import { CapabilityOrchestrator } from './capabilityOrchestrator';
+
+interface RuntimeSupportContext {
+  availableSkillsCatalog?: SkillCatalogSnapshot;
+}
 
 export class AgentRuntime {
   private llm: LLMProvider;
   private tools: Map<string, ToolDefinition>;
+  private capabilityOrchestrator: CapabilityOrchestrator;
   private history: ChatMessage[] = [];
   private systemPrompt: string;
   private workspace: string;
@@ -57,6 +73,27 @@ export class AgentRuntime {
     stepId?: string;
   }) => void;
   private refreshSystemPrompt?: () => string | Promise<string>;
+  private getRuntimeSupportContext?: () => RuntimeSupportContext;
+  private sessionActiveSkillStates = new Map<string, SessionActiveSkillState>();
+  private sessionSkillCatalogStates = new Map<string, SessionSkillCatalogState>();
+  private sessionToolCatalogStates = new Map<string, SessionToolCatalogState>();
+
+  private restoreSnapshotState(snapshot: RuntimeSnapshot) {
+    this.systemPrompt = snapshot.systemPrompt || this.systemPrompt;
+    this.history = Array.isArray(snapshot.history) ? snapshot.history : [];
+    this.capabilityOrchestrator.setLoadedSkills(Array.isArray(snapshot.loadedSkills) ? snapshot.loadedSkills : []);
+    this.setRuntimeSupportSnapshot(snapshot.runtimeSupportSnapshot);
+  }
+
+  private createResumeOptions(run: { id: string; sessionId?: string; agentId: string }, iterations: number) {
+    return {
+      sessionId: run.sessionId,
+      agentId: run.agentId,
+      runId: run.id,
+      maxIterations: undefined,
+      iterations
+    } as RuntimeChatOptions & { iterations: number };
+  }
 
   constructor(
     llm: LLMProvider,
@@ -73,7 +110,8 @@ export class AgentRuntime {
       runId?: string;
       stepId?: string;
     }) => void,
-    refreshSystemPrompt?: () => string | Promise<string>
+    refreshSystemPrompt?: () => string | Promise<string>,
+    getRuntimeSupportContext?: () => RuntimeSupportContext
   ) {
     this.llm = llm;
     this.systemPrompt = systemPrompt;
@@ -81,11 +119,14 @@ export class AgentRuntime {
     this.permissionGuard = permissionGuard;
     this.auditLog = auditLog;
     this.refreshSystemPrompt = refreshSystemPrompt;
+    this.getRuntimeSupportContext = getRuntimeSupportContext;
     this.tools = new Map();
+    this.capabilityOrchestrator = new CapabilityOrchestrator(permissionGuard);
   }
 
   registerTool(tool: ToolDefinition) {
     this.tools.set(tool.name, tool);
+    this.capabilityOrchestrator.registerTool(tool);
   }
 
   getHistory(): ChatMessage[] {
@@ -94,6 +135,14 @@ export class AgentRuntime {
 
   setHistory(history: ChatMessage[]) {
     this.history = history;
+  }
+
+  activateLoadedSkill(skillName: string, allowedTools: string[], loadedAt?: number) {
+    this.capabilityOrchestrator.activateSkill(skillName, allowedTools, loadedAt);
+  }
+
+  clearLoadedSkills() {
+    this.capabilityOrchestrator.clearLoadedSkills();
   }
 
   async chat(
@@ -106,6 +155,7 @@ export class AgentRuntime {
     }
 
     await this.refreshPromptIfNeeded();
+    this.clearLoadedSkills();
     const userMessage: ChatMessage = {
       role: 'user',
       content: userInput,
@@ -130,7 +180,9 @@ export class AgentRuntime {
     this.persistSnapshot(run.id, {
       iterations: 0,
       lastUserInput: userInput,
-      contextSummary: this.buildModelContext(run.id, options.sessionId).metadata,
+      contextSummary: this.buildModelContext(run.id, options.sessionId, {
+        consumeRuntimeSupportSummary: false
+      }).metadata,
       stepId: planStep.id
     });
 
@@ -171,8 +223,7 @@ export class AgentRuntime {
     }
     const { approval, run, snapshot, pendingToolCall } = resumeState;
 
-    this.systemPrompt = snapshot.systemPrompt || this.systemPrompt;
-    this.history = Array.isArray(snapshot.history) ? snapshot.history : [];
+    this.restoreSnapshotState(snapshot);
     this.runControls.set(run.id, {
       pauseRequested: false,
       cancelRequested: false
@@ -190,7 +241,9 @@ export class AgentRuntime {
       emitUpdate: (listener, update) => this.emitUpdate(listener, update),
       appendToolMessage: (name, callId, content) => this.appendToolMessage(name, callId, content),
       persistSnapshot: (currentRunId, patch) => this.persistSnapshot(currentRunId, patch),
-      buildContextSummary: (currentRunId, sessionId) => this.buildModelContext(currentRunId, sessionId).metadata
+      buildContextSummary: (currentRunId, sessionId) => this.buildModelContext(currentRunId, sessionId, {
+        consumeRuntimeSupportSummary: false
+      }).metadata
     });
 
     this.persistSnapshot(run.id, {
@@ -203,13 +256,7 @@ export class AgentRuntime {
         runId: run.id,
         userInput: snapshot.lastUserInput || run.userInput,
         onUpdate,
-        options: {
-          sessionId: run.sessionId,
-          agentId: run.agentId,
-          runId: run.id,
-          maxIterations: undefined,
-          iterations: snapshot.iterations
-        } as RuntimeChatOptions & { iterations: number }
+        options: this.createResumeOptions(run, snapshot.iterations)
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
@@ -319,8 +366,7 @@ export class AgentRuntime {
       throw new Error(`Context snapshot not found for run ${runId}`);
     }
 
-    this.systemPrompt = snapshot.systemPrompt || this.systemPrompt;
-    this.history = Array.isArray(snapshot.history) ? snapshot.history : [];
+    this.restoreSnapshotState(snapshot);
     this.runControls.set(run.id, {
       pauseRequested: false,
       cancelRequested: false
@@ -336,13 +382,7 @@ export class AgentRuntime {
       runId: run.id,
       userInput: snapshot.lastUserInput || run.userInput,
       onUpdate,
-      options: {
-        sessionId: run.sessionId,
-        agentId: run.agentId,
-        runId: run.id,
-        maxIterations: undefined,
-        iterations: snapshot.iterations
-      } as RuntimeChatOptions & { iterations: number }
+      options: this.createResumeOptions(run, snapshot.iterations)
     });
   }
 
@@ -361,8 +401,7 @@ export class AgentRuntime {
       throw new Error(`Context snapshot not found for step ${stepId}.`);
     }
 
-    this.systemPrompt = snapshot.systemPrompt || this.systemPrompt;
-    this.history = Array.isArray(snapshot.history) ? snapshot.history : [];
+    this.restoreSnapshotState(snapshot);
     this.runControls.set(run.id, {
       pauseRequested: false,
       cancelRequested: false
@@ -384,13 +423,7 @@ export class AgentRuntime {
       runId: run.id,
       userInput: snapshot.lastUserInput || run.userInput,
       onUpdate,
-      options: {
-        sessionId: run.sessionId,
-        agentId: run.agentId,
-        runId: run.id,
-        maxIterations: undefined,
-        iterations: snapshot.iterations
-      } as RuntimeChatOptions & { iterations: number }
+      options: this.createResumeOptions(run, snapshot.iterations)
     });
   }
 
@@ -403,12 +436,14 @@ export class AgentRuntime {
     const { runId, userInput, onUpdate, options } = params;
     const result = await executeRunEngine({
       llm: this.llm,
-      tools: Array.from(this.tools.values()),
+      tools: this.capabilityOrchestrator.getExposedTools(),
       runId,
       userInput,
       onUpdate,
       options,
-      buildModelContext: (currentRunId, sessionId) => this.buildModelContext(currentRunId, sessionId),
+      buildModelContext: (currentRunId, sessionId) => this.buildModelContext(currentRunId, sessionId, {
+        consumeRuntimeSupportSummary: true
+      }),
       handleToolCall: (params) => handleToolCall({
         ...params,
         onUpdate,
@@ -418,7 +453,9 @@ export class AgentRuntime {
         emitUpdate: (listener, update) => this.emitUpdate(listener, update),
         appendToolMessage: (name, callId, content) => this.appendToolMessage(name, callId, content),
         persistSnapshot: (currentRunId, patch) => this.persistSnapshot(currentRunId, patch),
-        buildContextSummary: (currentRunId, sessionId) => this.buildModelContext(currentRunId, sessionId).metadata
+        buildContextSummary: (currentRunId, sessionId) => this.buildModelContext(currentRunId, sessionId, {
+          consumeRuntimeSupportSummary: false
+        }).metadata
       }),
       persistSnapshot: (currentRunId, patch) => this.persistSnapshot(currentRunId, patch),
       emitUpdate: (listener, update) => this.emitUpdate(listener, update),
@@ -460,8 +497,10 @@ export class AgentRuntime {
       history: this.history,
       iterations: patch.iterations,
       lastUserInput: patch.lastUserInput,
+      loadedSkills: patch.loadedSkills ?? this.capabilityOrchestrator.getLoadedSkills(),
       contextSummary: patch.contextSummary,
-      pendingToolCall: patch.pendingToolCall
+      pendingToolCall: patch.pendingToolCall,
+      runtimeSupportSnapshot: this.getRuntimeSupportSnapshot()
     } satisfies RuntimeSnapshot, patch.stepId);
 
     if (patch.contextSummary) {
@@ -509,18 +548,167 @@ export class AgentRuntime {
     }
   }
 
-  private buildModelContext(runId: string, sessionId?: string): RuntimeModelContext {
+  private getRuntimeSupportSessionKey(runId: string, sessionId?: string) {
+    const normalizedSessionId = typeof sessionId === 'string' ? sessionId.trim() : '';
+    return normalizedSessionId || `run:${runId}`;
+  }
+
+  private getRuntimeSupportSnapshot(): RuntimeSupportSnapshot | undefined {
+    if (
+      this.sessionActiveSkillStates.size === 0
+      && this.sessionSkillCatalogStates.size === 0
+      && this.sessionToolCatalogStates.size === 0
+    ) {
+      return undefined;
+    }
+
+    return {
+      activeSkillSessions: Object.fromEntries(this.sessionActiveSkillStates.entries()),
+      skillCatalogSessions: Object.fromEntries(this.sessionSkillCatalogStates.entries()),
+      toolCatalogSessions: Object.fromEntries(this.sessionToolCatalogStates.entries())
+    };
+  }
+
+  private setRuntimeSupportSnapshot(snapshot?: RuntimeSupportSnapshot) {
+    this.sessionActiveSkillStates.clear();
+    this.sessionSkillCatalogStates.clear();
+    this.sessionToolCatalogStates.clear();
+    const activeSkillSessions = snapshot?.activeSkillSessions;
+    if (activeSkillSessions) {
+      for (const [key, value] of Object.entries(activeSkillSessions)) {
+        if (!value || typeof value.fingerprint !== 'string' || !Array.isArray(value.announcedSkillNames)) {
+          continue;
+        }
+        this.sessionActiveSkillStates.set(key, {
+          fingerprint: value.fingerprint,
+          announcedSkillNames: value.announcedSkillNames
+            .map((skillName) => String(skillName).trim())
+            .filter(Boolean)
+        });
+      }
+    }
+
+    const skillCatalogSessions = snapshot?.skillCatalogSessions;
+    if (skillCatalogSessions) {
+      for (const [key, value] of Object.entries(skillCatalogSessions)) {
+        if (!value || typeof value.fingerprint !== 'string' || !Array.isArray(value.announcedSkillIds)) {
+          continue;
+        }
+        this.sessionSkillCatalogStates.set(key, {
+          fingerprint: value.fingerprint,
+          announcedSkillIds: value.announcedSkillIds
+            .map((skillId) => String(skillId).trim())
+            .filter(Boolean)
+        });
+      }
+    }
+
+    const toolCatalogSessions = snapshot?.toolCatalogSessions;
+    if (!toolCatalogSessions) {
+      return;
+    }
+
+    for (const [key, value] of Object.entries(toolCatalogSessions)) {
+      if (!value || typeof value.fingerprint !== 'string' || !Array.isArray(value.announcedToolNames)) {
+        continue;
+      }
+      this.sessionToolCatalogStates.set(key, {
+        fingerprint: value.fingerprint,
+        announcedToolNames: value.announcedToolNames
+          .map((toolName) => String(toolName).trim())
+          .filter(Boolean)
+      });
+    }
+  }
+
+  private resolveAvailableSkillsSummary(
+    runId: string,
+    sessionId: string | undefined,
+    availableSkillsCatalog: SkillCatalogSnapshot | undefined,
+    consumeRuntimeSupportSummary: boolean
+  ) {
+    const sessionKey = this.getRuntimeSupportSessionKey(runId, sessionId);
+    const currentState = this.sessionSkillCatalogStates.get(sessionKey);
+    const update = computeSkillCatalogUpdate(availableSkillsCatalog, currentState);
+    if (consumeRuntimeSupportSummary && update.nextState) {
+      this.sessionSkillCatalogStates.set(sessionKey, update.nextState);
+    }
+    return update.summary;
+  }
+
+  private resolveActiveSkillsSummary(
+    runId: string,
+    sessionId: string | undefined,
+    loadedSkills: ReturnType<CapabilityOrchestrator['getLoadedSkills']>,
+    consumeRuntimeSupportSummary: boolean
+  ) {
+    const sessionKey = this.getRuntimeSupportSessionKey(runId, sessionId);
+    const currentState = this.sessionActiveSkillStates.get(sessionKey);
+    const activeSkillSnapshot = createActiveSkillsSnapshot(loadedSkills);
+    const update = computeActiveSkillsUpdate(activeSkillSnapshot, currentState);
+    if (consumeRuntimeSupportSummary && update.nextState) {
+      this.sessionActiveSkillStates.set(sessionKey, update.nextState);
+    }
+    return update.summary;
+  }
+
+  private resolveAvailableToolsSummary(
+    runId: string,
+    sessionId: string | undefined,
+    availableToolNames: string[] | undefined,
+    consumeToolSummary: boolean
+  ) {
+    const sessionKey = this.getRuntimeSupportSessionKey(runId, sessionId);
+    const currentState = this.sessionToolCatalogStates.get(sessionKey);
+    const toolCatalogSnapshot = createToolCatalogSnapshot(availableToolNames || []);
+    const update = computeToolCatalogUpdate(toolCatalogSnapshot, currentState);
+    if (consumeToolSummary && update.nextState) {
+      this.sessionToolCatalogStates.set(sessionKey, update.nextState);
+    }
+    return update.summary;
+  }
+
+  private buildModelContext(
+    runId: string,
+    sessionId?: string,
+    options?: { consumeRuntimeSupportSummary?: boolean }
+  ): RuntimeModelContext {
     const run = getRunById(runId);
     const runSteps = getRunSteps(runId);
     const pendingApproval = getPendingApproval(sessionId);
     const episodicSummaries = sessionId
       ? getRecentSessionContextSummaries(sessionId, 4, runId)
       : [];
+    const loadedSkills = this.capabilityOrchestrator.getLoadedSkills();
+    const availableToolNames = this.capabilityOrchestrator.getExposedTools().map((tool) => tool.name);
+    const runtimeSupportContext = this.getRuntimeSupportContext?.() || {};
+    const activeSkillsSummary = this.resolveActiveSkillsSummary(
+      runId,
+      sessionId,
+      loadedSkills,
+      options?.consumeRuntimeSupportSummary === true
+    );
+    const availableSkillsSummary = this.resolveAvailableSkillsSummary(
+      runId,
+      sessionId,
+      runtimeSupportContext.availableSkillsCatalog,
+      options?.consumeRuntimeSupportSummary === true
+    );
+    const availableToolsSummary = this.resolveAvailableToolsSummary(
+      runId,
+      sessionId,
+      availableToolNames,
+      options?.consumeRuntimeSupportSummary === true
+    );
 
     return assembleRuntimeContext({
       systemPrompt: this.systemPrompt,
       workspace: this.workspace,
       history: this.history,
+      activeSkillsSummary,
+      loadedSkills,
+      availableSkillsSummary,
+      availableToolsSummary,
       run,
       runSteps,
       pendingApproval,

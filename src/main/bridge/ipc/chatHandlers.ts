@@ -8,6 +8,7 @@ import {
   getLatestRunSteps,
   getPendingApproval,
   getRunById,
+  queryRuns,
   getRunTrace,
   getSessionById,
   updateSessionTitle,
@@ -101,6 +102,15 @@ function registerChatHandlers() {
       return null;
     }
     return getApprovalRecord(approval.id);
+  });
+
+  ipcMain.handle(KAIRO_INVOKE.chatQueryRuns, async (_, input) => {
+    const agentId = getActiveAgentId();
+    const query = typeof input === 'object' && input ? input : {};
+    return queryRuns({
+      ...(query as Record<string, unknown>),
+      agentId: agentId || undefined
+    });
   });
 
   ipcMain.handle(KAIRO_INVOKE.chatGetRunTrace, async (_, input) => {

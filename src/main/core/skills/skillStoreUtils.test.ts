@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import {
   assertHttpsUrl,
+  matchesAllowedToolName,
   normalizeClaudeMarketplaceResponse,
   normalizeClaudeMarketplaceSkill,
   normalizeMarketplaceResponse,
   normalizeSkillStoreEntry,
   normalizeSkillsRegistryEntry,
-  parseSkillFrontmatter
+  parseSkillFrontmatter,
+  resolveAllowedToolToRegisteredNames
 } from './skillStoreUtils'
 
 describe('skillStoreUtils', () => {
@@ -75,6 +77,27 @@ metadata:
       },
       installedScopes: []
     })
+  })
+
+  it('支持将 allowed-tools 别名映射到内部工具名', () => {
+    expect(matchesAllowedToolName('RunCommand', 'execute_command')).toBe(true)
+    expect(matchesAllowedToolName('Read', 'read_file')).toBe(true)
+    expect(matchesAllowedToolName('LS', 'list_directory')).toBe(true)
+    expect(matchesAllowedToolName('WebFetch', 'fetch_webpage')).toBe(true)
+    expect(matchesAllowedToolName('RunCommand', 'web_search')).toBe(false)
+  })
+
+  it('能将技能声明的工具名解析为已注册工具名列表', () => {
+    expect(resolveAllowedToolToRegisteredNames('RunCommand', [
+      'read_file',
+      'execute_command',
+      'web_search'
+    ])).toEqual(['execute_command'])
+
+    expect(resolveAllowedToolToRegisteredNames('*', [
+      'read_file',
+      'execute_command'
+    ])).toEqual(['read_file', 'execute_command'])
   })
 
   it('将 Claude marketplace 插件映射为 github 技能源', () => {

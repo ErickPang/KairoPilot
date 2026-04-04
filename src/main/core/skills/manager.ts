@@ -19,6 +19,7 @@ import {
 } from '../../../shared/contracts'
 import {
   isSkillMarketplaceQuery,
+  matchesAllowedToolName,
   normalizeRelativePath,
   normalizeSkillFolderId,
   normalizeSkillsRegistryEntry,
@@ -471,7 +472,7 @@ export class SkillsManager {
       return false
     }
 
-    return metadata.metadata.allowedTools.includes(toolName) || metadata.metadata.allowedTools.includes('*')
+    return metadata.metadata.allowedTools.some((allowedToolName) => matchesAllowedToolName(allowedToolName, toolName))
   }
 
   getPublicSkillsDirectoryPath() {

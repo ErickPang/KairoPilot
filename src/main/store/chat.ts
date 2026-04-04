@@ -14,7 +14,10 @@ import type {
   MonitoringTokenQuery,
   MonitoringTokenQueryResult,
   MonitoringTokenUsageItem,
+  QueryFacet,
   RunContextSummary,
+  RunQuery,
+  RunQueryResult,
   RunStatus,
   RunStep,
   RunStepStatus,
@@ -46,6 +49,7 @@ export interface SessionSummary {
 
 let db: Database.Database | null = null;
 const DEFAULT_AGENT_ID = 'mainAgent';
+const MAX_RUN_QUERY_PAGE_SIZE = 100;
 
 function normalizeAgentId(agentId?: string | null) {
   return agentId || DEFAULT_AGENT_ID;
@@ -605,11 +609,24 @@ function mapContextSummaryRow(row: {
     sessionId: row.session_id || undefined,
     stepId: row.step_id || undefined,
     activeTaskSummary: parsedSummary.activeTaskSummary || '',
+    activeSkillsSummary: parsedSummary.activeSkillsSummary || '',
+    availableSkillsSummary: parsedSummary.availableSkillsSummary || '',
+    availableToolsSummary: parsedSummary.availableToolsSummary || '',
     compactedHistorySummary: parsedSummary.compactedHistorySummary || '',
     unresolvedApprovals: parsedSummary.unresolvedApprovals || '',
     selectedToolResults: parsedSummary.selectedToolResults || '',
     workspaceRetrieval: parsedSummary.workspaceRetrieval || '',
     memoryDigest: parsedSummary.memoryDigest || '',
+    layers: Array.isArray(parsedSummary.layers)
+      ? parsedSummary.layers.map((layer) => ({
+          id: String(layer.id || ''),
+          title: String(layer.title || ''),
+          kind: layer.kind === 'system' || layer.kind === 'support' || layer.kind === 'history' ? layer.kind : 'support',
+          messageCount: Number.isFinite(layer.messageCount) ? layer.messageCount : 0,
+          charCount: Number.isFinite(layer.charCount) ? layer.charCount : 0,
+          summary: String(layer.summary || '')
+        }))
+      : [],
     recentMessageCount: Number.isFinite(parsedSummary.recentMessageCount) ? parsedSummary.recentMessageCount : 0,
     omittedMessageCount: Number.isFinite(parsedSummary.omittedMessageCount) ? parsedSummary.omittedMessageCount : 0,
     budget: {
@@ -1072,6 +1089,146 @@ export function getLatestRun(sessionId: string): RunSummary | null {
   } | undefined;
 
   return row ? mapRunRowToSummary(row) : null;
+}
+
+function buildRunQueryWhere(query: RunQuery) {
+  const clauses: string[] = [];
+  const params: Array<string | number> = [];
+  const search = query.search?.trim().toLowerCase();
+  const status = query.status ?? 'all';
+  const sessionId = query.sessionId?.trim();
+  const agentId = query.agentId?.trim();
+
+  if (status !== 'all') {
+    clauses.push('status = ?');
+    params.push(status);
+  }
+
+  if (sessionId) {
+    clauses.push('session_id = ?');
+    params.push(sessionId);
+  }
+
+  if (agentId) {
+    clauses.push('agent_id = ?');
+    params.push(agentId);
+  }
+
+  if (search) {
+    const keyword = `%${search}%`;
+    clauses.push(`(
+      LOWER(id) LIKE ?
+      OR LOWER(goal) LIKE ?
+      OR LOWER(user_input) LIKE ?
+      OR LOWER(COALESCE(final_response, '')) LIKE ?
+      OR LOWER(COALESCE(error, '')) LIKE ?
+      OR LOWER(session_id) LIKE ?
+    )`);
+    params.push(keyword, keyword, keyword, keyword, keyword, keyword);
+  }
+
+  return {
+    whereClause: clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '',
+    params
+  };
+}
+
+export function queryRuns(query: RunQuery = {}): RunQueryResult {
+  const database = getDb();
+  const page = Number.isFinite(query.page) && Number(query.page) > 0 ? Math.floor(Number(query.page)) : 1;
+  const pageSize = Number.isFinite(query.page) && Number(query.pageSize) > 0
+    ? Math.min(Math.floor(Number(query.pageSize)), MAX_RUN_QUERY_PAGE_SIZE)
+    : 20;
+  const { whereClause, params } = buildRunQueryWhere(query);
+  const totalRow = database.prepare(`
+    SELECT COUNT(*) as count
+    FROM runs
+    ${whereClause}
+  `).get(...params) as { count: number };
+  const total = totalRow?.count ?? 0;
+  const totalPages = total === 0 ? 1 : Math.ceil(total / pageSize);
+  const safePage = Math.min(page, totalPages);
+  const offset = (safePage - 1) * pageSize;
+  const runRows = database.prepare(`
+    SELECT
+      id,
+      session_id,
+      agent_id,
+      goal,
+      user_input,
+      status,
+      final_response,
+      error,
+      waiting_approval_id,
+      created_at,
+      updated_at,
+      started_at,
+      completed_at
+    FROM runs
+    ${whereClause}
+    ORDER BY updated_at DESC, created_at DESC
+    LIMIT ? OFFSET ?
+  `).all(...params, pageSize, offset) as Array<{
+    id: string;
+    session_id: string;
+    agent_id: string;
+    goal: string;
+    user_input: string;
+    status: RunStatus;
+    final_response: string | null;
+    error: string | null;
+    waiting_approval_id: string | null;
+    created_at: number;
+    updated_at: number;
+    started_at: number | null;
+    completed_at: number | null;
+  }>;
+  const items = runRows.map(mapRunRowToSummary);
+  const aggregateStats = database.prepare(`
+    SELECT
+      COUNT(*) as total_runs,
+      SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) as running_runs,
+      SUM(CASE WHEN status = 'waiting_approval' THEN 1 ELSE 0 END) as waiting_approval_runs,
+      SUM(CASE WHEN status = 'paused' THEN 1 ELSE 0 END) as paused_runs,
+      SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed_runs,
+      SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed_runs,
+      SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) as cancelled_runs
+    FROM runs
+    ${whereClause}
+  `).get(...params) as {
+    total_runs: number | null;
+    running_runs: number | null;
+    waiting_approval_runs: number | null;
+    paused_runs: number | null;
+    completed_runs: number | null;
+    failed_runs: number | null;
+    cancelled_runs: number | null;
+  };
+  const statusRows = database.prepare(`
+    SELECT status as value, COUNT(*) as count
+    FROM runs
+    ${whereClause}
+    GROUP BY status
+    ORDER BY count DESC, value ASC
+  `).all(...params) as QueryFacet[];
+
+  return {
+    items,
+    total,
+    page: safePage,
+    pageSize,
+    totalPages,
+    aggregations: {
+      totalRuns: aggregateStats?.total_runs ?? 0,
+      runningRuns: aggregateStats?.running_runs ?? 0,
+      waitingApprovalRuns: aggregateStats?.waiting_approval_runs ?? 0,
+      pausedRuns: aggregateStats?.paused_runs ?? 0,
+      completedRuns: aggregateStats?.completed_runs ?? 0,
+      failedRuns: aggregateStats?.failed_runs ?? 0,
+      cancelledRuns: aggregateStats?.cancelled_runs ?? 0,
+      statuses: statusRows
+    }
+  };
 }
 
 export function updateRun(

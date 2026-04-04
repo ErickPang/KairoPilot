@@ -67,6 +67,36 @@ describe('toolPipeline', () => {
     }
   });
 
+  it('允许使用 URL 前缀白名单放行 web_search', () => {
+    const guard = new PermissionGuard({
+      executionProfile: 'approved_execution',
+      fileSystem: { read: true, write: true, allowedPaths: ['/tmp'] },
+      network: { enabled: true, allowedDomains: ['https://html.duckduckgo.com/html/'] },
+      shell: { enabled: false, allowedCommands: [] }
+    });
+
+    const decision = checkPermission(guard, 'web_search', {
+      query: 'KairoPilot'
+    });
+
+    expect(decision.kind).toBe('approval');
+  });
+
+  it('允许使用 URL 前缀白名单放行 fetch_webpage', () => {
+    const guard = new PermissionGuard({
+      executionProfile: 'approved_execution',
+      fileSystem: { read: true, write: true, allowedPaths: ['/tmp'] },
+      network: { enabled: true, allowedDomains: ['https://docs.anthropic.com/'] },
+      shell: { enabled: false, allowedCommands: [] }
+    });
+
+    const decision = checkPermission(guard, 'fetch_webpage', {
+      url: 'https://docs.anthropic.com/en/docs/agents-and-tools/tool-use'
+    });
+
+    expect(decision.kind).toBe('approval');
+  });
+
   it('在 chat_only 档位下拒绝读取类工具', () => {
     const guard = new PermissionGuard({
       executionProfile: 'chat_only',

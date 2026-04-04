@@ -102,11 +102,15 @@ describe('toolCallCoordinator', () => {
     const persistSnapshot = vi.fn();
     const buildContextSummary = vi.fn().mockReturnValue({
       activeTaskSummary: '',
+      activeSkillsSummary: '',
+      availableSkillsSummary: '',
+      availableToolsSummary: '',
       compactedHistorySummary: '',
       unresolvedApprovals: '',
       selectedToolResults: '',
       workspaceRetrieval: '',
       memoryDigest: '',
+      layers: [],
       recentMessageCount: 0,
       omittedMessageCount: 0,
       budget: {
@@ -174,11 +178,15 @@ describe('toolCallCoordinator', () => {
     const persistSnapshot = vi.fn();
     const buildContextSummary = vi.fn().mockReturnValue({
       activeTaskSummary: 'task',
+      activeSkillsSummary: '',
+      availableSkillsSummary: '',
+      availableToolsSummary: 'execute_command',
       compactedHistorySummary: '',
       unresolvedApprovals: '',
       selectedToolResults: '',
       workspaceRetrieval: '',
       memoryDigest: '',
+      layers: [],
       recentMessageCount: 1,
       omittedMessageCount: 0,
       budget: {

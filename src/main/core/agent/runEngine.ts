@@ -5,6 +5,7 @@ import {
 } from '../../store/chat';
 import type { ContextAssemblyMetadata } from '../context/assembler';
 import type { ChatMessage, LLMProvider, ToolDefinition } from '../llm/types';
+import type { LoadedSkillCapability } from './capabilityOrchestrator';
 import type { PendingToolCallSnapshot } from './approvalCoordinator';
 
 export type RuntimeUpdate = Record<string, unknown>;
@@ -39,6 +40,7 @@ export interface RuntimeModelContext {
 export interface RuntimeSnapshotPatch {
   iterations: number;
   lastUserInput: string;
+  loadedSkills?: LoadedSkillCapability[];
   contextSummary?: ContextAssemblyMetadata;
   pendingToolCall?: PendingToolCallSnapshot;
   stepId?: string;
