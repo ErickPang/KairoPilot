@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { ModelConfig, AgentConfig, FetchModelsResult } from '../types';
+import { ModelConfig, AgentConfig, FetchModelsResult, ProviderCapabilitySnapshot } from '../types';
 import { IconSettings } from './Icons';
 import { useTranslation } from '../hooks/useTranslation';
 import { ModelList } from './config/ModelList';
@@ -18,6 +18,7 @@ interface ConfigPanelProps {
   onSaveAgent: (agent: AgentConfig) => void;
   onDeleteAgent: (id: string) => void;
   onSetActiveAgent: (id: string) => void;
+  onDescribeProvider: (config: ModelConfig) => Promise<ProviderCapabilitySnapshot | null>;
   onFetchModels: (config: ModelConfig) => Promise<FetchModelsResult>;
   availableModels: string[];
   activeSection?: string;
@@ -37,7 +38,7 @@ export function ConfigPanel({
   models, agents, activeAgentId, 
   onSaveModel, onDeleteModel, 
   onSaveAgent, onDeleteAgent, onSetActiveAgent,
-  onFetchModels, availableModels, activeSection 
+  onDescribeProvider, onFetchModels, availableModels, activeSection 
 }: ConfigPanelProps) {
   const [view, setView] = useState<'list' | 'edit-model' | 'edit-agent'>('list');
   const [editingModel, setEditingModel] = useState<ModelConfig | null>(null);
@@ -70,6 +71,7 @@ export function ConfigPanel({
   const handleSaveModel = useCallback(() => {
     if (editingModel) {
       const normalizedName = editingModel.name.trim();
+      const normalizedApiKey = editingModel.apiKey.trim();
       if (!/^[a-zA-Z][a-zA-Z0-9_-]*$/.test(normalizedName)) {
         alert('模型名称只能使用英文、数字、下划线或短横线，且必须以英文开头');
         return;
@@ -78,12 +80,16 @@ export function ConfigPanel({
         alert('请先选择提供商');
         return;
       }
+      if (editingModel.provider !== 'ollama' && !normalizedApiKey) {
+        alert('请先填写 API Key');
+        return;
+      }
       const selectedModelIds = (editingModel.availableModels || []).map(item => item.id).filter(Boolean);
       if (selectedModelIds.length === 0 && !editingModel.model.trim()) {
         alert('请至少选择一个模型ID');
         return;
       }
-      onSaveModel({ ...editingModel, id: normalizedName, name: normalizedName });
+      onSaveModel({ ...editingModel, id: normalizedName, name: normalizedName, apiKey: normalizedApiKey });
       setView('list');
       setEditingModel(null);
     }
@@ -165,6 +171,7 @@ export function ConfigPanel({
           setEditingModel={setEditingModel}
           isEditingExisting={isEditingExistingModel}
           availableModels={availableModels}
+          onDescribeProvider={onDescribeProvider}
           onFetchModels={onFetchModels}
           onSave={handleSaveModel}
           onCancel={() => {

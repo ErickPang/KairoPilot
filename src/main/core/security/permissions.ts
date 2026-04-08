@@ -1,9 +1,61 @@
 import { z } from 'zod';
 import path from 'path';
 import fs from 'fs';
+import os from 'os';
+import {
+  ApprovalMode,
+  createDefaultPolicyConfig,
+  DataClass,
+  EnvironmentScope,
+  ExecutionProfile,
+  RiskLevel
+} from '../../../shared/contracts';
+
+const DEFAULT_SHELL_TIMEOUT_MS = 60_000;
+const DEFAULT_SHELL_MAX_BUFFER_BYTES = 256 * 1024;
+const TRUSTED_SHELL_TIMEOUT_MS = 120_000;
+const TRUSTED_SHELL_MAX_BUFFER_BYTES = 1024 * 1024;
+
+export interface ShellExecutionPolicy {
+  enabled: boolean;
+  requiresApproval: boolean;
+  timeoutMs: number;
+  maxBufferBytes: number;
+  allowInteractive: boolean;
+}
+
+const PolicySchema = z.object({
+  approvalMode: z.enum(['never', 'on_write', 'on_external', 'always']).optional(),
+  environmentScope: z.enum(['workspace', 'allowed_paths', 'isolated_env']).optional(),
+  dataClass: z.enum(['public', 'project', 'sensitive']).optional(),
+  redactSensitiveOutput: z.boolean().optional()
+});
+
+type PermissionConfigInput = {
+  executionProfile: ExecutionProfile;
+  policy?: z.infer<typeof PolicySchema>;
+  fileSystem: {
+    read: boolean;
+    write: boolean;
+    allowedPaths: string[];
+  };
+  network: {
+    enabled: boolean;
+    allowedDomains?: string[];
+  };
+  shell: {
+    enabled: boolean;
+    allowedCommands: string[];
+    timeoutMs?: number;
+    maxBufferBytes?: number;
+    allowInteractive?: boolean;
+  };
+};
 
 // Define the permission schema
 export const PermissionSchema = z.object({
+  executionProfile: z.enum(['chat_only', 'read_only_workspace', 'approved_execution', 'trusted_automation']).default('chat_only'),
+  policy: PolicySchema.default(createDefaultPolicyConfig('chat_only')),
   fileSystem: z.object({
     read: z.boolean().default(false),
     write: z.boolean().default(false),
@@ -16,6 +68,9 @@ export const PermissionSchema = z.object({
   shell: z.object({
     enabled: z.boolean().default(false),
     allowedCommands: z.array(z.string()).default([]), // e.g., ['git', 'npm']
+    timeoutMs: z.number().int().positive().optional(),
+    maxBufferBytes: z.number().int().positive().optional(),
+    allowInteractive: z.boolean().optional()
   }),
 });
 
@@ -45,8 +100,157 @@ const PROTECTED_PROMPT_FILES = new Set([
 export class PermissionGuard {
   private config: PermissionConfig;
 
-  constructor(config: PermissionConfig) {
-    this.config = config;
+  constructor(config: PermissionConfigInput | PermissionConfig) {
+    this.config = PermissionSchema.parse({
+      ...config,
+      policy: {
+        ...createDefaultPolicyConfig(config.executionProfile),
+        ...(typeof config.policy === 'object' && config.policy ? config.policy : {})
+      }
+    });
+  }
+
+  getExecutionProfile(): ExecutionProfile {
+    return this.config.executionProfile;
+  }
+
+  getApprovalMode(): ApprovalMode {
+    return this.config.policy.approvalMode ?? createDefaultPolicyConfig(this.config.executionProfile).approvalMode;
+  }
+
+  getEnvironmentScope(): EnvironmentScope {
+    return this.config.policy.environmentScope ?? createDefaultPolicyConfig(this.config.executionProfile).environmentScope;
+  }
+
+  getDataClass(): DataClass {
+    return this.config.policy.dataClass ?? createDefaultPolicyConfig(this.config.executionProfile).dataClass;
+  }
+
+  shouldRedactSensitiveOutput(): boolean {
+    return this.config.policy.redactSensitiveOutput ?? createDefaultPolicyConfig(this.config.executionProfile).redactSensitiveOutput;
+  }
+
+  canReadFileSystem(): boolean {
+    if (this.config.executionProfile === 'chat_only') {
+      return false;
+    }
+    return this.config.fileSystem.read;
+  }
+
+  canWriteFileSystem(): boolean {
+    if (this.config.executionProfile === 'chat_only' || this.config.executionProfile === 'read_only_workspace') {
+      return false;
+    }
+    return this.config.fileSystem.write;
+  }
+
+  isNetworkEnabled(): boolean {
+    if (this.config.executionProfile === 'chat_only') {
+      return false;
+    }
+    return this.config.network.enabled;
+  }
+
+  isShellEnabled(): boolean {
+    return this.getShellExecutionPolicy().enabled;
+  }
+
+  getShellExecutionPolicy(): ShellExecutionPolicy {
+    const approvalMode = this.getApprovalMode();
+    if (!this.config.shell.enabled) {
+      return {
+        enabled: false,
+        requiresApproval: false,
+        timeoutMs: this.config.shell.timeoutMs ?? DEFAULT_SHELL_TIMEOUT_MS,
+        maxBufferBytes: this.config.shell.maxBufferBytes ?? DEFAULT_SHELL_MAX_BUFFER_BYTES,
+        allowInteractive: this.config.shell.allowInteractive ?? false
+      };
+    }
+
+    if (this.config.executionProfile === 'trusted_automation') {
+      return {
+        enabled: true,
+        requiresApproval: approvalMode === 'always' || approvalMode === 'on_external',
+        timeoutMs: this.config.shell.timeoutMs ?? TRUSTED_SHELL_TIMEOUT_MS,
+        maxBufferBytes: this.config.shell.maxBufferBytes ?? TRUSTED_SHELL_MAX_BUFFER_BYTES,
+        allowInteractive: this.config.shell.allowInteractive ?? false
+      };
+    }
+
+    return {
+      enabled: this.config.executionProfile === 'approved_execution',
+      requiresApproval: approvalMode !== 'never',
+      timeoutMs: this.config.shell.timeoutMs ?? DEFAULT_SHELL_TIMEOUT_MS,
+      maxBufferBytes: this.config.shell.maxBufferBytes ?? DEFAULT_SHELL_MAX_BUFFER_BYTES,
+      allowInteractive: this.config.shell.allowInteractive ?? false
+    };
+  }
+
+  shouldAllowHighRiskWrites(): boolean {
+    return this.config.executionProfile === 'trusted_automation';
+  }
+
+  getToolRiskLevel(toolName: string, args: Record<string, unknown> = {}): RiskLevel {
+    if (toolName === 'delete_file') {
+      return 'critical';
+    }
+
+    if (toolName === 'execute_command') {
+      const command = typeof args.command === 'string' ? args.command.toLowerCase() : '';
+      if (/(^|\/)(rm|sudo|chmod|chown|mv|dd|launchctl|osascript)$/.test(command)) {
+        return 'critical';
+      }
+      return 'high';
+    }
+
+    if (toolName === 'run_skill_script') {
+      return 'high';
+    }
+
+    if (toolName === 'write_file') {
+      const targetPath = String(args.path || args.file_path || '').toLowerCase();
+      if (targetPath.includes('.env') || targetPath.includes('/.ssh/') || targetPath.endsWith('/.ssh')) {
+        return 'critical';
+      }
+      return 'high';
+    }
+
+    if (toolName === 'web_search' || toolName === 'fetch_webpage') {
+      return 'medium';
+    }
+
+    if (toolName === 'read_file' || toolName === 'list_directory' || toolName === 'system_info') {
+      return this.getDataClass() === 'sensitive' ? 'medium' : 'low';
+    }
+
+    return 'medium';
+  }
+
+  shouldRequireApproval(toolName: string, args: Record<string, unknown> = {}): boolean {
+    const approvalMode = this.getApprovalMode();
+    if (approvalMode === 'never') {
+      return false;
+    }
+
+    if (approvalMode === 'always') {
+      return true;
+    }
+
+    const isWriteTool = toolName === 'write_file' || toolName === 'delete_file';
+    const isExternalTool = toolName === 'web_search'
+      || toolName === 'fetch_webpage'
+      || toolName === 'execute_command'
+      || toolName === 'run_skill_script';
+
+    if (approvalMode === 'on_write') {
+      return isWriteTool || this.getToolRiskLevel(toolName, args) === 'critical';
+    }
+
+    if (approvalMode === 'on_external') {
+      return isExternalTool || this.getToolRiskLevel(toolName, args) === 'critical';
+    }
+
+    return false;
   }
 
   /**
@@ -134,9 +338,27 @@ export class PermissionGuard {
    * Matches the command binary name.
    */
   checkShellCommand(command: string): boolean {
-    if (!this.config.shell.enabled) return false;
+    const shellPolicy = this.getShellExecutionPolicy();
+    if (!shellPolicy.enabled) return false;
 
     return this.config.shell.allowedCommands.includes(command.trim());
+  }
+
+  private matchesAllowedNetworkTarget(targetUrl: URL, allowedTarget: string): boolean {
+    const normalizedAllowedTarget = allowedTarget.trim();
+    if (!normalizedAllowedTarget) {
+      return false;
+    }
+
+    try {
+      const allowedUrl = new URL(normalizedAllowedTarget);
+      const allowedPrefix = allowedUrl.href;
+      const targetPrefix = targetUrl.href;
+      return targetPrefix === allowedPrefix || targetPrefix.startsWith(allowedPrefix);
+    } catch {
+      const hostname = targetUrl.hostname;
+      return hostname === normalizedAllowedTarget || hostname.endsWith('.' + normalizedAllowedTarget);
+    }
   }
 
   /**
@@ -152,12 +374,54 @@ export class PermissionGuard {
     }
 
     try {
-      const hostname = new URL(url).hostname;
-      return this.config.network.allowedDomains.some(domain => 
-        hostname === domain || hostname.endsWith('.' + domain)
+      const targetUrl = new URL(url);
+      return this.config.network.allowedDomains.some(domain =>
+        this.matchesAllowedNetworkTarget(targetUrl, domain)
       );
     } catch {
       return false; // Invalid URL
     }
   }
+}
+
+export function redactSensitiveText(value: string): string {
+  const normalizedHomePath = os.homedir().trim();
+  let result = value;
+
+  if (normalizedHomePath) {
+    result = result.split(normalizedHomePath).join('~');
+  }
+
+  result = result
+    .replace(/-----BEGIN [A-Z ]+-----[\s\S]*?-----END [A-Z ]+-----/g, '[REDACTED_PRIVATE_KEY]')
+    .replace(/\b(?:sk|rk)-[A-Za-z0-9_-]{8,}\b/g, '[REDACTED_API_KEY]')
+    .replace(/\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g, '[REDACTED_ACCESS_KEY]')
+    .replace(/((?:bearer)\s+)([A-Za-z0-9._-]+)/gi, '$1[REDACTED]')
+    .replace(/((?:token|api[_-]?key|secret|password|passwd|authorization|cookie)\s*[:=]\s*)([^\s,;]+)/gi, '$1[REDACTED]')
+    .replace(/(\b[A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|API_KEY|ACCESS_KEY)\b\s*=\s*)([^\s]+)/gi, '$1[REDACTED]');
+
+  return result;
+}
+
+export function redactSensitiveValue(value: unknown): unknown {
+  if (typeof value === 'string') {
+    return redactSensitiveText(value);
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => redactSensitiveValue(item));
+  }
+
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, entryValue]) => {
+        if (/(token|secret|password|passwd|api[_-]?key|authorization|cookie)/i.test(key)) {
+          return [key, '[REDACTED]'];
+        }
+        return [key, redactSensitiveValue(entryValue)];
+      })
+    );
+  }
+
+  return value;
 }

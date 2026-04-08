@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { FetchModelsResult, ModelConfig } from '../types';
+import { FetchModelsResult, ModelConfig, ProviderCapabilitySnapshot } from '../types';
 import { I18nContextValue } from '../components/layout/I18nContext';
 import { KAIRO_INVOKE } from '../../shared/ipc';
 
@@ -27,6 +27,15 @@ export function useModelConfig(options: UseModelConfigOptions) {
     }
   }, []);
 
+  const describeProvider = useCallback(async (config: ModelConfig): Promise<ProviderCapabilitySnapshot | null> => {
+    try {
+      return await window.kairo.invoke(KAIRO_INVOKE.llmDescribeProvider, config) as ProviderCapabilitySnapshot;
+    } catch (error) {
+      console.error('Failed to describe provider:', error);
+      return null;
+    }
+  }, []);
+
   const handleSaveModel = useCallback(async (model: ModelConfig) => {
     try {
       await window.kairo.invoke(KAIRO_INVOKE.configSaveModel, model);
@@ -51,6 +60,7 @@ export function useModelConfig(options: UseModelConfigOptions) {
 
   return {
     availableModels,
+    describeProvider,
     fetchModels,
     handleDeleteModel,
     handleSaveModel

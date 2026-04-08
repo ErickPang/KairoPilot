@@ -6,6 +6,7 @@ import { KAIRO_EVENT, KAIRO_INVOKE } from '../../shared/ipc';
 interface UseChatControllerOptions {
   agentCount: number;
   loadActiveSession: () => Promise<void>;
+  loadRunState: (sessionId?: string | null) => Promise<void>;
   loadSessions: () => Promise<void>;
   messages: Message[];
   messagesEndRef: RefObject<HTMLDivElement>;
@@ -20,6 +21,7 @@ export function useChatController(options: UseChatControllerOptions) {
   const {
     agentCount,
     loadActiveSession,
+    loadRunState,
     loadSessions,
     messages,
     messagesEndRef,
@@ -33,7 +35,15 @@ export function useChatController(options: UseChatControllerOptions) {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
+    const removeTrailingThinking = (items: Message[]) => {
+      if (items[items.length - 1]?.role === 'thinking') {
+        return items.slice(0, -1);
+      }
+      return items;
+    };
+
     const removeListener = window.kairo.on(KAIRO_EVENT.agentUpdate, (update) => {
+      const shouldRefreshRunState = typeof update.runId === 'string' && !!sessionContext.activeSessionId;
       if (update.type === 'thinking') {
         setMessages((prev) => {
           const lastMsg = prev[prev.length - 1];
@@ -42,52 +52,91 @@ export function useChatController(options: UseChatControllerOptions) {
           }
           return [...prev, { role: 'thinking', content: update.content || '' }];
         });
+        if (shouldRefreshRunState) {
+          void loadRunState(sessionContext.activeSessionId);
+        }
         return;
       }
 
       if (update.type === 'tool-call') {
-        setMessages((prev) => [...prev, {
+        setMessages((prev) => [...removeTrailingThinking(prev), {
           role: 'tool',
           content: t('app.toolCall', { tool: update.tool || 'unknown' }),
           details: update.args
         }]);
+        if (shouldRefreshRunState) {
+          void loadRunState(sessionContext.activeSessionId);
+        }
         return;
       }
 
       if (update.type === 'tool-result') {
-        setMessages((prev) => [...prev, {
+        setMessages((prev) => [...removeTrailingThinking(prev), {
           role: 'tool',
           content: t('app.toolResult', { tool: update.tool || 'unknown' }),
           details: (update.result as Record<string, unknown>) || {}
         }]);
+        if (shouldRefreshRunState) {
+          void loadRunState(sessionContext.activeSessionId);
+        }
         return;
       }
 
       if (update.type === 'tool-error') {
-        setMessages((prev) => [...prev, {
+        setMessages((prev) => [...removeTrailingThinking(prev), {
           role: 'tool',
           content: t('app.toolError', { tool: update.tool || 'unknown' }),
           details: { error: update.error }
         }]);
+        if (shouldRefreshRunState) {
+          void loadRunState(sessionContext.activeSessionId);
+        }
+        return;
+      }
+
+      if (update.type === 'assistant-response') {
+        setMessages((prev) => [...removeTrailingThinking(prev), {
+          role: 'assistant',
+          content: String(update.content || '')
+        }]);
+        if (shouldRefreshRunState) {
+          void loadRunState(sessionContext.activeSessionId);
+        }
+        return;
+      }
+
+      if (update.type === 'approval-required') {
+        if (shouldRefreshRunState) {
+          void loadRunState(sessionContext.activeSessionId);
+        }
+        return;
+      }
+
+      if (update.type === 'run-paused' || update.type === 'run-cancelled') {
+        setLoading(false);
+        if (shouldRefreshRunState) {
+          void loadRunState(sessionContext.activeSessionId);
+        }
       }
     });
 
     return () => removeListener();
-  }, [setMessages, t]);
+  }, [loadRunState, sessionContext.activeSessionId, setMessages, t]);
 
   useEffect(() => {
     const removeListener = window.kairo.on(KAIRO_EVENT.agentAskConfirmation, (request: ConfirmationRequest) => {
       updateSessionContext({ confirmationRequest: request });
+      void loadRunState(request.sessionId || sessionContext.activeSessionId);
     });
 
     return () => removeListener();
-  }, [setMessages, setSessions, updateSessionContext]);
+  }, [loadRunState, sessionContext.activeSessionId, setMessages, setSessions, updateSessionContext]);
 
   const handleCreateSession = useCallback(async () => {
     try {
       const newSession = await window.kairo.invoke(KAIRO_INVOKE.chatCreateSession);
       setSessions((prev) => [newSession, ...prev]);
-      updateSessionContext({ activeSessionId: newSession.id });
+      updateSessionContext({ activeSessionId: newSession.id, latestContextSummary: null, latestRun: null, activeRunSteps: [], confirmationRequest: null });
       setMessages([]);
     } catch (error) {
       console.error('Failed to create session:', error);
@@ -110,11 +159,12 @@ export function useChatController(options: UseChatControllerOptions) {
         setMessages([]);
       }
 
+      await loadRunState(sessionId);
       await loadSessions();
     } catch (error) {
       console.error('Failed to switch session:', error);
     }
-  }, [loadSessions, setMessages, updateSessionContext]);
+  }, [loadRunState, loadSessions, setMessages, updateSessionContext]);
 
   const handleDeleteSession = useCallback(async (e: React.MouseEvent, sessionId: string) => {
     e.stopPropagation();
@@ -149,8 +199,10 @@ export function useChatController(options: UseChatControllerOptions) {
       id: sessionContext.confirmationRequest.id,
       approved: true
     });
-    updateSessionContext({ confirmationRequest: null });
-  }, [sessionContext.confirmationRequest, updateSessionContext]);
+      updateSessionContext({ confirmationRequest: null });
+    await loadRunState(sessionContext.confirmationRequest.sessionId || sessionContext.activeSessionId);
+    await loadSessions();
+  }, [loadRunState, loadSessions, sessionContext.activeSessionId, sessionContext.confirmationRequest, updateSessionContext]);
 
   const handleDeny = useCallback(async () => {
     if (!sessionContext.confirmationRequest) {
@@ -161,19 +213,114 @@ export function useChatController(options: UseChatControllerOptions) {
       id: sessionContext.confirmationRequest.id,
       approved: false
     });
-    updateSessionContext({ confirmationRequest: null });
-  }, [sessionContext.confirmationRequest, updateSessionContext]);
+      updateSessionContext({ confirmationRequest: null });
+    await loadRunState(sessionContext.confirmationRequest.sessionId || sessionContext.activeSessionId);
+    await loadSessions();
+  }, [loadRunState, loadSessions, sessionContext.activeSessionId, sessionContext.confirmationRequest, updateSessionContext]);
 
   const handleClear = useCallback(async () => {
     try {
       await window.kairo.invoke(KAIRO_INVOKE.chatClearAllSessions);
       setMessages([]);
       await loadSessions();
-      updateSessionContext({ activeSessionId: null });
+      updateSessionContext({ activeSessionId: null, latestContextSummary: null, latestRun: null, activeRunSteps: [], confirmationRequest: null });
     } catch (error) {
       console.error('Failed to clear history:', error);
     }
   }, [loadSessions, setMessages, updateSessionContext]);
+
+  const handlePauseRun = useCallback(async () => {
+    const runId = sessionContext.latestRun?.id;
+    if (!runId) {
+      return;
+    }
+
+    try {
+      const result = await window.kairo.invoke(KAIRO_INVOKE.agentPauseRun, { runId });
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to pause run');
+      }
+      setLoading(false);
+      await loadRunState(sessionContext.activeSessionId);
+      await loadSessions();
+    } catch (error) {
+      setMessages((prev) => [...prev, {
+        role: 'assistant',
+        content: `Error: ${(error as Error).message}`
+      }]);
+    }
+  }, [loadRunState, loadSessions, sessionContext.activeSessionId, sessionContext.latestRun?.id, setMessages]);
+
+  const handleResumeRun = useCallback(async () => {
+    const runId = sessionContext.latestRun?.id;
+    if (!runId) {
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const result = await window.kairo.invoke(KAIRO_INVOKE.agentResumeRun, { runId });
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to resume run');
+      }
+      await loadRunState(sessionContext.activeSessionId);
+      await loadSessions();
+    } catch (error) {
+      setMessages((prev) => [...prev, {
+        role: 'assistant',
+        content: `Error: ${(error as Error).message}`
+      }]);
+    } finally {
+      setLoading(false);
+    }
+  }, [loadRunState, loadSessions, sessionContext.activeSessionId, sessionContext.latestRun?.id, setMessages]);
+
+  const handleCancelRun = useCallback(async () => {
+    const runId = sessionContext.latestRun?.id;
+    if (!runId) {
+      return;
+    }
+
+    try {
+      const result = await window.kairo.invoke(KAIRO_INVOKE.agentCancelRun, { runId });
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to cancel run');
+      }
+      setLoading(false);
+      updateSessionContext({ confirmationRequest: null });
+      await loadRunState(sessionContext.activeSessionId);
+      await loadSessions();
+    } catch (error) {
+      setMessages((prev) => [...prev, {
+        role: 'assistant',
+        content: `Error: ${(error as Error).message}`
+      }]);
+    }
+  }, [loadRunState, loadSessions, sessionContext.activeSessionId, sessionContext.latestRun?.id, setMessages, updateSessionContext]);
+
+  const handleRetryStep = useCallback(async (stepId: string) => {
+    const runId = sessionContext.latestRun?.id;
+    if (!runId || !stepId) {
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const result = await window.kairo.invoke(KAIRO_INVOKE.agentRetryStep, { runId, stepId });
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to retry step');
+      }
+      await loadRunState(sessionContext.activeSessionId);
+      await loadSessions();
+    } catch (error) {
+      setMessages((prev) => [...prev, {
+        role: 'assistant',
+        content: `Error: ${(error as Error).message}`
+      }]);
+    } finally {
+      setLoading(false);
+    }
+  }, [loadRunState, loadSessions, sessionContext.activeSessionId, sessionContext.latestRun?.id, setMessages]);
 
   const handleSend = useCallback(async () => {
     if (!input.trim()) {
@@ -205,10 +352,11 @@ export function useChatController(options: UseChatControllerOptions) {
       const result = await window.kairo.invoke(KAIRO_INVOKE.agentChat, input);
       if (result.error) {
         setMessages((prev) => [...prev, { role: 'assistant', content: `Error: ${result.error}` }]);
-      } else {
+      } else if (result.status === 'completed' && result.content && messages[messages.length - 1]?.content !== result.content) {
         setMessages((prev) => [...prev, { role: 'assistant', content: result.content }]);
       }
 
+      await loadRunState(sessionContext.activeSessionId);
       await loadSessions();
     } catch (error) {
       setMessages((prev) => [...prev, {
@@ -218,14 +366,18 @@ export function useChatController(options: UseChatControllerOptions) {
     } finally {
       setLoading(false);
     }
-  }, [agentCount, input, loadSessions, sessionContext.activeAgentId, sessionContext.activeSessionId, setMessages, setSessions, t, updateSessionContext]);
+  }, [agentCount, input, loadRunState, loadSessions, messages, sessionContext.activeAgentId, sessionContext.activeSessionId, setMessages, setSessions, t, updateSessionContext]);
 
   return {
+    handleCancelRun,
     handleClear,
     handleConfirm,
     handleCreateSession,
     handleDeleteSession,
     handleDeny,
+    handlePauseRun,
+    handleResumeRun,
+    handleRetryStep,
     handleSelectSession,
     handleSend,
     handleUpdateSessionTitle,

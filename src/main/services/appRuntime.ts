@@ -41,18 +41,38 @@ export function ensureAppPaths(): AppPaths {
   };
 }
 
-function resolveBuiltinSkillsSourcePath() {
+export function getBuiltinSkillsSourcePath() {
+  const appPath = app.getAppPath();
+  const appRoot = typeof process.env.APP_ROOT === 'string' && process.env.APP_ROOT.trim().length > 0
+    ? path.resolve(process.env.APP_ROOT)
+    : '';
   const candidatePaths = app.isPackaged
-    ? [path.join(process.resourcesPath, 'builtin-skills')]
+    ? [
+        path.join(process.resourcesPath, 'builtin-skills'),
+        appPath ? path.join(path.dirname(appPath), 'builtin-skills') : '',
+        appRoot ? path.join(appRoot, 'builtin-skills') : '',
+        appRoot ? path.join(appRoot, 'skills') : ''
+      ]
     : [
         path.join(process.cwd(), 'skills'),
-        path.join(app.getAppPath(), 'skills'),
-        process.env.APP_ROOT ? path.resolve(process.env.APP_ROOT, '..', 'skills') : ''
+        appPath ? path.join(appPath, 'skills') : '',
+        appRoot ? path.join(appRoot, 'skills') : '',
+        appPath ? path.join(appPath, '..', 'skills') : '',
+        appRoot ? path.join(appRoot, '..', 'skills') : ''
       ].filter(Boolean);
 
   for (const candidatePath of candidatePaths) {
-    if (candidatePath && fs.existsSync(candidatePath)) {
-      return candidatePath;
+    if (!candidatePath) {
+      continue;
+    }
+
+    const resolvedPath = path.resolve(candidatePath);
+    try {
+      if (fs.existsSync(resolvedPath) && fs.statSync(resolvedPath).isDirectory()) {
+        return resolvedPath;
+      }
+    } catch {
+      continue;
     }
   }
 
@@ -60,7 +80,7 @@ function resolveBuiltinSkillsSourcePath() {
 }
 
 export async function seedBuiltinSkills(appPaths: AppPaths) {
-  const sourceDir = resolveBuiltinSkillsSourcePath();
+  const sourceDir = getBuiltinSkillsSourcePath();
   if (!sourceDir) {
     console.warn('[Skills] Builtin skills source directory not found, skipping seed.');
     return 0;

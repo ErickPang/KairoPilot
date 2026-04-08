@@ -913,6 +913,71 @@ textarea.form-control {
   padding: 0.65rem 0.75rem;
 }
 
+.permission-overview-card,
+.permission-category-panel {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: rgba(255, 255, 255, 0.72);
+  padding: 0.9rem;
+}
+
+.permission-overview-card {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.permission-overview-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.permission-overview-title-row,
+.permission-category-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.permission-overview-title,
+.permission-category-title {
+  color: var(--foreground);
+  font-size: 0.98rem;
+  font-weight: 700;
+}
+
+.permission-overview-help,
+.permission-category-help {
+  margin-top: 0.35rem;
+}
+
+.permission-overview-note {
+  margin-top: 0.7rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--muted-fg);
+  font-size: 0.82rem;
+}
+
+.permission-overview-actions {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+}
+
+.permission-category-panel {
+  margin-bottom: 1rem;
+}
+
+.permission-inline-card,
+.permission-command-panel {
+  margin-top: 0.75rem;
+}
+
 .permission-card-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
@@ -1023,6 +1088,11 @@ textarea.form-control {
   box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.1);
 }
 
+.shell-command-item.disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .shell-command-content {
   min-width: 0;
 }
@@ -1045,6 +1115,21 @@ textarea.form-control {
   color: var(--muted-fg);
   font-size: 0.82rem;
   line-height: 1.4;
+}
+
+@media (max-width: 900px) {
+  .permission-overview-card {
+    flex-direction: column;
+  }
+
+  .permission-overview-actions {
+    width: 100%;
+    justify-content: stretch;
+  }
+
+  .permission-overview-actions .btn {
+    width: 100%;
+  }
 }
 
 .permission-textarea {

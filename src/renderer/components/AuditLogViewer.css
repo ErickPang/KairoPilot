@@ -10,7 +10,8 @@
   box-shadow: 0 4px 12px var(--ring);
 }
 
-.audit-viewer-loading, .audit-viewer-empty {
+.audit-viewer-loading,
+.audit-viewer-empty {
   text-align: center;
   padding: 2.75rem;
   color: var(--muted-fg);
@@ -21,7 +22,7 @@
   padding: 1.35rem;
   border-radius: 50%;
   color: var(--primary);
-  box-shadow: inset 0 2px 4px rgba(255,255,255,0.8), 0 4px 12px var(--ring);
+  box-shadow: inset 0 2px 4px rgba(255, 255, 255, 0.8), 0 4px 12px var(--ring);
   display: inline-block;
   margin-bottom: 1rem;
 }
@@ -29,96 +30,299 @@
 .audit-viewer-empty-text {
   font-weight: 600;
   color: var(--foreground);
-  font-size: 1.25rem;
+  font-size: 1.1rem;
+}
+
+.audit-back-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border: none;
+  background: transparent;
+  color: var(--primary);
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+  margin-bottom: 0.75rem;
+}
+
+.audit-page-content {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.config-card.audit-list-shell,
+.config-card.audit-detail-summary-card,
+.config-card.audit-step-timeline-card,
+.config-card.audit-log-detail-card,
+.config-card.audit-viewer-empty-state {
+  width: 100%;
+  min-width: 0;
+  margin-bottom: 0;
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  align-items: stretch;
+  gap: 1rem;
+}
+
+.config-card.audit-list-shell {
+  flex: 1;
+  min-height: calc(100vh - 220px);
+}
+
+.audit-list-toolbar {
+  display: grid;
+  grid-template-columns: minmax(320px, 1.7fr) minmax(220px, 0.9fr) auto;
+  gap: 0.75rem;
+  align-items: center;
+  width: 100%;
+}
+
+.audit-log-toolbar {
+  grid-template-columns: minmax(280px, 1.5fr) repeat(3, minmax(160px, 0.7fr)) auto;
+}
+
+.audit-list-meta,
+.audit-detail-section-header,
+.audit-log-header,
+.audit-detail-summary-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.audit-list-meta {
+  justify-content: flex-end;
+}
+
+.audit-list-body {
+  flex: 1;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+}
+
+.audit-filter-summary,
+.audit-pagination-info {
+  font-size: 0.85rem;
+  color: var(--muted-fg);
+}
+
+.audit-run-record-list,
+.audit-log-list,
+.audit-related-list,
+.audit-step-detail-shell {
+  display: grid;
+  gap: 0.75rem;
+  width: 100%;
+}
+
+.audit-run-record-card,
+.audit-step-item {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--card);
+  padding: 1rem;
+  display: grid;
+  gap: 0.75rem;
+  text-align: left;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.audit-run-record-card {
+  cursor: pointer;
+}
+
+.audit-run-record-card:hover,
+.audit-step-item:hover,
+.audit-step-item.active {
+  border-color: var(--primary);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+  transform: translateY(-1px);
+}
+
+.audit-run-record-header,
+.audit-step-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.audit-run-record-heading,
+.audit-step-item-main,
+.audit-step-item-side {
+  display: grid;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.audit-run-record-badges,
+.audit-detail-actions,
+.audit-pagination-actions,
+.audit-filter-pill-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.audit-run-record-title,
+.audit-detail-summary-title,
+.audit-log-tool-name,
+.audit-related-title,
+.audit-step-item-title {
+  font-weight: 700;
+  color: var(--foreground);
+}
+
+.audit-run-record-subtitle,
+.audit-run-record-meta,
+.audit-log-timestamp,
+.audit-log-reference,
+.audit-summary-label,
+.audit-step-item-label {
+  color: var(--muted-fg);
+  font-size: 0.82rem;
+}
+
+.audit-run-record-subtitle,
+.audit-run-record-meta {
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.audit-run-record-meta,
+.audit-log-reference {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.audit-detail-layout {
+  display: grid;
+  gap: 0.75rem;
+  width: 100%;
+}
+
+.audit-detail-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 0.75rem;
+}
+
+.audit-detail-stat,
+.audit-detail-block,
+.audit-related-card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.02);
+  padding: 0.9rem;
+}
+
+.audit-detail-stat-value {
+  color: var(--foreground);
+  font-size: 1rem;
+  font-weight: 700;
+  margin-top: 0.25rem;
+}
+
+.audit-detail-content-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 0.75rem;
+}
+
+.audit-step-timeline {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.audit-step-item-label,
+.audit-log-section-title,
+.audit-summary-label {
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 600;
+}
+
+.audit-step-item-side {
+  justify-items: end;
+}
+
+.audit-step-retry-link,
+.audit-reference-button {
+  border: none;
+  background: transparent;
+  color: var(--primary);
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+}
+
+.audit-filter-pill {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--muted-fg);
+  padding: 0.35rem 0.7rem;
+  cursor: pointer;
+}
+
+.audit-filter-pill.active {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: var(--primary-muted);
+}
+
+.audit-control-button {
+  min-height: 40px;
+  justify-content: center;
+  border-radius: 999px;
+  padding-left: 1rem;
+  padding-right: 1rem;
+  white-space: nowrap;
 }
 
 .audit-log-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-  max-height: calc(100vh - 200px);
+  max-height: calc(100vh - 240px);
   overflow-y: auto;
   padding-right: 0.35rem;
 }
 
-.audit-filter-panel {
-  display: grid;
-  grid-template-columns: minmax(220px, 1fr) repeat(3, minmax(140px, 180px)) auto;
-  gap: 0.625rem;
-  align-items: center;
-  margin-bottom: 0.625rem;
-}
-
-.audit-filter-group {
-  min-width: 0;
-}
-
-.audit-filter-summary {
-  font-size: 0.85rem;
-  color: var(--muted-fg);
-  margin-bottom: 0.625rem;
-}
-
-.audit-summary-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 0.625rem;
-  margin-bottom: 0.625rem;
-}
-
-.audit-summary-card {
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-  align-items: flex-start;
-}
-
-.audit-summary-label {
-  font-size: 0.8rem;
-  font-weight: 600;
-  color: var(--muted-fg);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-.audit-summary-value {
-  font-size: 1.8rem;
-  font-weight: 800;
-  color: var(--foreground);
-}
-
-/* Custom Scrollbar for Audit Log List */
 .audit-log-list::-webkit-scrollbar {
   width: 6px;
 }
+
 .audit-log-list::-webkit-scrollbar-track {
   background: transparent;
 }
+
 .audit-log-list::-webkit-scrollbar-thumb {
   background: var(--border);
   border-radius: 4px;
 }
+
 .audit-log-list::-webkit-scrollbar-thumb:hover {
   background: var(--muted-fg);
 }
 
 .audit-log-card {
-  flex-direction: column;
-  align-items: stretch;
-  gap: 0.75rem;
   margin: 0;
-  transition: all 0.2s ease;
+  display: grid;
+  gap: 0.75rem;
 }
 
 .audit-log-card.is-error {
-  background: linear-gradient(135deg, rgba(254,242,242,0.6) 0%, rgba(254,242,242,0.9) 100%);
+  background: linear-gradient(135deg, rgba(254, 242, 242, 0.6) 0%, rgba(254, 242, 242, 0.9) 100%);
   border-color: rgba(239, 68, 68, 0.2);
-}
-
-.audit-log-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
 }
 
 .audit-log-tool-info {
@@ -146,18 +350,6 @@
   color: var(--destructive);
 }
 
-.audit-log-tool-name {
-  font-weight: 600;
-  font-size: 1.05rem;
-  color: var(--foreground);
-}
-
-.audit-log-timestamp {
-  color: var(--muted-fg);
-  font-size: 0.8rem;
-  margin-top: 0.2rem;
-}
-
 .audit-log-badge {
   padding: 0.4rem 0.75rem;
 }
@@ -172,8 +364,13 @@
   color: var(--success);
 }
 
+.audit-log-badge.is-warning {
+  background: rgba(245, 158, 11, 0.12);
+  color: #b45309;
+}
+
 .audit-log-details {
-  border-radius: 8px;
+  border-radius: 10px;
   border: 1px solid;
   padding: 1rem;
 }
@@ -190,25 +387,24 @@
 
 .audit-log-section-title {
   font-size: 0.75rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
   color: var(--muted-fg);
   margin-bottom: 0.5rem;
 }
 
-.audit-log-args {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 0.85rem;
-  color: var(--foreground);
+.audit-log-args,
+.audit-trace-pre,
+.audit-log-error-text {
+  margin: 0;
   white-space: pre-wrap;
   word-break: break-word;
-  max-height: 200px;
-  overflow-y: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  color: var(--foreground);
+  font-size: 0.84rem;
 }
 
-.audit-log-tags-container {
-  margin-top: 1rem;
+.audit-log-tags-container,
+.audit-log-error-container {
+  margin-top: 0.9rem;
 }
 
 .audit-log-tags {
@@ -224,25 +420,25 @@
   padding: 0.2rem 0.5rem;
 }
 
-.audit-log-error-container {
-  margin-top: 1rem;
-  padding-top: 1rem;
-  border-top: 1px dashed rgba(239, 68, 68, 0.3);
-  color: var(--destructive);
-}
-
 .audit-log-error-title {
   font-size: 0.75rem;
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
   margin-bottom: 0.5rem;
+  color: var(--destructive);
 }
 
-.audit-log-error-text {
-  font-size: 0.9rem;
-  white-space: pre-wrap;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+.audit-related-empty,
+.audit-run-empty {
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  padding: 1rem;
+  text-align: center;
+  color: var(--muted-fg);
+}
+
+.audit-viewer-empty-state {
+  justify-content: center;
+  min-height: 320px;
 }
 
 .audit-pagination {
@@ -250,17 +446,28 @@
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  margin-top: 1rem;
   flex-wrap: wrap;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+  margin-top: auto;
 }
 
-.audit-pagination-info {
-  color: var(--muted-fg);
-  font-size: 0.9rem;
-}
+@media (max-width: 980px) {
+  .audit-list-toolbar,
+  .audit-log-toolbar {
+    grid-template-columns: 1fr;
+  }
 
-.audit-pagination-actions {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
+  .audit-log-list {
+    max-height: none;
+  }
+
+  .audit-run-record-header,
+  .audit-step-item {
+    flex-direction: column;
+  }
+
+  .audit-step-item-side {
+    justify-items: start;
+  }
 }
