@@ -111,7 +111,7 @@ export async function findSkillRecord(params: {
   agentId?: string
   loadAllSkills: () => Promise<void>
   loadAgentSkills: (agentId: string) => Promise<void>
-  publicSkillIndex: Map<string, SkillRecord>
+  getPublicSkillIndex: () => Map<string, SkillRecord>
   getAgentIndex: (agentId: string) => Map<string, SkillRecord>
 }) {
   const normalizedSkillName = params.skillName.trim()
@@ -128,7 +128,7 @@ export async function findSkillRecord(params: {
   }
 
   await params.loadAllSkills()
-  return findSkillInIndex(params.publicSkillIndex, normalizedSkillName)
+  return findSkillInIndex(params.getPublicSkillIndex(), normalizedSkillName)
 }
 
 export async function resolveSkillResourcePath(skill: SkillRecord, resourcePath: string) {

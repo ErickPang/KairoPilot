@@ -285,6 +285,17 @@ export function computeSkillCatalogUpdate(
   };
 }
 
+export function buildAvailableSkillsPromptSummary(
+  snapshot: SkillCatalogSnapshot | undefined,
+  maxChars: number = 2200
+) {
+  if (!snapshot || !snapshot.fullSummary.trim() || maxChars <= 0) {
+    return '';
+  }
+
+  return trimToMaxChars(snapshot.fullSummary, maxChars);
+}
+
 export function createToolCatalogSnapshot(
   toolNames: string[],
   maxChars: number = 1800

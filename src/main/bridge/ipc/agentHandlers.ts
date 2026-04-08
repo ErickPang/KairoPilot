@@ -58,8 +58,8 @@ function registerAgentHandlers() {
     try {
       const config = await resolveAgentConfig(activeAgentId);
       agent = await ensureAgentRuntime(config, event.sender);
-    } catch {
-      return { success: false, error: 'Agent not initialized. Please configure settings first.' };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Agent not initialized. Please configure settings first.' };
     }
 
     if (!agent) {
@@ -269,8 +269,8 @@ function registerAgentHandlers() {
     try {
       const config = await resolveAgentConfig(activeAgentId);
       agent = await ensureAgentRuntime(config, event.sender);
-    } catch {
-      return { error: 'Agent not initialized. Please configure settings first.' };
+    } catch (error) {
+      return { error: error instanceof Error ? error.message : 'Agent not initialized. Please configure settings first.' };
     }
 
     if (!agent) {

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, afterEach } from 'vitest';
 import type { ChatMessage } from '../llm/types';
 import {
+  buildAvailableSkillsPromptSummary,
   computeActiveSkillsUpdate,
   computeSkillCatalogUpdate,
   computeToolCatalogUpdate,
@@ -111,6 +112,23 @@ describe('runtimeHelpers', () => {
       fingerprint: 'v1',
       announcedSkillIds: ['alpha']
     });
+  });
+
+  it('构造给模型的可用技能摘要时始终返回完整目录', () => {
+    const summary = buildAvailableSkillsPromptSummary({
+      fingerprint: 'v1',
+      fullSummary: '- alpha: first skill\n- beta: second skill',
+      entries: [
+        { id: 'alpha', summary: '- alpha: first skill' },
+        { id: 'beta', summary: '- beta: second skill' }
+      ]
+    });
+
+    expect(summary).toBe('- alpha: first skill - beta: second skill');
+  });
+
+  it('构造给模型的可用技能摘要时在缺少快照时返回空串', () => {
+    expect(buildAvailableSkillsPromptSummary(undefined)).toBe('');
   });
 
   it('技能目录变化时仅注入新增与移除信息', () => {

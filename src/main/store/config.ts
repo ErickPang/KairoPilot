@@ -18,6 +18,7 @@ import {
   type ProviderType,
   createDefaultAgentPermissions
 } from '../../shared/contracts';
+import { resolveDefaultBaseUrl } from '../core/llm/provider';
 
 export type {
   AgentConfig,
@@ -360,7 +361,7 @@ function getConfigPath(): string {
   return path.join(app.getPath('userData'), 'kairopilot.json');
 }
 
-const PROVIDER_TYPES: ProviderType[] = ['openai', 'ollama', 'anthropic', 'deepseek', 'zhipu', 'kimi', 'qianwen', 'custom'];
+const PROVIDER_TYPES: ProviderType[] = ['openai', 'openrouter', 'ollama', 'anthropic', 'deepseek', 'zhipu', 'kimi', 'qianwen', 'custom'];
 
 function resolveProviderType(value: unknown, providerKey: string): ProviderType {
   if (typeof value === 'string' && PROVIDER_TYPES.includes(value as ProviderType)) {
@@ -378,6 +379,7 @@ function isValidProviderKey(value: string): boolean {
 }
 
 function normalizeProvider(provider: Partial<ProviderConfig> & { model?: unknown }, fallbackProviderKey: string): ProviderConfig {
+  const resolvedProviderType = resolveProviderType(provider.provider, fallbackProviderKey);
   const rawModel = provider.model;
   const rawModelObject = rawModel && typeof rawModel === 'object' ? rawModel as { list?: unknown[] } : undefined;
   const rawModelList = Array.isArray(rawModel)
@@ -391,8 +393,8 @@ function normalizeProvider(provider: Partial<ProviderConfig> & { model?: unknown
     }));
   const finalModelList = modelList.length > 0 ? modelList : [{ id: 'gpt-4o', name: 'gpt-4o' }];
   return {
-    provider: resolveProviderType(provider.provider, fallbackProviderKey),
-    baseUrl: provider.baseUrl || 'https://api.openai.com/v1',
+    provider: resolvedProviderType,
+    baseUrl: provider.baseUrl || resolveDefaultBaseUrl(resolvedProviderType) || 'https://api.openai.com/v1',
     apiKey: provider.apiKey || '',
     model: finalModelList
   };

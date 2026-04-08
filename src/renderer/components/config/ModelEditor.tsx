@@ -18,6 +18,7 @@ interface ModelEditorProps {
 
 const PROVIDER_DEFAULT_BASE_URLS: Partial<Record<ModelConfig['provider'], string>> = {
   openai: 'https://api.openai.com/v1',
+  openrouter: 'https://openrouter.ai/api/v1',
   deepseek: 'https://api.deepseek.com/v1',
   zhipu: 'https://open.bigmodel.cn/api/paas/v4',
   kimi: 'https://api.moonshot.cn/v1',
@@ -128,6 +129,7 @@ export const ModelEditor = memo(function ModelEditor({
 
   const providerOptions: SelectOption[] = [
     { value: 'openai', label: 'OpenAI' },
+    { value: 'openrouter', label: 'OpenRouter' },
     { value: 'anthropic', label: 'Anthropic' },
     { value: 'deepseek', label: 'DeepSeek' },
     { value: 'zhipu', label: '智谱 (Zhipu)' },

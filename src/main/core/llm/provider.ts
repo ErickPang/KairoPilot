@@ -15,6 +15,7 @@ import type {
 
 const OPENAI_COMPATIBLE_PROVIDERS = new Set<ProviderType>([
   'openai',
+  'openrouter',
   'ollama',
   'deepseek',
   'zhipu',
@@ -93,6 +94,8 @@ export function resolveDefaultBaseUrl(provider: ProviderType): string | undefine
   switch (provider) {
     case 'anthropic':
       return 'https://api.anthropic.com/v1';
+    case 'openrouter':
+      return 'https://openrouter.ai/api/v1';
     case 'ollama':
       return 'http://localhost:11434/v1';
     case 'deepseek':
@@ -115,14 +118,69 @@ function buildProviderError(provider: ProviderType): Error {
   return new Error(`Provider "${provider}" 尚未接入原生适配器。当前阶段仅完成 OpenAI-compatible 抽象收敛，请配置兼容端点或后续补充 native adapter。`);
 }
 
-function buildProviderNotes(config: LLMConfig, provider: LLMProvider): string | undefined {
-  if (provider.adapter.id === 'native-placeholder') {
+function resolveOpenAICompatibleApiKey(provider: ProviderType, apiKey: string | undefined): string {
+  const trimmedApiKey = apiKey?.trim() || '';
+
+  if (provider === 'ollama') {
+    return trimmedApiKey || 'ollama';
+  }
+
+  if (!trimmedApiKey) {
+    throw new Error(`Provider "${provider}" 缺少 API Key，请在模型配置中填写后再试。`);
+  }
+
+  return trimmedApiKey;
+}
+
+function normalizeOpenAICompatibleError(provider: ProviderType, action: 'chat' | 'stream' | 'models', error: unknown): Error {
+  const message = error instanceof Error ? error.message : 'Unknown error';
+
+  if (provider === 'openrouter' && /401\s+Missing Authentication header/i.test(message)) {
+    const actionLabel = action === 'models' ? '获取模型列表' : '发起对话';
+    return new Error(`OpenRouter ${actionLabel}失败：服务端返回 401 Missing Authentication header。当前配置中的 API Key 已被提交请求，但 OpenRouter 未接受该密钥。请确认使用的是 OpenRouter 控制台生成并可用于聊天接口的密钥。注意：OpenRouter 的 /models 接口可匿名访问，因此“获取模型”成功并不能证明 API Key 可用于对话。`);
+  }
+
+  if (provider === 'openrouter') {
+    const actionLabel = action === 'models' ? '获取模型列表' : '发起对话';
+    return new Error(`OpenRouter ${actionLabel}失败：${message}`);
+  }
+
+  return new Error(`${provider} ${action === 'models' ? '获取模型列表' : '请求'}失败：${message}`);
+}
+
+function buildProviderNotesFromDescriptor(config: LLMConfig, descriptor: LLMProviderAdapterDescriptor): string | undefined {
+  if (descriptor.id === 'native-placeholder') {
     return buildProviderError(config.provider).message;
   }
   if (config.provider === 'custom') {
     return '当前作为 OpenAI-compatible 自定义端点接入。'
   }
   return undefined;
+}
+
+function resolveProviderCapabilities(config: LLMConfig): {
+  descriptor: LLMProviderAdapterDescriptor;
+  capabilities: LLMProviderCapabilities;
+} {
+  const descriptor = providerRegistry.describe(config) || NATIVE_PLACEHOLDER_DESCRIPTOR;
+
+  switch (descriptor.id) {
+    case 'openai-compatible':
+      return {
+        descriptor,
+        capabilities: createOpenAICompatibleCapabilities()
+      };
+    case 'anthropic-native':
+      return {
+        descriptor,
+        capabilities: createAnthropicCapabilities()
+      };
+    default:
+      return {
+        descriptor,
+        capabilities: createNativePlaceholderCapabilities()
+      };
+  }
 }
 
 type AnthropicRequestMessage = {
@@ -153,22 +211,22 @@ export class OpenAICompatibleProvider implements LLMProvider {
 
   private readonly client: OpenAI;
   private readonly model: string;
-  private readonly providerName: string;
 
   constructor(config: LLMConfig) {
     const normalizedBaseUrl = config.baseUrl ? normalizeBaseUrl(config.baseUrl) : resolveDefaultBaseUrl(config.provider);
     if (!normalizedBaseUrl) {
       throw buildProviderError(config.provider);
     }
+    const resolvedApiKey = resolveOpenAICompatibleApiKey(config.provider, config.apiKey);
 
     this.config = {
       ...config,
+      apiKey: resolvedApiKey,
       baseUrl: normalizedBaseUrl
     };
-    this.providerName = config.provider;
     this.model = config.model;
     this.client = new OpenAI({
-      apiKey: config.apiKey || 'ollama',
+      apiKey: resolvedApiKey,
       baseURL: normalizedBaseUrl,
       dangerouslyAllowBrowser: true
     });
@@ -179,42 +237,46 @@ export class OpenAICompatibleProvider implements LLMProvider {
   }
 
   async complete(request: LLMRequest): Promise<LLMResponse> {
-    const response = await this.client.chat.completions.create({
-      model: this.model,
-      messages: this.formatMessages(request.messages) as unknown as Parameters<typeof this.client.chat.completions.create>[0]['messages'],
-      tools: this.formatTools(request.tools),
-      temperature: request.generationConfig?.temperature,
-      top_p: request.generationConfig?.topP,
-      stop: request.generationConfig?.stop,
-      max_tokens: request.generationConfig?.maxOutputTokens
-    });
+    try {
+      const response = await this.client.chat.completions.create({
+        model: this.model,
+        messages: this.formatMessages(request.messages) as unknown as Parameters<typeof this.client.chat.completions.create>[0]['messages'],
+        tools: this.formatTools(request.tools),
+        temperature: request.generationConfig?.temperature,
+        top_p: request.generationConfig?.topP,
+        stop: request.generationConfig?.stop,
+        max_tokens: request.generationConfig?.maxOutputTokens
+      });
 
-    const choice = Array.isArray(response.choices) ? response.choices[0] : undefined;
-    const message = choice?.message;
-    if (!message) {
-      throw new Error('Invalid OpenAI-compatible chat response: missing choices[0].message');
+      const choice = Array.isArray(response.choices) ? response.choices[0] : undefined;
+      const message = choice?.message;
+      if (!message) {
+        throw new Error('Invalid OpenAI-compatible chat response: missing choices[0].message');
+      }
+
+      const normalizedMessage: ChatMessage = {
+        role: message.role || 'assistant',
+        content: typeof message.content === 'string' ? message.content : '',
+        tool_calls: Array.isArray(message.tool_calls) ? message.tool_calls as unknown as Record<string, unknown>[] : undefined,
+        model: this.model,
+        usage: response.usage ? {
+          prompt_tokens: response.usage.prompt_tokens,
+          completion_tokens: response.usage.completion_tokens,
+          total_tokens: response.usage.total_tokens
+        } : undefined
+      };
+
+      return {
+        message: normalizedMessage,
+        provider: this.config.provider,
+        model: this.model,
+        usage: normalizedMessage.usage,
+        finishReason: choice?.finish_reason || undefined,
+        raw: response
+      };
+    } catch (error) {
+      throw normalizeOpenAICompatibleError(this.config.provider, 'chat', error);
     }
-
-    const normalizedMessage: ChatMessage = {
-      role: message.role || 'assistant',
-      content: typeof message.content === 'string' ? message.content : '',
-      tool_calls: Array.isArray(message.tool_calls) ? message.tool_calls as unknown as Record<string, unknown>[] : undefined,
-      model: this.model,
-      usage: response.usage ? {
-        prompt_tokens: response.usage.prompt_tokens,
-        completion_tokens: response.usage.completion_tokens,
-        total_tokens: response.usage.total_tokens
-      } : undefined
-    };
-
-    return {
-      message: normalizedMessage,
-      provider: this.config.provider,
-      model: this.model,
-      usage: normalizedMessage.usage,
-      finishReason: choice?.finish_reason || undefined,
-      raw: response
-    };
   }
 
   async chat(messages: ChatMessage[], tools?: ToolDefinition[]): Promise<ChatMessage> {
@@ -281,11 +343,11 @@ export class OpenAICompatibleProvider implements LLMProvider {
     } catch (error) {
       onEvent({
         type: 'failed',
-        error: error instanceof Error ? error.message : 'Unknown stream error',
+        error: normalizeOpenAICompatibleError(this.config.provider, 'stream', error).message,
         provider: this.config.provider,
         model: this.model
       });
-      throw error;
+      throw normalizeOpenAICompatibleError(this.config.provider, 'stream', error);
     }
   }
 
@@ -296,8 +358,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
       });
       return response.data.map((model) => model.id);
     } catch (error) {
-      console.warn(`[${this.providerName.toUpperCase()} Provider] Failed to list models: ${error instanceof Error ? error.message : 'Unknown error'}`);
-      return [];
+      throw normalizeOpenAICompatibleError(this.config.provider, 'models', error);
     }
   }
 
@@ -834,13 +895,12 @@ export function createLLMProvider(config: LLMConfig): LLMProvider {
 }
 
 export function describeProvider(config: LLMConfig): ProviderCapabilitySnapshot {
-  const provider = createLLMProvider(config);
-  const capabilities = provider.getCapabilities();
+  const { descriptor, capabilities } = resolveProviderCapabilities(config);
   return {
     provider: config.provider,
-    adapterId: provider.adapter.id,
-    adapterName: provider.adapter.displayName,
-    protocol: provider.adapter.protocol,
+    adapterId: descriptor.id,
+    adapterName: descriptor.displayName,
+    protocol: descriptor.protocol,
     supported: capabilities.chat,
     defaultBaseUrl: resolveDefaultBaseUrl(config.provider),
     capabilities: {
@@ -851,7 +911,7 @@ export function describeProvider(config: LLMConfig): ProviderCapabilitySnapshot 
       structuredOutput: capabilities.structuredOutput,
       multimodalInput: capabilities.multimodalInput
     },
-    notes: buildProviderNotes(config, provider)
+    notes: buildProviderNotesFromDescriptor(config, descriptor)
   };
 }
 

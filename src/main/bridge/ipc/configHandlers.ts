@@ -48,18 +48,13 @@ function registerConfigHandlers() {
   });
 
   ipcMain.handle(KAIRO_INVOKE.llmListModels, async (_, config) => {
-    try {
-      const llm = createLLMProvider({
-        provider: config.provider || 'openai',
-        apiKey: config.apiKey,
-        baseUrl: config.baseUrl,
-        model: 'dummy'
-      });
-      return llm.listModels ? await llm.listModels() : [];
-    } catch (error) {
-      console.warn(`[Handlers] Failed to list models: ${error instanceof Error ? error.message : 'Unknown error'}`);
-      return [];
-    }
+    const llm = createLLMProvider({
+      provider: config.provider || 'openai',
+      apiKey: config.apiKey,
+      baseUrl: config.baseUrl,
+      model: 'dummy'
+    });
+    return llm.listModels ? await llm.listModels() : [];
   });
 
   ipcMain.handle(KAIRO_INVOKE.llmDescribeProvider, async (_, config) => {

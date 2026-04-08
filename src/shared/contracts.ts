@@ -1,4 +1,4 @@
-export type ProviderType = 'openai' | 'ollama' | 'anthropic' | 'deepseek' | 'zhipu' | 'kimi' | 'qianwen' | 'custom'
+export type ProviderType = 'openai' | 'openrouter' | 'ollama' | 'anthropic' | 'deepseek' | 'zhipu' | 'kimi' | 'qianwen' | 'custom'
 
 export interface ModelOption {
   id: string

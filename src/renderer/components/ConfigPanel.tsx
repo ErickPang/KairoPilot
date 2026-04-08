@@ -71,6 +71,7 @@ export function ConfigPanel({
   const handleSaveModel = useCallback(() => {
     if (editingModel) {
       const normalizedName = editingModel.name.trim();
+      const normalizedApiKey = editingModel.apiKey.trim();
       if (!/^[a-zA-Z][a-zA-Z0-9_-]*$/.test(normalizedName)) {
         alert('模型名称只能使用英文、数字、下划线或短横线，且必须以英文开头');
         return;
@@ -79,12 +80,16 @@ export function ConfigPanel({
         alert('请先选择提供商');
         return;
       }
+      if (editingModel.provider !== 'ollama' && !normalizedApiKey) {
+        alert('请先填写 API Key');
+        return;
+      }
       const selectedModelIds = (editingModel.availableModels || []).map(item => item.id).filter(Boolean);
       if (selectedModelIds.length === 0 && !editingModel.model.trim()) {
         alert('请至少选择一个模型ID');
         return;
       }
-      onSaveModel({ ...editingModel, id: normalizedName, name: normalizedName });
+      onSaveModel({ ...editingModel, id: normalizedName, name: normalizedName, apiKey: normalizedApiKey });
       setView('list');
       setEditingModel(null);
     }

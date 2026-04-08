@@ -133,14 +133,14 @@ description: helper
       agentId: 'agent-1',
       loadAllSkills,
       loadAgentSkills,
-      publicSkillIndex: new Map([[publicSkill.id, publicSkill]]),
+      getPublicSkillIndex: () => new Map([[publicSkill.id, publicSkill]]),
       getAgentIndex
     })
     const resolvedPublicSkill = await findSkillRecord({
       skillName: 'Release Helper',
       loadAllSkills,
       loadAgentSkills,
-      publicSkillIndex: new Map([[publicSkill.id, publicSkill]]),
+      getPublicSkillIndex: () => new Map([[publicSkill.id, publicSkill]]),
       getAgentIndex: () => new Map()
     })
 

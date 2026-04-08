@@ -50,6 +50,7 @@ import {
   scanSkillsDirectory,
   toSkillSummary
 } from './skillIndexUtils'
+import { getBuiltinSkillsSourcePath } from '../../services/appRuntime'
 
 interface PreparedSkillInstall {
   requestId: string
@@ -181,8 +182,24 @@ export class SkillsManager {
 
   async loadAllSkills() {
     await this.ensureSkillsDirectories()
-    const publicSkills = await scanSkillsDirectory(this.publicSkillsDir, 'public')
-    this.publicSkillIndex = new Map(publicSkills.map((skill) => [skill.id, skill]))
+    const mergedPublicSkills = new Map<string, SkillRecord>()
+    const builtinSkillsDir = getBuiltinSkillsSourcePath()
+    const publicSkillDirectories = [
+      this.publicSkillsDir,
+      builtinSkillsDir
+    ]
+      .filter((dirPath): dirPath is string => typeof dirPath === 'string' && dirPath.trim().length > 0)
+      .map((dirPath) => path.resolve(dirPath))
+      .filter((dirPath, index, directories) => directories.indexOf(dirPath) === index)
+
+    for (const skillsDir of publicSkillDirectories) {
+      const publicSkills = await scanSkillsDirectory(skillsDir, 'public')
+      for (const skill of publicSkills) {
+        mergedPublicSkills.set(skill.id, skill)
+      }
+    }
+
+    this.publicSkillIndex = mergedPublicSkills
   }
 
   async loadAgentSkills(agentId: string) {
@@ -395,7 +412,7 @@ export class SkillsManager {
       agentId,
       loadAllSkills: () => this.loadAllSkills(),
       loadAgentSkills: (resolvedAgentId) => this.loadAgentSkills(resolvedAgentId),
-      publicSkillIndex: this.publicSkillIndex,
+      getPublicSkillIndex: () => this.publicSkillIndex,
       getAgentIndex: (resolvedAgentId) => this.getAgentIndex(resolvedAgentId)
     })
     return skill?.metadata ?? null
@@ -407,7 +424,7 @@ export class SkillsManager {
       agentId,
       loadAllSkills: () => this.loadAllSkills(),
       loadAgentSkills: (resolvedAgentId) => this.loadAgentSkills(resolvedAgentId),
-      publicSkillIndex: this.publicSkillIndex,
+      getPublicSkillIndex: () => this.publicSkillIndex,
       getAgentIndex: (resolvedAgentId) => this.getAgentIndex(resolvedAgentId)
     })
     return skill?.content ?? null
@@ -419,7 +436,7 @@ export class SkillsManager {
       agentId,
       loadAllSkills: () => this.loadAllSkills(),
       loadAgentSkills: (resolvedAgentId) => this.loadAgentSkills(resolvedAgentId),
-      publicSkillIndex: this.publicSkillIndex,
+      getPublicSkillIndex: () => this.publicSkillIndex,
       getAgentIndex: (resolvedAgentId) => this.getAgentIndex(resolvedAgentId)
     })
     return skill?.skillDir ?? null
@@ -431,7 +448,7 @@ export class SkillsManager {
       agentId,
       loadAllSkills: () => this.loadAllSkills(),
       loadAgentSkills: (resolvedAgentId) => this.loadAgentSkills(resolvedAgentId),
-      publicSkillIndex: this.publicSkillIndex,
+      getPublicSkillIndex: () => this.publicSkillIndex,
       getAgentIndex: (resolvedAgentId) => this.getAgentIndex(resolvedAgentId)
     })
     if (!skill) {

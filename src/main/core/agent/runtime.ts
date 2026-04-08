@@ -31,6 +31,7 @@ import {
   RuntimeUpdate
 } from './runEngine';
 import {
+  buildAvailableSkillsPromptSummary,
   computeActiveSkillsUpdate,
   computeToolCatalogUpdate,
   computeSkillCatalogUpdate,
@@ -633,7 +634,7 @@ export class AgentRuntime {
     if (consumeRuntimeSupportSummary && update.nextState) {
       this.sessionSkillCatalogStates.set(sessionKey, update.nextState);
     }
-    return update.summary;
+    return buildAvailableSkillsPromptSummary(availableSkillsCatalog);
   }
 
   private resolveActiveSkillsSummary(

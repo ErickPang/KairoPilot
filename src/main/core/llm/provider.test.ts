@@ -66,6 +66,122 @@ describe('llm provider registry', () => {
     });
   });
 
+  it('describeProvider 在配置页预览阶段不要求 API Key', () => {
+    expect(describeProvider({
+      provider: 'openai',
+      apiKey: '',
+      model: 'gpt-4o-mini'
+    })).toEqual({
+      provider: 'openai',
+      adapterId: 'openai-compatible',
+      adapterName: 'OpenAI Compatible',
+      protocol: 'openai-compatible',
+      supported: true,
+      defaultBaseUrl: 'https://api.openai.com/v1',
+      capabilities: {
+        chat: true,
+        stream: true,
+        toolCalling: true,
+        modelListing: true,
+        structuredOutput: false,
+        multimodalInput: false
+      },
+      notes: undefined
+    });
+  });
+
+  it('将 OpenRouter 作为 OpenAI-compatible 提供商接入', () => {
+    const provider = createLLMProvider({
+      provider: 'openrouter',
+      apiKey: 'sk-or-v1-test-key',
+      model: 'openai/gpt-4o-mini'
+    });
+
+    expect(provider.adapter.id).toBe('openai-compatible');
+    expect(provider.config.baseUrl).toBe('https://openrouter.ai/api/v1');
+    expect(describeProvider({
+      provider: 'openrouter',
+      apiKey: 'sk-or-v1-test-key',
+      model: 'openai/gpt-4o-mini'
+    })).toEqual({
+      provider: 'openrouter',
+      adapterId: 'openai-compatible',
+      adapterName: 'OpenAI Compatible',
+      protocol: 'openai-compatible',
+      supported: true,
+      defaultBaseUrl: 'https://openrouter.ai/api/v1',
+      capabilities: {
+        chat: true,
+        stream: true,
+        toolCalling: true,
+        modelListing: true,
+        structuredOutput: false,
+        multimodalInput: false
+      },
+      notes: undefined
+    });
+  });
+
+  it('在远端 OpenAI-compatible provider 缺少 API Key 时直接报错', () => {
+    expect(() => createLLMProvider({
+      provider: 'openai',
+      apiKey: '',
+      model: 'gpt-4o-mini'
+    })).toThrow('缺少 API Key');
+  });
+
+  it('OpenRouter 在运行前仅校验 API Key 非空，不强依赖前缀格式', () => {
+    const provider = createLLMProvider({
+      provider: 'openrouter',
+      apiKey: 'sk-test-key',
+      model: 'openai/gpt-4o-mini'
+    });
+
+    expect(provider.config.apiKey).toBe('sk-test-key');
+  });
+
+  it('OpenRouter 对话鉴权失败时给出更明确的提示', async () => {
+    const provider = createLLMProvider({
+      provider: 'openrouter',
+      apiKey: 'sk-test-key',
+      model: 'qwen/qwen3.6-plus:free'
+    }) as unknown as {
+      complete: (request: { messages: Array<{ role: string; content: string }> }) => Promise<unknown>
+      client: {
+        chat: {
+          completions: {
+            create: () => Promise<never>
+          }
+        }
+      }
+    };
+
+    provider.client.chat.completions.create = vi.fn().mockRejectedValue(new Error('401 Missing Authentication header'));
+
+    await expect(provider.complete({
+      messages: [{ role: 'user', content: 'hi' }]
+    })).rejects.toThrow('OpenRouter 的 /models 接口可匿名访问');
+  });
+
+  it('获取模型列表失败时向上抛出真实错误，便于界面提示', async () => {
+    const provider = createLLMProvider({
+      provider: 'openrouter',
+      apiKey: 'sk-or-v1-test-key',
+      model: 'openai/gpt-4o-mini'
+    }) as unknown as {
+      listModels: () => Promise<string[]>
+      client: {
+        models: {
+          list: () => Promise<never>
+        }
+      }
+    };
+
+    provider.client.models.list = vi.fn().mockRejectedValue(new Error('401 Missing Authentication header'));
+
+    await expect(provider.listModels()).rejects.toThrow('OpenRouter 获取模型列表失败：服务端返回 401 Missing Authentication header');
+  });
+
   it('为 Anthropic 返回原生适配器与能力声明', () => {
     const provider = createLLMProvider({
       provider: 'anthropic',
@@ -87,6 +203,7 @@ describe('llm provider registry', () => {
 
   it('暴露默认 baseUrl 解析，便于 UI 自动填充', () => {
     expect(resolveDefaultBaseUrl('openai')).toBe('https://api.openai.com/v1');
+    expect(resolveDefaultBaseUrl('openrouter')).toBe('https://openrouter.ai/api/v1');
     expect(resolveDefaultBaseUrl('ollama')).toBe('http://localhost:11434/v1');
     expect(resolveDefaultBaseUrl('anthropic')).toBe('https://api.anthropic.com/v1');
   });
