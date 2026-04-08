@@ -2,7 +2,7 @@ import { app, protocol } from 'electron'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import fixPath from 'fix-path'
-import { bindAppLifecycle, bootstrapMainProcess } from './services/mainBootstrap'
+import { bindAppLifecycle, bootstrapMainProcess } from './bootstrap/appBootstrap'
 
 app.name = 'KairoPilot'
 app.setName('KairoPilot')

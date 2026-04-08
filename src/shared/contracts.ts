@@ -1,4 +1,4 @@
-export type ProviderType = 'openai' | 'ollama' | 'anthropic' | 'deepseek' | 'zhipu' | 'kimi' | 'qianwen' | 'custom'
+export type ProviderType = 'openai' | 'openrouter' | 'ollama' | 'anthropic' | 'deepseek' | 'zhipu' | 'kimi' | 'qianwen' | 'custom'
 
 export interface ModelOption {
   id: string
@@ -22,7 +22,48 @@ export interface ModelConfig {
   availableModels?: ModelOption[]
 }
 
+export type ProviderProtocol = 'openai-compatible' | 'native'
+
+export interface ProviderCapabilitySnapshot {
+  provider: ProviderType
+  adapterId: string
+  adapterName: string
+  protocol: ProviderProtocol
+  supported: boolean
+  defaultBaseUrl?: string
+  capabilities: {
+    chat: boolean
+    stream: boolean
+    toolCalling: boolean
+    modelListing: boolean
+    structuredOutput: boolean
+    multimodalInput: boolean
+  }
+  notes?: string
+}
+
+export type ExecutionProfile =
+  | 'chat_only'
+  | 'read_only_workspace'
+  | 'approved_execution'
+  | 'trusted_automation'
+
+export type RiskLevel = 'low' | 'medium' | 'high' | 'critical'
+
+export type ApprovalMode = 'never' | 'on_write' | 'on_external' | 'always'
+
+export type EnvironmentScope = 'workspace' | 'allowed_paths' | 'isolated_env'
+
+export type DataClass = 'public' | 'project' | 'sensitive'
+
 export interface AgentPermissionConfig {
+  executionProfile: ExecutionProfile
+  policy: {
+    approvalMode: ApprovalMode
+    environmentScope: EnvironmentScope
+    dataClass: DataClass
+    redactSensitiveOutput: boolean
+  }
   fileSystem: {
     read: boolean
     write: boolean
@@ -36,6 +77,43 @@ export interface AgentPermissionConfig {
     enabled: boolean
     allowedCommands: string[]
   }
+}
+
+export function applyExecutionProfileConstraints(permissions: AgentPermissionConfig): AgentPermissionConfig {
+  if (permissions.executionProfile === 'chat_only') {
+    return {
+      ...permissions,
+      fileSystem: {
+        ...permissions.fileSystem,
+        read: false,
+        write: false
+      },
+      network: {
+        ...permissions.network,
+        enabled: false
+      },
+      shell: {
+        ...permissions.shell,
+        enabled: false
+      }
+    }
+  }
+
+  if (permissions.executionProfile === 'read_only_workspace') {
+    return {
+      ...permissions,
+      fileSystem: {
+        ...permissions.fileSystem,
+        write: false
+      },
+      shell: {
+        ...permissions.shell,
+        enabled: false
+      }
+    }
+  }
+
+  return permissions
 }
 
 export interface AgentConfig {
@@ -58,6 +136,15 @@ export interface AgentStats {
   promptTokens: number
   completionTokens: number
   totalTokens: number
+  totalRuns: number
+  completedRuns: number
+  failedRuns: number
+  cancelledRuns: number
+  waitingApprovalRuns: number
+  approvalRequests: number
+  approvalApproved: number
+  toolCalls: number
+  successfulToolCalls: number
 }
 
 export interface AuditLogEntry {
@@ -68,6 +155,8 @@ export interface AuditLogEntry {
   result?: unknown
   error?: string
   sessionId?: string
+  runId?: string
+  stepId?: string
   policyTags?: string[]
 }
 
@@ -101,6 +190,8 @@ export interface AuditLogQuery {
   tool?: string
   tag?: string
   sessionId?: string
+  runId?: string
+  stepId?: string
   startTime?: number
   endTime?: number
 }
@@ -151,6 +242,177 @@ export interface MonitoringTokenAggregations {
 }
 
 export type MonitoringTokenQueryResult = PagedQueryResult<MonitoringTokenUsageItem, MonitoringTokenAggregations>
+
+export type RunStatus = 'running' | 'waiting_approval' | 'paused' | 'completed' | 'failed' | 'cancelled'
+
+export type RunStepType =
+  | 'plan'
+  | 'model_call'
+  | 'tool_call'
+  | 'approval_wait'
+  | 'tool_result'
+  | 'summary'
+  | 'complete'
+  | 'failed'
+
+export type RunStepStatus = 'pending' | 'running' | 'waiting_approval' | 'completed' | 'failed' | 'cancelled'
+
+export interface RunSummary {
+  id: string
+  sessionId: string
+  agentId: string
+  goal: string
+  userInput: string
+  status: RunStatus
+  finalResponse?: string
+  error?: string
+  waitingApprovalId?: string
+  createdAt: number
+  updatedAt: number
+  startedAt?: number
+  completedAt?: number
+}
+
+export type RunQueryStatus = 'all' | RunStatus
+
+export interface RunQuery {
+  page?: number
+  pageSize?: number
+  search?: string
+  status?: RunQueryStatus
+  sessionId?: string
+  agentId?: string
+}
+
+export interface RunQueryAggregations {
+  totalRuns: number
+  runningRuns: number
+  waitingApprovalRuns: number
+  pausedRuns: number
+  completedRuns: number
+  failedRuns: number
+  cancelledRuns: number
+  statuses: QueryFacet[]
+}
+
+export type RunQueryResult = PagedQueryResult<RunSummary, RunQueryAggregations>
+
+export interface RunStep {
+  id: string
+  runId: string
+  stepIndex: number
+  type: RunStepType
+  status: RunStepStatus
+  title: string
+  input?: unknown
+  output?: unknown
+  error?: string
+  metadata?: Record<string, unknown>
+  createdAt: number
+  updatedAt: number
+}
+
+export interface ApprovalRecord {
+  id: string
+  runId: string
+  stepId?: string
+  sessionId?: string
+  toolName: string
+  args: Record<string, unknown>
+  status: 'pending' | 'approved' | 'denied'
+  metadata?: Record<string, unknown>
+  createdAt: number
+  updatedAt: number
+  resolvedAt?: number
+}
+
+export interface ToolCallRecord {
+  id: string
+  runId: string
+  stepId?: string
+  toolName: string
+  args?: unknown
+  result?: unknown
+  error?: string
+  status: 'running' | 'waiting_approval' | 'success' | 'failed' | 'cancelled'
+  createdAt: number
+  updatedAt: number
+}
+
+export interface ContextAssemblyBudget {
+  maxContextChars: number
+  systemPromptChars: number
+  supportChars: number
+  recentHistoryChars: number
+  totalChars: number
+}
+
+export interface ContextAssemblyLayerSummary {
+  id: string
+  title: string
+  kind: 'system' | 'support' | 'history'
+  messageCount: number
+  charCount: number
+  summary: string
+}
+
+export interface RunContextSummary {
+  id: string
+  runId: string
+  sessionId?: string
+  stepId?: string
+  activeTaskSummary: string
+  activeSkillsSummary: string
+  availableSkillsSummary: string
+  availableToolsSummary: string
+  compactedHistorySummary: string
+  unresolvedApprovals: string
+  selectedToolResults: string
+  workspaceRetrieval: string
+  memoryDigest: string
+  layers: ContextAssemblyLayerSummary[]
+  recentMessageCount: number
+  omittedMessageCount: number
+  budget: ContextAssemblyBudget
+  createdAt: number
+}
+
+export interface RunTraceQuery {
+  runId: string
+  page?: number
+  pageSize?: number
+  includeToolCalls?: boolean
+  includeApprovalRecords?: boolean
+  includeAuditLogs?: boolean
+  includeContextSummary?: boolean
+}
+
+export interface RunTraceAggregations {
+  totalSteps: number
+  completedSteps: number
+  failedSteps: number
+  waitingApprovalSteps: number
+  toolCallCount: number
+  successfulToolCallCount: number
+  approvalCount: number
+  approvedCount: number
+  auditLogCount: number
+  auditErrorCount: number
+}
+
+export interface RunTrace {
+  run: RunSummary
+  steps: RunStep[]
+  total: number
+  page: number
+  pageSize: number
+  totalPages: number
+  aggregations: RunTraceAggregations
+  toolCalls: ToolCallRecord[]
+  approvals: ApprovalRecord[]
+  auditLogs: AuditLogEntry[]
+  latestContextSummary: RunContextSummary | null
+}
 
 export type SkillScope = 'public' | 'agent'
 
@@ -402,8 +664,37 @@ export const DEFAULT_SHELL_COMMANDS = [
   'curl'
 ] as const
 
+export function createDefaultPolicyConfig(executionProfile: ExecutionProfile = 'chat_only'): AgentPermissionConfig['policy'] {
+  if (executionProfile === 'trusted_automation') {
+    return {
+      approvalMode: 'never',
+      environmentScope: 'allowed_paths',
+      dataClass: 'project',
+      redactSensitiveOutput: true
+    }
+  }
+
+  if (executionProfile === 'approved_execution') {
+    return {
+      approvalMode: 'on_external',
+      environmentScope: 'allowed_paths',
+      dataClass: 'project',
+      redactSensitiveOutput: true
+    }
+  }
+
+  return {
+    approvalMode: 'always',
+    environmentScope: 'workspace',
+    dataClass: 'project',
+    redactSensitiveOutput: true
+  }
+}
+
 export function createDefaultAgentPermissions(): AgentPermissionConfig {
   return {
+    executionProfile: 'chat_only',
+    policy: createDefaultPolicyConfig('chat_only'),
     fileSystem: {
       read: false,
       write: false,

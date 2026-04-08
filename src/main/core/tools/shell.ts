@@ -2,14 +2,22 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { z } from 'zod';
 import { ToolDefinition } from '../llm/types';
+import { ShellExecutionPolicy } from '../security/permissions';
 
 const execFileAsync = promisify(execFile);
 const EXECUTION_MAX_BUFFER_BYTES = 1024 * 1024;
 const SHELL_CONTROL_PATTERN = /[|&;<>()$`\n\r]/;
+const INTERACTIVE_COMMANDS = new Set(['vim', 'vi', 'nano', 'top', 'less', 'more', 'man']);
+const INTERACTIVE_ARGS = new Set(['-i', '--interactive', '--watch']);
 
 export interface NormalizedExecuteCommandInput {
   command: string;
   args: string[];
+}
+
+export interface ExecuteCommandToolOptions {
+  cwd: string;
+  policy?: Partial<ShellExecutionPolicy>;
 }
 
 function tokenizeCommandLine(commandLine: string): string[] {
@@ -118,21 +126,48 @@ export function normalizeExecuteCommandInput(args: Record<string, unknown>): Nor
   };
 }
 
-export const createExecuteCommandTool = (cwd: string): ToolDefinition => ({
+export function isInteractiveShellCommand(command: string, args: string[]) {
+  if (INTERACTIVE_COMMANDS.has(command.trim())) {
+    return true;
+  }
+
+  return args.some((arg) => INTERACTIVE_ARGS.has(arg.trim()));
+}
+
+function getShellPolicy(options: ExecuteCommandToolOptions) {
+  return {
+    enabled: options.policy?.enabled ?? true,
+    requiresApproval: options.policy?.requiresApproval ?? true,
+    timeoutMs: options.policy?.timeoutMs ?? 60_000,
+    maxBufferBytes: options.policy?.maxBufferBytes ?? EXECUTION_MAX_BUFFER_BYTES,
+    allowInteractive: options.policy?.allowInteractive ?? false
+  } satisfies ShellExecutionPolicy;
+}
+
+export const createExecuteCommandTool = (options: string | ExecuteCommandToolOptions): ToolDefinition => ({
   name: 'execute_command',
-  description: `Execute a non-interactive command in the current workspace (${cwd}). Provide the binary in command and each argument separately in args. Do not use shell operators like &&, |, >, <, ; or command substitution.`,
+  description: `Execute a non-interactive command in the current workspace (${typeof options === 'string' ? options : options.cwd}). Provide the binary in command and each argument separately in args. Do not use shell operators like &&, |, >, <, ; or command substitution.`,
   parameters: z.object({
     command: z.string().describe('The executable or binary name only, for example "npm", "git", "node", or "python3".'),
     args: z.array(z.string()).default([]).describe('Arguments passed to the executable as a string array, for example ["run", "build"].')
   }),
   execute: async (args: Record<string, unknown>) => {
     try {
+      const resolvedOptions = typeof options === 'string' ? { cwd: options } : options;
+      const shellPolicy = getShellPolicy(resolvedOptions);
       const normalized = normalizeExecuteCommandInput(args);
-      console.log(`Executing command: ${normalized.command} ${normalized.args.join(' ')} in ${cwd}`);
+      if (!shellPolicy.enabled) {
+        throw new Error('Shell execution is disabled by the current execution profile.');
+      }
+      if (!shellPolicy.allowInteractive && isInteractiveShellCommand(normalized.command, normalized.args)) {
+        throw new Error('Interactive shell commands are not allowed.');
+      }
+      console.log(`Executing command: ${normalized.command} ${normalized.args.join(' ')} in ${resolvedOptions.cwd}`);
       const { stdout, stderr } = await execFileAsync(normalized.command, normalized.args, {
-        cwd,
-        maxBuffer: EXECUTION_MAX_BUFFER_BYTES,
-        windowsHide: true
+        cwd: resolvedOptions.cwd,
+        maxBuffer: shellPolicy.maxBufferBytes,
+        windowsHide: true,
+        timeout: shellPolicy.timeoutMs
       });
       return {
         stdout: stdout.trim(),

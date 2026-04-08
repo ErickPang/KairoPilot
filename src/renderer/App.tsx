@@ -21,7 +21,9 @@ function App() {
     agents,
     availableModels,
     confirmationRequest,
+    describeProvider,
     fetchModels,
+    handleCancelRun,
     handleClear,
     handleConfirm,
     handleCreateSession,
@@ -29,6 +31,9 @@ function App() {
     handleDeleteModel,
     handleDeleteSession,
     handleDeny,
+    handlePauseRun,
+    handleResumeRun,
+    handleRetryStep,
     handleSaveAgent,
     handleSaveModel,
     handleSelectSession,
@@ -174,6 +179,7 @@ function App() {
             onSaveAgent={handleSaveAgent}
             onDeleteAgent={handleDeleteAgent}
             onSetActiveAgent={handleSetActiveAgent}
+            onDescribeProvider={describeProvider}
             onFetchModels={fetchModels}
             availableModels={availableModels}
             activeSection={activeConfigSection}
@@ -183,7 +189,14 @@ function App() {
 
       {activeTab === 'audit' && (
         <div className="main-content" style={{ padding: 0, height: '100%', overflow: 'hidden' }}>
-          <AuditLogViewer />
+          <AuditLogViewer
+            latestRun={sessionContext.latestRun}
+            activeRunSteps={sessionContext.activeRunSteps}
+            handleCancelRun={handleCancelRun}
+            handlePauseRun={handlePauseRun}
+            handleResumeRun={handleResumeRun}
+            handleRetryStep={handleRetryStep}
+          />
         </div>
       )}
       

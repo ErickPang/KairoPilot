@@ -68,7 +68,7 @@ export function useConfigController(options: UseConfigControllerOptions) {
     loadConfig();
   }, [applyConfigToState, loadActiveSession, loadSessions]);
 
-  const { availableModels, fetchModels, handleDeleteModel, handleSaveModel } = useModelConfig({
+  const { availableModels, describeProvider, fetchModels, handleDeleteModel, handleSaveModel } = useModelConfig({
     refreshConfig: async () => {
       await refreshConfig();
     },
@@ -89,6 +89,7 @@ export function useConfigController(options: UseConfigControllerOptions) {
     activeAgentName,
     agents,
     availableModels,
+    describeProvider,
     fetchModels,
     handleDeleteAgent,
     handleDeleteModel,
