@@ -1,6 +1,6 @@
 import { memo, useMemo, useState } from 'react';
 import type { AgentConfig, AgentPermissionConfig, ModelConfig } from '../../types';
-import { IconArrowLeft, IconFolder, IconShield, IconTerminal } from '../Icons';
+import { IconArrowLeft, IconFolder, IconShield, IconTerminal, IconBot } from '../Icons';
 import { Select } from '../Select';
 import { useTranslation } from '../../hooks/useTranslation';
 import { applyExecutionProfileConstraints, createDefaultPolicyConfig, DEFAULT_SHELL_COMMANDS } from '../../../shared/contracts';
@@ -182,19 +182,28 @@ export const AgentEditor = memo(function AgentEditor({
   return (
     <>
       <div className="config-header">
-        <div className="config-title">
-          <button onClick={onCancel} className="btn-icon" style={{ marginRight: '0.5rem' }}>
-            <IconArrowLeft size={24} />
-          </button>
-          <span>{isNewAgent ? t('config.newAgent') : t('config.editAgent')}</span>
+        <div className="config-page-title-block">
+          <div className="config-page-title-row">
+            <button type="button" onClick={onCancel} className="btn-icon config-back-button" title={t('common.cancel')}>
+              <IconArrowLeft size={24} />
+            </button>
+            <div className="config-page-icon">
+              <IconBot size={18} />
+            </div>
+            <div>
+              <div className="config-title">{isNewAgent ? t('config.newAgent') : t('config.editAgent')}</div>
+            </div>
+          </div>
+          <div className="config-subtitle config-page-subtitle">{t('settings.agentEditorDescription')}</div>
         </div>
       </div>
 
       <div className="config-content">
-        <div className="form-section-title">{t('config.agentInfo')}</div>
-
-        <div className="form-row">
-          <div className="form-group" style={{ flex: 1 }}>
+        <div className="config-detail-shell">
+        <div className="config-detail-section">
+          <div className="form-section-title">{t('config.agentInfo')}</div>
+          <div className="form-row">
+          <div className="form-group">
             <label>{t('config.agentName')}</label>
             <input 
               className="form-control"
@@ -214,9 +223,9 @@ export const AgentEditor = memo(function AgentEditor({
             {!isNewAgent && <div className="form-help">{t('config.agentNameHelp')}</div>}
           </div>
 
-          <div className="form-group" style={{ flex: 1 }}>
+          <div className="form-group">
             <label>{t('config.linkedModel')}</label>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+            <div className="editor-two-column-grid">
               <Select
                 value={activeProvider?.id || ''}
                 onChange={(providerId) => {
@@ -244,8 +253,11 @@ export const AgentEditor = memo(function AgentEditor({
             </div>
           </div>
         </div>
+        </div>
 
-        <div className="form-group">
+        <div className="config-detail-section">
+          <div className="form-section-title">{t('config.agentDocs')}</div>
+          <div className="form-group">
           <label>{t('config.agentDocs')}</label>
           <div className="agent-doc-tabs" role="tablist" aria-label={t('config.agentDocs')}>
             {docTabs.map(tab => (
@@ -298,24 +310,24 @@ export const AgentEditor = memo(function AgentEditor({
               ? t('config.kairopilotPromptHelp')
               : activeDocTab === 'identity'
                 ? t('config.identityPromptHelp')
-                : activeDocTab === 'user'
+              : activeDocTab === 'user'
                   ? t('config.userPromptHelp')
                   : t('config.soulPromptHelp')}
           </div>
+          </div>
         </div>
 
-        <div className="form-section-title">{t('config.workspace')}</div>
-
-        <div className="form-group">
+        <div className="config-detail-section">
+          <div className="form-section-title">{t('config.workspace')}</div>
+          <div className="form-group">
           <label>{t('config.workspaceName')}</label>
-          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+          <div className="agent-workspace-row">
             {editingAgent.id === 'mainAgent' ? (
-              <span style={{ color: 'var(--foreground)', whiteSpace: 'nowrap', padding: '0.5rem 0' }}>~/.kairopilot/workspace</span>
+              <span className="agent-workspace-static">~/.kairopilot/workspace</span>
             ) : (
               <>
-                <span style={{ color: 'var(--muted-fg)', whiteSpace: 'nowrap' }}>~/.kairopilot/workspace-</span>
+                <span className="agent-workspace-prefix">~/.kairopilot/workspace-</span>
                 <input 
-                  className="form-control"
                   value={editingAgent.workspaceName !== undefined ? editingAgent.workspaceName : (
                     editingAgent.workspace ? 
                       (editingAgent.workspace.match(/workspace-(.+)$/) ? editingAgent.workspace.match(/workspace-(.+)$/)![1] : (
@@ -329,7 +341,7 @@ export const AgentEditor = memo(function AgentEditor({
                   }} 
                   placeholder={t('config.placeholder.workspace')}
                   disabled={!isNewAgent}
-                  style={{ flex: 1 }}
+                  className="form-control agent-workspace-input"
                 />
               </>
             )}
@@ -343,11 +355,12 @@ export const AgentEditor = memo(function AgentEditor({
                 : t('config.workspaceNameHelpFixed')}
             </div>
           )}
+          </div>
         </div>
 
-        <div className="form-section-title">{t('config.security')}</div>
-
-        <div className="permission-overview-card">
+        <div className="config-detail-section">
+          <div className="form-section-title">{t('config.security')}</div>
+          <div className="permission-overview-card">
           <div className="permission-overview-content">
             <div className="permission-overview-title-row">
               <div className="permission-overview-title">{t('config.permissionOverview')}</div>
@@ -476,10 +489,10 @@ export const AgentEditor = memo(function AgentEditor({
                 }))}
               />
               <div>
-                <div style={{ fontWeight: 500, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <div className="permission-toggle-title">
                   <IconShield size={16} /> {t('config.redactSensitiveOutput')}
                 </div>
-                <div className="form-help" style={{ marginTop: '0.25rem', marginBottom: 0 }}>
+                <div className="form-help form-help-tight-top">
                   {t('config.redactSensitiveOutputHelp')}
                 </div>
               </div>
@@ -515,10 +528,10 @@ export const AgentEditor = memo(function AgentEditor({
                   }))}
                 />
                 <div>
-                  <div style={{ fontWeight: 500, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <div className="permission-toggle-title">
                     <IconFolder size={16} /> {t('config.allowFileRead')}
                   </div>
-                  <div className="form-help" style={{ marginTop: '0.25rem', marginBottom: 0 }}>
+                  <div className="form-help form-help-tight-top">
                     {t('config.allowFileReadHelp')}
                   </div>
                 </div>
@@ -545,10 +558,10 @@ export const AgentEditor = memo(function AgentEditor({
                   }))}
                 />
                 <div>
-                  <div style={{ fontWeight: 500, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <div className="permission-toggle-title">
                     <IconFolder size={16} /> {t('config.allowFileWrite')}
                   </div>
-                  <div className="form-help" style={{ marginTop: '0.25rem', marginBottom: 0 }}>
+                  <div className="form-help form-help-tight-top">
                     {t('config.allowFileWriteHelp')}
                   </div>
                 </div>
@@ -575,10 +588,10 @@ export const AgentEditor = memo(function AgentEditor({
                   }))}
                 />
                 <div>
-                  <div style={{ fontWeight: 500, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <div className="permission-toggle-title">
                     <IconShield size={16} /> {t('config.allowNetwork')}
                   </div>
-                  <div className="form-help" style={{ marginTop: '0.25rem', marginBottom: 0 }}>
+                  <div className="form-help form-help-tight-top">
                     {t('config.allowNetworkHelp')}
                   </div>
                 </div>
@@ -606,10 +619,10 @@ export const AgentEditor = memo(function AgentEditor({
                   }))}
                 />
                 <div>
-                  <div style={{ fontWeight: 500, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <div className="permission-toggle-title">
                     <IconTerminal size={16} /> {t('config.allowShell')}
                   </div>
-                  <div className="form-help" style={{ marginTop: '0.25rem', marginBottom: 0 }}>
+                  <div className="form-help form-help-tight-top">
                     {t('config.allowShellHelp')}
                   </div>
                 </div>
@@ -735,10 +748,15 @@ export const AgentEditor = memo(function AgentEditor({
             </div>
           </div>
         </div>
+        </div>
 
-        <div className="form-actions">
-          <button className="btn btn-secondary" onClick={onCancel}>{t('common.cancel')}</button>
-          <button className="btn btn-primary" onClick={onSave}>{t('common.save')}</button>
+        </div>
+      </div>
+
+      <div className="config-detail-footer">
+        <div className="form-actions config-detail-actions">
+          <button type="button" className="btn btn-secondary" onClick={onCancel}>{t('common.cancel')}</button>
+          <button type="button" className="btn btn-primary" onClick={onSave}>{t('common.save')}</button>
         </div>
       </div>
     </>

@@ -1,15 +1,18 @@
-import { memo, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
-import { FetchModelsResult, ModelConfig, ProviderCapabilitySnapshot } from '../../types';
-import { IconArrowLeft, IconRefresh, IconChevronDown, IconCheck, IconX } from '../Icons';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { AppNotice, FetchModelsResult, ModelConfig, ProviderCapabilitySnapshot } from '../../types';
+import { IconArrowLeft, IconRefresh, IconChevronDown, IconCheck, IconCpu } from '../Icons';
 import { Select, type SelectOption } from '../Select';
 import { OllamaManager } from './OllamaManager';
 import { useTranslation } from '../../hooks/useTranslation';
+import { createErrorNotice, createSuccessNotice } from '../../hooks/errorUtils';
 
 interface ModelEditorProps {
   editingModel: ModelConfig;
   setEditingModel: (model: ModelConfig) => void;
   isEditingExisting: boolean;
   availableModels: string[];
+  onClearNotice: () => void;
+  onReportNotice: (notice: AppNotice) => void;
   onDescribeProvider: (model: ModelConfig) => Promise<ProviderCapabilitySnapshot | null>;
   onFetchModels: (model: ModelConfig) => Promise<FetchModelsResult>;
   onSave: () => void;
@@ -27,22 +30,13 @@ const PROVIDER_DEFAULT_BASE_URLS: Partial<Record<ModelConfig['provider'], string
   custom: 'https://api.openai.com/v1'
 };
 
-const BASE_URL_NOTICE_STYLE: CSSProperties = {
-  marginTop: '0.75rem',
-  padding: '0.75rem 0.875rem',
-  borderRadius: 'var(--radius-md)',
-  border: '1px solid var(--border)',
-  background: '#fffbeb',
-  color: '#b45309',
-  fontSize: '0.875rem',
-  lineHeight: 1.5
-};
-
 export const ModelEditor = memo(function ModelEditor({ 
   editingModel, 
   setEditingModel, 
   isEditingExisting,
   availableModels, 
+  onClearNotice,
+  onReportNotice,
   onDescribeProvider,
   onFetchModels, 
   onSave, 
@@ -57,7 +51,6 @@ export const ModelEditor = memo(function ModelEditor({
   const [modelDropdownPlacement, setModelDropdownPlacement] = useState<'top' | 'bottom'>('bottom');
   const [manualModelId, setManualModelId] = useState('');
   const [showManualInput, setShowManualInput] = useState(false);
-  const [feedbackDialog, setFeedbackDialog] = useState<{ title: string; message: string; type: 'success' | 'error' } | null>(null);
   const modelDropdownRef = useRef<HTMLDivElement>(null);
   const modelTriggerRef = useRef<HTMLButtonElement>(null);
   const selectedModelIds = useMemo(
@@ -220,40 +213,42 @@ export const ModelEditor = memo(function ModelEditor({
   };
 
   const handleFetchModels = async () => {
+    onClearNotice();
     const result = await onFetchModels(editingModel);
     if (result.success) {
       setShowManualInput(false);
-      setFeedbackDialog({
-        title: t('common.success'),
-        message: t('config.fetchModelsSuccess', { count: String(result.models.length) }),
-        type: 'success'
-      });
+      onReportNotice(createSuccessNotice(t('config.fetchModelsSuccess', { count: String(result.models.length) }), 'fetch_models'));
       return;
     }
     setShowManualInput(true);
-    setFeedbackDialog({
-      title: t('common.error'),
-      message: t('config.fetchModelsFailed', { error: result.error || t('common.error') }),
-      type: 'error'
-    });
+    onReportNotice(createErrorNotice(t('config.fetchModelsFailed', { error: result.error || t('common.error') }), 'fetch_models'));
   };
 
   return (
     <>
       <div className="config-header">
-        <div className="config-title">
-          <button onClick={onCancel} className="btn-icon" style={{ marginRight: '0.5rem' }}>
-            <IconArrowLeft size={24} />
-          </button>
-          <span>{editingModel.id ? t('config.editModel') : t('config.newModel')}</span>
+        <div className="config-page-title-block">
+          <div className="config-page-title-row">
+            <button type="button" onClick={onCancel} className="btn-icon config-back-button" title={t('common.cancel')}>
+              <IconArrowLeft size={24} />
+            </button>
+            <div className="config-page-icon">
+              <IconCpu size={18} />
+            </div>
+            <div>
+              <div className="config-title">{editingModel.id ? t('config.editModel') : t('config.newModel')}</div>
+            </div>
+          </div>
+          <div className="config-subtitle config-page-subtitle">{t('settings.modelEditorDescription')}</div>
         </div>
       </div>
 
       <div className="config-content">
-        <div className="form-section-title">{t('config.generalInfo')}</div>
-        
-        <div className="form-row">
-          <div className="form-group" style={{ flex: 2 }}>
+        <div className="config-detail-shell">
+        <div className="config-detail-section">
+          <div className="form-section-title">{t('config.generalInfo')}</div>
+          <div className="form-row">
+          <div className="form-group form-group-span-2">
             <label>{t('config.configName')}</label>
             <input 
               className="form-control"
@@ -274,7 +269,7 @@ export const ModelEditor = memo(function ModelEditor({
             <div className="form-help">仅支持英文、数字、下划线和短横线</div>
           </div>
 
-          <div className="form-group" style={{ flex: 1 }}>
+          <div className="form-group">
             <label>{t('config.provider')}</label>
             <Select 
               value={editingModel.provider || ''}
@@ -287,10 +282,11 @@ export const ModelEditor = memo(function ModelEditor({
             )}
           </div>
         </div>
+        </div>
 
-        <div className="form-section-title">{t('config.connectionDetails')}</div>
-
-        <div className="form-group">
+        <div className="config-detail-section">
+          <div className="form-section-title">{t('config.connectionDetails')}</div>
+          <div className="form-group">
           <label>{t('config.baseUrl')}</label>
           <input 
               className="form-control"
@@ -305,7 +301,7 @@ export const ModelEditor = memo(function ModelEditor({
             <div className="form-help">{t('config.providerCapabilitiesLoading')}</div>
           )}
           {baseUrlProtocolNotice && (
-            <div style={BASE_URL_NOTICE_STYLE}>
+            <div className={`config-inline-notice ${baseUrlProtocolNotice.tone === 'warning' ? 'warning' : 'info'}`}>
               {baseUrlProtocolNotice.message}
             </div>
           )}
@@ -322,15 +318,18 @@ export const ModelEditor = memo(function ModelEditor({
           />
           <div className="form-help">{t('config.apiKeyHelp')}</div>
         </div>
+        </div>
 
-        <div className="form-group">
+        <div className="config-detail-section">
+          <div className="form-section-title">{t('config.modelId')}</div>
+          <div className="form-group">
           <label>{t('config.modelId')}</label>
-          <div style={{ display: 'flex', gap: '0.5rem' }}>
-            <div style={{ flex: 1, position: 'relative' }} ref={modelDropdownRef}>
+          <div className="editor-inline-row">
+            <div className="editor-inline-grow model-editor-select" ref={modelDropdownRef}>
               <button
                 ref={modelTriggerRef}
                 type="button"
-                className="form-control"
+                className="form-control model-editor-select-trigger"
                 onClick={() => setIsModelDropdownOpen(prev => !prev)}
                 onKeyDown={(e) => {
                   if (e.key === 'ArrowDown') {
@@ -371,37 +370,15 @@ export const ModelEditor = memo(function ModelEditor({
                     setIsModelDropdownOpen(false);
                   }
                 }}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  textAlign: 'left',
-                  cursor: 'pointer'
-                }}
               >
-                <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: selectedModelIds.length > 0 ? 'var(--foreground)' : 'var(--muted-fg)' }}>
+                <span className={`model-editor-select-value ${selectedModelIds.length > 0 ? 'has-value' : ''}`}>
                   {selectedModelIds.length > 0 ? selectedModelIds.join(', ') : t('config.selectModelIds')}
                 </span>
-                <IconChevronDown size={16} style={{ color: 'var(--muted-fg)', marginLeft: '8px' }} />
+                <IconChevronDown size={16} className="model-editor-select-chevron" />
               </button>
               {isModelDropdownOpen && (
-                <div
-                  style={{
-                    position: 'absolute',
-                    left: 0,
-                    right: 0,
-                    ...(modelDropdownPlacement === 'top'
-                      ? { bottom: '100%', marginBottom: '8px' }
-                      : { top: '100%', marginTop: '8px' }),
-                    background: 'var(--background)',
-                    border: '1px solid var(--border)',
-                    borderRadius: 'var(--radius-md)',
-                    boxShadow: 'var(--shadow-lg)',
-                    zIndex: 50,
-                    overflow: 'hidden'
-                  }}
-                >
-                  <div style={{ maxHeight: '240px', overflowY: 'auto', padding: '4px' }}>
+                <div className={`model-editor-select-menu ${modelDropdownPlacement === 'top' ? 'is-top' : 'is-bottom'}`}>
+                  <div className="model-editor-select-options">
                     {selectableModels.map(id => {
                       const itemIndex = selectableModels.indexOf(id);
                       const selected = selectedModelIds.includes(id);
@@ -413,25 +390,17 @@ export const ModelEditor = memo(function ModelEditor({
                           onClick={() => {
                             toggleModelSelection(id);
                           }}
-                          style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '8px',
-                            padding: '8px',
-                            borderRadius: 'var(--radius-sm)',
-                            cursor: 'pointer',
-                            background: selected || highlighted ? 'var(--sidebar-accent)' : 'transparent'
-                          }}
+                          className={`model-editor-select-option ${selected ? 'is-selected' : ''} ${highlighted ? 'is-highlighted' : ''}`}
                         >
-                          <div style={{ width: '16px', display: 'flex', justifyContent: 'center' }}>
-                            {selected && <IconCheck size={14} style={{ color: 'var(--primary)' }} />}
+                          <div className="model-editor-select-option-check">
+                            {selected && <IconCheck size={14} className="model-editor-select-option-check-icon" />}
                           </div>
                           <span>{id}</span>
                         </div>
                       );
                     })}
                     {selectableModels.length === 0 && (
-                      <div style={{ padding: '10px', color: 'var(--muted-fg)', fontSize: '0.85rem' }}>暂无模型</div>
+                      <div className="model-editor-select-empty">暂无模型</div>
                     )}
                   </div>
                 </div>
@@ -447,10 +416,9 @@ export const ModelEditor = memo(function ModelEditor({
             </button>
           </div>
           {showManualInput && (
-            <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.5rem', alignItems: 'stretch' }}>
+            <div className="editor-inline-row editor-inline-row-top">
               <input
-                className="form-control"
-                style={{ flex: '1 1 auto', maxWidth: 'calc(100% - 136px)' }}
+                className="form-control editor-inline-grow"
                 value={manualModelId}
                 onChange={e => setManualModelId(e.target.value)}
                 onKeyDown={e => {
@@ -463,9 +431,8 @@ export const ModelEditor = memo(function ModelEditor({
               />
               <button
                 type="button"
-                className="btn btn-secondary"
                 onClick={addManualModelId}
-                style={{ flex: '0 0 128px', justifyContent: 'center', whiteSpace: 'nowrap' }}
+                className="btn btn-secondary editor-inline-fixed"
               >
                 {t('config.addModelId')}
               </button>
@@ -473,41 +440,27 @@ export const ModelEditor = memo(function ModelEditor({
           )}
           <div className="form-help">{t('config.modelIdHelp')}</div>
           {showManualInput && <div className="form-help">{t('config.manualModelIdHelp')}</div>}
+          </div>
+
+          {editingModel.provider === 'ollama' && (
+            <OllamaManager
+              editingModel={editingModel}
+              onClearNotice={onClearNotice}
+              onFetchModels={onFetchModels}
+              onReportNotice={onReportNotice}
+            />
+          )}
         </div>
 
-        {editingModel.provider === 'ollama' && (
-          <OllamaManager editingModel={editingModel} onFetchModels={onFetchModels} />
-        )}
-
-        <div className="form-actions">
-          <button className="btn btn-secondary" onClick={onCancel}>{t('common.cancel')}</button>
-          <button className="btn btn-primary" onClick={onSave}>{t('common.save')}</button>
         </div>
       </div>
-      {feedbackDialog && (
-        <div className="feedback-dialog-overlay" onClick={() => setFeedbackDialog(null)}>
-          <div
-            className={`feedback-dialog ${feedbackDialog.type === 'error' ? 'is-error' : 'is-success'}`}
-            onClick={e => e.stopPropagation()}
-          >
-            <div className="feedback-dialog-header">
-              <div className="feedback-dialog-title-wrap">
-                <img src="/icon.png" alt="KairoPilot" className="feedback-dialog-icon" />
-                <h3 className="feedback-dialog-title">{feedbackDialog.title}</h3>
-              </div>
-              <button className="btn-icon feedback-dialog-close" onClick={() => setFeedbackDialog(null)}>
-                <IconX size={18} />
-              </button>
-            </div>
-            <div className="feedback-dialog-body">
-              <p className="feedback-dialog-message">{feedbackDialog.message}</p>
-            </div>
-            <div className="feedback-dialog-actions">
-              <button className="btn btn-primary" onClick={() => setFeedbackDialog(null)}>{t('common.confirm')}</button>
-            </div>
-          </div>
+
+      <div className="config-detail-footer">
+        <div className="form-actions config-detail-actions">
+          <button type="button" className="btn btn-secondary" onClick={onCancel}>{t('common.cancel')}</button>
+          <button type="button" className="btn btn-primary" onClick={onSave}>{t('common.save')}</button>
         </div>
-      )}
+      </div>
     </>
   );
 });
