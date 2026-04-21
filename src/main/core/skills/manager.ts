@@ -3,10 +3,11 @@ import fs from 'fs/promises'
 import path from 'path'
 import { randomUUID } from 'crypto'
 import { createLLMProvider } from '../llm/provider'
-import { getActiveAgentId, getAgent, getAgents, getKairoPilotConfig, getModelForAgent, saveKairoPilotConfig } from '../../store/config'
+import { getAgent, getAgents, getKairoPilotConfig, getModelForAgent, saveKairoPilotConfig } from '../../store/config'
 import {
   DEFAULT_SKILL_MARKETPLACE_PRESETS,
   SKILL_IMPORT_ERROR,
+  ModelConfig,
   SkillImportArgs,
   SkillInstallArgs,
   SkillInstallReview,
@@ -407,55 +408,37 @@ export class SkillsManager {
   }
 
   async getMetadata(skillName: string, agentId?: string) {
-    const skill = await findSkillRecord({
-      skillName,
-      agentId,
-      loadAllSkills: () => this.loadAllSkills(),
-      loadAgentSkills: (resolvedAgentId) => this.loadAgentSkills(resolvedAgentId),
-      getPublicSkillIndex: () => this.publicSkillIndex,
-      getAgentIndex: (resolvedAgentId) => this.getAgentIndex(resolvedAgentId)
-    })
+    const skill = await this.findSkill(skillName, agentId)
     return skill?.metadata ?? null
   }
 
   async readSkillContent(skillName: string, agentId?: string) {
-    const skill = await findSkillRecord({
-      skillName,
-      agentId,
-      loadAllSkills: () => this.loadAllSkills(),
-      loadAgentSkills: (resolvedAgentId) => this.loadAgentSkills(resolvedAgentId),
-      getPublicSkillIndex: () => this.publicSkillIndex,
-      getAgentIndex: (resolvedAgentId) => this.getAgentIndex(resolvedAgentId)
-    })
+    const skill = await this.findSkill(skillName, agentId)
     return skill?.content ?? null
   }
 
   async resolveSkillPath(skillName: string, agentId?: string) {
-    const skill = await findSkillRecord({
-      skillName,
-      agentId,
-      loadAllSkills: () => this.loadAllSkills(),
-      loadAgentSkills: (resolvedAgentId) => this.loadAgentSkills(resolvedAgentId),
-      getPublicSkillIndex: () => this.publicSkillIndex,
-      getAgentIndex: (resolvedAgentId) => this.getAgentIndex(resolvedAgentId)
-    })
+    const skill = await this.findSkill(skillName, agentId)
     return skill?.skillDir ?? null
   }
 
   async resolveResourcePath(skillName: string, resourcePath: string, agentId?: string) {
-    const skill = await findSkillRecord({
-      skillName,
-      agentId,
-      loadAllSkills: () => this.loadAllSkills(),
-      loadAgentSkills: (resolvedAgentId) => this.loadAgentSkills(resolvedAgentId),
-      getPublicSkillIndex: () => this.publicSkillIndex,
-      getAgentIndex: (resolvedAgentId) => this.getAgentIndex(resolvedAgentId)
-    })
+    const skill = await this.findSkill(skillName, agentId)
     if (!skill) {
       return null
     }
 
     return resolveSkillResourcePath(skill, resourcePath)
+  }
+
+  async listSkillFiles(skillName: string, agentId?: string) {
+    const skill = await this.findSkill(skillName, agentId)
+    if (!skill) {
+      return []
+    }
+
+    const filePaths = await this.collectSkillFiles(skill.skillDir)
+    return filePaths.sort((left, right) => left.localeCompare(right))
   }
 
   async resolveReferencePath(skillName: string, resourceName: string, agentId?: string) {
@@ -540,6 +523,58 @@ export class SkillsManager {
         await fs.writeFile(resolvedFilePath, file.content, 'utf-8')
       }
     }
+  }
+
+  private async findSkill(skillName: string, agentId?: string) {
+    return findSkillRecord({
+      skillName,
+      agentId,
+      loadAllSkills: () => this.loadAllSkills(),
+      loadAgentSkills: (resolvedAgentId) => this.loadAgentSkills(resolvedAgentId),
+      getPublicSkillIndex: () => this.publicSkillIndex,
+      getAgentIndex: (resolvedAgentId) => this.getAgentIndex(resolvedAgentId)
+    })
+  }
+
+  private async collectSkillFiles(skillDir: string, relativeSegments: string[] = []): Promise<string[]> {
+    const currentDir = relativeSegments.length > 0
+      ? path.join(skillDir, ...relativeSegments)
+      : skillDir
+    const files: string[] = []
+
+    let entryNames: string[]
+    try {
+      entryNames = await fs.readdir(currentDir, { encoding: 'utf-8' })
+    } catch {
+      return files
+    }
+
+    for (const entryName of entryNames) {
+      if (entryName.startsWith('.')) {
+        continue
+      }
+
+      const nextSegments = [...relativeSegments, entryName]
+      let stats: Awaited<ReturnType<typeof fs.stat>>
+      try {
+        stats = await fs.stat(path.join(currentDir, entryName))
+      } catch {
+        continue
+      }
+
+      if (stats.isDirectory()) {
+        files.push(...await this.collectSkillFiles(skillDir, nextSegments))
+        continue
+      }
+
+      if (entryName === 'SKILL.md' || entryName === '_meta.json') {
+        continue
+      }
+
+      files.push(nextSegments.join('/'))
+    }
+
+    return files
   }
 
   private async createSkillInstallReview(params: {
@@ -666,9 +701,7 @@ export class SkillsManager {
     materializedSkill: MaterializedSkill,
     staticFindings: SkillReviewFinding[]
   ) {
-    const activeAgentId = getActiveAgentId()
-    const agent = activeAgentId ? getAgent(activeAgentId) : undefined
-    const model = agent ? getModelForAgent(agent) : undefined
+    const model = this.resolveSkillReviewModel(scope)
 
     if (!model?.model) {
       return {
@@ -757,6 +790,38 @@ export class SkillsManager {
         findings: [] as SkillReviewFinding[]
       }
     }
+  }
+
+  private resolveSkillReviewModel(scope: string): ModelConfig | undefined {
+    const candidateAgents = new Map<string, ReturnType<typeof getAgent>>()
+    const registerCandidate = (agentId: string | undefined) => {
+      if (!agentId || candidateAgents.has(agentId)) {
+        return
+      }
+      candidateAgents.set(agentId, getAgent(agentId))
+    }
+
+    if (scope.startsWith('agent:')) {
+      registerCandidate(scope.slice('agent:'.length).trim())
+    }
+
+    registerCandidate('mainAgent')
+
+    for (const agent of getAgents()) {
+      registerCandidate(agent.id)
+    }
+
+    for (const agent of candidateAgents.values()) {
+      if (!agent) {
+        continue
+      }
+      const model = getModelForAgent(agent)
+      if (model?.model) {
+        return model
+      }
+    }
+
+    return undefined
   }
 
   private getAgentIndex(agentId: string) {

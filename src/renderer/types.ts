@@ -19,13 +19,15 @@ export type {
   RunQuery,
   RunQueryResult,
   RunQueryStatus,
+  RuntimeUpdateEvent,
   RunStep,
   RunTraceAggregations,
   RunTraceQuery,
   RunTrace,
   RunSummary,
   SkillSummary,
-  ToolCallRecord
+  ToolCallRecord,
+  WebSearchConfig
 } from '../shared/contracts';
 
 export interface Message {
@@ -82,11 +84,30 @@ export interface ConfirmationRequest {
   redacted?: boolean;
 }
 
+export interface AppNotice {
+  kind: 'error' | 'info' | 'success';
+  message: string;
+  source?: string;
+}
+
+export interface AppConfirmationOptions {
+  title: string;
+  message: string;
+  confirmLabel?: string;
+  cancelLabel?: string;
+  variant?: 'default' | 'danger';
+}
+
 export interface SessionContextState {
   activeAgentId: string | null;
   activeSessionId: string | null;
+  appNotice: AppNotice | null;
   confirmationRequest: ConfirmationRequest | null;
   latestContextSummary: import('../shared/contracts').RunContextSummary | null;
   latestRun: import('../shared/contracts').RunSummary | null;
   activeRunSteps: import('../shared/contracts').RunStep[];
 }
+
+export type SessionContextUpdate =
+  | Partial<SessionContextState>
+  | ((current: SessionContextState) => Partial<SessionContextState> | SessionContextState);

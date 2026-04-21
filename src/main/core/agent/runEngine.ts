@@ -3,12 +3,13 @@ import {
   updateRun,
   updateRunStep
 } from '../../store/chat';
+import type { RuntimeUpdateEvent } from '../../../shared/contracts';
 import type { ContextAssemblyMetadata } from '../context/assembler';
 import type { ChatMessage, LLMProvider, ToolDefinition } from '../llm/types';
 import type { LoadedSkillCapability } from './capabilityOrchestrator';
 import type { PendingToolCallSnapshot } from './approvalCoordinator';
 
-export type RuntimeUpdate = Record<string, unknown>;
+export type RuntimeUpdate = RuntimeUpdateEvent;
 
 export type RuntimeExecutionStatus = 'completed' | 'waiting_approval' | 'paused' | 'cancelled' | 'failed';
 

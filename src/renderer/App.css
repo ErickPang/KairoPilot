@@ -1051,6 +1051,11 @@ textarea.form-control {
   box-shadow: var(--shadow);
 }
 
+.settings-panel--allow-overflow {
+  overflow: visible;
+  z-index: 2;
+}
+
 .settings-hero {
   display: grid;
   grid-template-columns: minmax(0, 1.3fr) minmax(300px, 0.9fr);
@@ -1188,6 +1193,10 @@ textarea.form-control {
 
 .settings-panel-body {
   padding: 1rem 1.15rem 1.15rem;
+}
+
+.settings-panel--allow-overflow .settings-panel-body {
+  overflow: visible;
 }
 
 .settings-provider-stack,
@@ -3894,6 +3903,10 @@ body {
   display: inline-block;
 }
 
+.settings-panel--allow-overflow .custom-select {
+  z-index: 3;
+}
+
 .custom-select-trigger {
   display: flex;
   align-items: center;
@@ -3982,6 +3995,10 @@ body {
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
   box-shadow: 0 22px 48px rgba(15, 23, 42, 0.14) !important;
+}
+
+.settings-panel--allow-overflow .custom-select-dropdown {
+  z-index: 120;
 }
 
 .custom-select-dropdown-top {

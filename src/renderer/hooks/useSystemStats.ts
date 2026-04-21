@@ -2,21 +2,50 @@ import { useEffect, useState } from 'react';
 import { SystemStats } from '../types';
 import { KAIRO_INVOKE } from '../../shared/ipc';
 
-export function useSystemStats() {
+export function useSystemStats(enabled = true, intervalMs = 5000) {
   const [systemStats, setSystemStats] = useState<SystemStats | null>(null);
 
   useEffect(() => {
-    const interval = setInterval(async () => {
+    if (!enabled) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const fetchStats = async () => {
       try {
         const stats = await window.kairo.invoke(KAIRO_INVOKE.systemStats);
-        setSystemStats(stats);
+        if (!cancelled) {
+          setSystemStats(stats);
+        }
       } catch {
         return;
       }
-    }, 2000);
+    };
 
-    return () => clearInterval(interval);
-  }, []);
+    const runFetch = () => {
+      if (typeof document !== 'undefined' && document.hidden) {
+        return;
+      }
+      void fetchStats();
+    };
+
+    runFetch();
+    const interval = window.setInterval(runFetch, intervalMs);
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        return;
+      }
+      runFetch();
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      cancelled = true;
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      clearInterval(interval);
+    };
+  }, [enabled, intervalMs]);
 
   return systemStats;
 }

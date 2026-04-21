@@ -2,7 +2,7 @@ import React, { useEffect, useLayoutEffect, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Message, ModelConfig } from '../types';
-import { IconUser, IconBot, IconTool, IconSend, IconTrash, IconCpu, IconChevronDown, IconCheck } from './Icons';
+import { IconUser, IconBot, IconTool, IconSend, IconCpu, IconChevronDown, IconCheck } from './Icons';
 import { useTranslation } from '../hooks/useTranslation';
 import type { I18nContextValue } from './layout/I18nContext';
 
@@ -150,7 +150,6 @@ export const ChatInterface = React.memo(function ChatInterface({
   setInput,
   loading,
   handleSend,
-  handleClear,
   messagesEndRef,
   models,
   activeModelId,
@@ -550,11 +549,6 @@ export const ChatInterface = React.memo(function ChatInterface({
               {loading ? t('chat.thinking') : t('chat.currentRun')}
             </span>
           </div>
-        </div>
-        <div className="chat-header-actions">
-          <button type="button" onClick={handleClear} className="icon-btn chat-header-clear" title={t('chat.clearAllSessions')}>
-            <IconTrash size={18} />
-          </button>
         </div>
       </div>
 

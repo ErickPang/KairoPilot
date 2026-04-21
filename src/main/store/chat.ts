@@ -4,16 +4,34 @@ import Database from 'better-sqlite3';
 import path from 'path';
 import { app } from 'electron';
 import fs from 'fs';
-import Store from 'electron-store'; // Only for migration
 import { getAgents } from './config';
 import { queryAuditLogs } from './audit';
 import { buildRunTraceAggregations, normalizeRunTraceQuery, paginateRunSteps } from './chat_trace_utils';
+import { initializeChatDatabase } from './chatDb';
+import {
+  isVisibleSessionMessage,
+  mapMessageRowToChatMessage,
+  serializeJson
+} from './chatMessageUtils';
+import { buildAgentStats, mapMonitoringRows } from './chatAnalyticsUtils';
+import {
+  buildMonitoringWhereClause,
+  buildRunQueryWhere,
+  buildTokenMetricFacets,
+  getSharedMessagePrefixLength,
+  mapApprovalRowToRecord,
+  mapContextSummaryRow,
+  mapRunRowToSummary,
+  mapRunStepRow,
+  mapSessionRowToSummary,
+  mapToolCallRecordRow,
+  parseJsonValue
+} from './chatStoreUtils';
 import type {
   AgentStats,
   ApprovalRecord,
   MonitoringTokenQuery,
   MonitoringTokenQueryResult,
-  MonitoringTokenUsageItem,
   QueryFacet,
   RunContextSummary,
   RunQuery,
@@ -26,7 +44,6 @@ import type {
   RunTraceAggregations,
   RunTraceQuery,
   RunSummary,
-  TokenMetricFacet,
   ToolCallRecord
 } from '../../shared/contracts';
 
@@ -59,31 +76,6 @@ function getActiveSessionStateKey(agentId?: string | null) {
   return `active_session_id:${normalizeAgentId(agentId)}`;
 }
 
-function ensureIndexes(database: Database.Database) {
-  database.exec(`
-    CREATE INDEX IF NOT EXISTS idx_sessions_agent_updated_at
-      ON sessions(agent_id, updated_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_messages_session_timestamp
-      ON messages(session_id, timestamp ASC);
-    CREATE INDEX IF NOT EXISTS idx_runs_session_updated_at
-      ON runs(session_id, updated_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_run_steps_run_step_index
-      ON run_steps(run_id, step_index ASC);
-    CREATE INDEX IF NOT EXISTS idx_tool_call_records_run_step
-      ON tool_call_records(run_id, step_id);
-    CREATE INDEX IF NOT EXISTS idx_approval_records_run_status
-      ON approval_records(run_id, status, updated_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_approval_records_session_status
-      ON approval_records(session_id, status, updated_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_context_snapshots_run_created_at
-      ON context_snapshots(run_id, created_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_context_summaries_run_created_at
-      ON context_summaries(run_id, created_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_context_summaries_session_created_at
-      ON context_summaries(session_id, created_at DESC);
-  `);
-}
-
 // Initialize Database
 function getDb(): Database.Database {
   if (!db) {
@@ -99,545 +91,12 @@ function getDb(): Database.Database {
     db = new Database(dbPath);
     db.pragma('journal_mode = WAL'); // Enable Write-Ahead Logging for performance
     db.pragma('foreign_keys = ON');
-    
-    initTables(db);
-    ensureIndexes(db);
-    
-    // Migration for agent_id column
-    try {
-      const columns = db.pragma('table_info(sessions)') as { name: string }[];
-      const hasAgentId = columns.some(col => col.name === 'agent_id');
-      if (!hasAgentId) {
-        db.prepare('ALTER TABLE sessions ADD COLUMN agent_id TEXT').run();
-      }
-      // Migrate legacy sessions to mainAgent
-      db.prepare("UPDATE sessions SET agent_id = 'mainAgent' WHERE agent_id IS NULL").run();
-    } catch (error) {
-      console.error('Failed to migrate sessions table:', error);
-    }
-
-    // Migration for tool calls and usage in messages table
-    try {
-      const msgColumns = db.pragma('table_info(messages)') as { name: string }[];
-      const hasName = msgColumns.some(col => col.name === 'name');
-      if (!hasName) {
-        db.exec(`
-          ALTER TABLE messages ADD COLUMN name TEXT;
-          ALTER TABLE messages ADD COLUMN tool_call_id TEXT;
-          ALTER TABLE messages ADD COLUMN tool_calls TEXT;
-        `);
-      }
-      
-      const hasUsage = msgColumns.some(col => col.name === 'usage');
-      if (!hasUsage) {
-        db.exec(`
-          ALTER TABLE messages ADD COLUMN usage TEXT;
-        `);
-      }
-
-      const hasModel = msgColumns.some(col => col.name === 'model');
-      if (!hasModel) {
-        db.exec(`
-          ALTER TABLE messages ADD COLUMN model TEXT;
-        `);
-      }
-    } catch (error) {
-      console.error('Failed to migrate messages table:', error);
-    }
-
-    migrateFromElectronStore(db);
-    migrateLegacyActiveSessionState(db);
+    initializeChatDatabase(db, {
+      defaultAgentId: DEFAULT_AGENT_ID,
+      getActiveSessionStateKey
+    });
   }
   return db;
-}
-
-function initTables(db: Database.Database) {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS sessions (
-      id TEXT PRIMARY KEY,
-      title TEXT NOT NULL,
-      agent_id TEXT,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS messages (
-      id TEXT PRIMARY KEY,
-      session_id TEXT NOT NULL,
-      role TEXT NOT NULL,
-      content TEXT NOT NULL,
-      timestamp INTEGER NOT NULL,
-      FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
-    );
-
-    CREATE TABLE IF NOT EXISTS app_state (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS runs (
-      id TEXT PRIMARY KEY,
-      session_id TEXT NOT NULL,
-      agent_id TEXT NOT NULL,
-      goal TEXT NOT NULL,
-      user_input TEXT NOT NULL,
-      status TEXT NOT NULL,
-      final_response TEXT,
-      error TEXT,
-      waiting_approval_id TEXT,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL,
-      started_at INTEGER,
-      completed_at INTEGER,
-      FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
-    );
-
-    CREATE TABLE IF NOT EXISTS run_steps (
-      id TEXT PRIMARY KEY,
-      run_id TEXT NOT NULL,
-      step_index INTEGER NOT NULL,
-      type TEXT NOT NULL,
-      status TEXT NOT NULL,
-      title TEXT NOT NULL,
-      input TEXT,
-      output TEXT,
-      error TEXT,
-      metadata TEXT,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL,
-      FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE
-    );
-
-    CREATE TABLE IF NOT EXISTS tool_call_records (
-      id TEXT PRIMARY KEY,
-      run_id TEXT NOT NULL,
-      step_id TEXT,
-      tool_name TEXT NOT NULL,
-      args TEXT,
-      result TEXT,
-      error TEXT,
-      status TEXT NOT NULL,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL,
-      FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE,
-      FOREIGN KEY (step_id) REFERENCES run_steps(id) ON DELETE SET NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS approval_records (
-      id TEXT PRIMARY KEY,
-      run_id TEXT NOT NULL,
-      step_id TEXT,
-      session_id TEXT,
-      tool_name TEXT NOT NULL,
-      args TEXT NOT NULL,
-      status TEXT NOT NULL,
-      metadata TEXT,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL,
-      resolved_at INTEGER,
-      FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE,
-      FOREIGN KEY (step_id) REFERENCES run_steps(id) ON DELETE SET NULL,
-      FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
-    );
-
-    CREATE TABLE IF NOT EXISTS context_snapshots (
-      id TEXT PRIMARY KEY,
-      run_id TEXT NOT NULL,
-      step_id TEXT,
-      snapshot TEXT NOT NULL,
-      created_at INTEGER NOT NULL,
-      FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE,
-      FOREIGN KEY (step_id) REFERENCES run_steps(id) ON DELETE SET NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS context_summaries (
-      id TEXT PRIMARY KEY,
-      run_id TEXT NOT NULL,
-      session_id TEXT,
-      step_id TEXT,
-      summary TEXT NOT NULL,
-      created_at INTEGER NOT NULL,
-      FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE,
-      FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
-      FOREIGN KEY (step_id) REFERENCES run_steps(id) ON DELETE SET NULL
-    );
-  `);
-}
-
-// One-time migration from old JSON store
-function migrateFromElectronStore(db: Database.Database) {
-  const migrationKey = 'migration_v1_completed';
-  const row = db.prepare('SELECT value FROM app_state WHERE key = ?').get(migrationKey) as { value: string } | undefined;
-  
-  if (row) return; // Already migrated
-
-  try {
-    const oldStore = new Store({ name: 'chat-history' });
-    const oldSessions = oldStore.get('sessions', []) as Session[];
-    const activeSessionId = oldStore.get('activeSessionId') as string | null;
-
-    if (oldSessions.length > 0) {
-      const insertSession = db.prepare('INSERT INTO sessions (id, title, created_at, updated_at) VALUES (@id, @title, @createdAt, @updatedAt)');
-      const insertMessage = db.prepare('INSERT INTO messages (id, session_id, role, content, timestamp, name, tool_call_id, tool_calls, usage, model) VALUES (@id, @sessionId, @role, @content, @timestamp, @name, @toolCallId, @toolCalls, @usage, @model)');
-
-      const transaction = db.transaction(() => {
-        for (const session of oldSessions) {
-          insertSession.run({
-            id: session.id,
-            title: session.title,
-            createdAt: session.createdAt,
-            updatedAt: session.updatedAt
-          });
-
-          for (const msg of session.messages) {
-            insertMessage.run({
-              id: uuidv4(),
-              sessionId: session.id,
-              role: msg.role,
-              content: msg.content || '',
-              timestamp: msg.timestamp || Date.now(),
-              name: msg.name || null,
-              toolCallId: msg.tool_call_id || null,
-              toolCalls: msg.tool_calls ? JSON.stringify(msg.tool_calls) : null,
-              usage: msg.usage ? JSON.stringify(msg.usage) : null,
-              model: msg.model || null
-            });
-          }
-        }
-
-        if (activeSessionId) {
-          db.prepare('INSERT OR REPLACE INTO app_state (key, value) VALUES (?, ?)').run('active_session_id', activeSessionId);
-        }
-      });
-
-      transaction();
-      console.log(`[DB] Migrated ${oldSessions.length} sessions from JSON store.`);
-    }
-
-    // Mark migration as done
-    db.prepare('INSERT INTO app_state (key, value) VALUES (?, ?)').run(migrationKey, 'true');
-    
-    // Optional: clear old store to free space? 
-    // oldStore.clear(); // Let's keep it as backup for now
-  } catch (error) {
-    console.error('[DB] Migration failed:', error);
-  }
-}
-
-function migrateLegacyActiveSessionState(db: Database.Database) {
-  try {
-    const legacyRow = db.prepare('SELECT value FROM app_state WHERE key = ?').get('active_session_id') as { value: string } | undefined;
-    if (!legacyRow?.value) {
-      return;
-    }
-
-    const scopedKey = getActiveSessionStateKey(DEFAULT_AGENT_ID);
-    const scopedRow = db.prepare('SELECT value FROM app_state WHERE key = ?').get(scopedKey) as { value: string } | undefined;
-    if (!scopedRow) {
-      db.prepare('INSERT OR REPLACE INTO app_state (key, value) VALUES (?, ?)').run(scopedKey, legacyRow.value);
-    }
-  } catch (error) {
-    console.error('[DB] Failed to migrate legacy active session state:', error);
-  }
-}
-
-// --- Public API ---
-
-function mapMessageRowToChatMessage(message: {
-  role: ChatMessage['role'];
-  content: string;
-  timestamp: number;
-  name?: string;
-  tool_call_id?: string;
-  tool_calls?: string;
-  usage?: string;
-  model?: string;
-}): ChatMessage {
-  const chatMessage: ChatMessage = {
-    role: message.role,
-    content: message.content,
-    timestamp: message.timestamp
-  };
-
-  if (message.name) {
-    chatMessage.name = message.name;
-  }
-
-  if (message.tool_call_id) {
-    chatMessage.tool_call_id = message.tool_call_id;
-  }
-
-  if (message.tool_calls) {
-    try {
-      chatMessage.tool_calls = JSON.parse(message.tool_calls);
-    } catch (error) {
-      console.warn('[DB] Failed to parse tool_calls:', error);
-    }
-  }
-
-  if (message.usage) {
-    try {
-      chatMessage.usage = JSON.parse(message.usage);
-    } catch (error) {
-      console.warn('[DB] Failed to parse usage:', error);
-    }
-  }
-
-  if (message.model) {
-    chatMessage.model = message.model;
-  }
-
-  return chatMessage;
-}
-
-function parseUsage(value: string | null | undefined) {
-  if (!value) {
-    return null;
-  }
-
-  try {
-    const usage = JSON.parse(value) as Partial<ChatMessage['usage']>;
-    return {
-      promptTokens: usage?.prompt_tokens || 0,
-      completionTokens: usage?.completion_tokens || 0,
-      totalTokens: usage?.total_tokens || 0
-    };
-  } catch {
-    return null;
-  }
-}
-
-function serializeJson(value: unknown) {
-  if (typeof value === 'undefined') {
-    return null;
-  }
-
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return JSON.stringify(String(value));
-  }
-}
-
-function parseJsonValue<T>(value: string | null | undefined): T | undefined {
-  if (!value) {
-    return undefined;
-  }
-
-  try {
-    return JSON.parse(value) as T;
-  } catch {
-    return undefined;
-  }
-}
-
-function serializeComparableMessage(message: ChatMessage): string {
-  return JSON.stringify({
-    role: message.role,
-    content: message.content || '',
-    timestamp: message.timestamp || 0,
-    name: message.name || null,
-    tool_call_id: message.tool_call_id || null,
-    tool_calls: message.tool_calls || null,
-    usage: message.usage || null,
-    model: message.model || null
-  });
-}
-
-function getSharedMessagePrefixLength(existingMessages: ChatMessage[], nextMessages: ChatMessage[]) {
-  const maxComparableLength = Math.min(existingMessages.length, nextMessages.length);
-  let prefixLength = 0;
-
-  while (prefixLength < maxComparableLength) {
-    if (serializeComparableMessage(existingMessages[prefixLength]) !== serializeComparableMessage(nextMessages[prefixLength])) {
-      break;
-    }
-    prefixLength += 1;
-  }
-
-  return prefixLength;
-}
-
-function mapSessionRowToSummary(session: {
-  id: string;
-  title: string;
-  agent_id: string;
-  created_at: number;
-  updated_at: number;
-}): SessionSummary {
-  return {
-    id: session.id,
-    title: session.title,
-    agentId: session.agent_id,
-    createdAt: session.created_at,
-    updatedAt: session.updated_at
-  };
-}
-
-function mapRunRowToSummary(run: {
-  id: string;
-  session_id: string;
-  agent_id: string;
-  goal: string;
-  user_input: string;
-  status: RunStatus;
-  final_response: string | null;
-  error: string | null;
-  waiting_approval_id: string | null;
-  created_at: number;
-  updated_at: number;
-  started_at: number | null;
-  completed_at: number | null;
-}): RunSummary {
-  return {
-    id: run.id,
-    sessionId: run.session_id,
-    agentId: run.agent_id,
-    goal: run.goal,
-    userInput: run.user_input,
-    status: run.status,
-    finalResponse: run.final_response || undefined,
-    error: run.error || undefined,
-    waitingApprovalId: run.waiting_approval_id || undefined,
-    createdAt: run.created_at,
-    updatedAt: run.updated_at,
-    startedAt: run.started_at || undefined,
-    completedAt: run.completed_at || undefined
-  };
-}
-
-function mapRunStepRow(step: {
-  id: string;
-  run_id: string;
-  step_index: number;
-  type: RunStepType;
-  status: RunStepStatus;
-  title: string;
-  input: string | null;
-  output: string | null;
-  error: string | null;
-  metadata: string | null;
-  created_at: number;
-  updated_at: number;
-}): RunStep {
-  return {
-    id: step.id,
-    runId: step.run_id,
-    stepIndex: step.step_index,
-    type: step.type,
-    status: step.status,
-    title: step.title,
-    input: parseJsonValue(step.input),
-    output: parseJsonValue(step.output),
-    error: step.error || undefined,
-    metadata: parseJsonValue<Record<string, unknown>>(step.metadata),
-    createdAt: step.created_at,
-    updatedAt: step.updated_at
-  };
-}
-
-function mapApprovalRowToRecord(row: {
-  id: string;
-  run_id: string;
-  step_id: string | null;
-  session_id: string | null;
-  tool_name: string;
-  args: string;
-  status: 'pending' | 'approved' | 'denied';
-  metadata: string | null;
-  created_at: number;
-  updated_at: number;
-  resolved_at: number | null;
-}): ApprovalRecord {
-  return {
-    id: row.id,
-    runId: row.run_id,
-    stepId: row.step_id || undefined,
-    sessionId: row.session_id || undefined,
-    toolName: row.tool_name,
-    args: parseJsonValue<Record<string, unknown>>(row.args) || {},
-    status: row.status,
-    metadata: parseJsonValue<Record<string, unknown>>(row.metadata),
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-    resolvedAt: row.resolved_at || undefined
-  };
-}
-
-function mapToolCallRecordRow(row: {
-  id: string;
-  run_id: string;
-  step_id: string | null;
-  tool_name: string;
-  args: string | null;
-  result: string | null;
-  error: string | null;
-  status: 'running' | 'waiting_approval' | 'success' | 'failed' | 'cancelled';
-  created_at: number;
-  updated_at: number;
-}): ToolCallRecord {
-  return {
-    id: row.id,
-    runId: row.run_id,
-    stepId: row.step_id || undefined,
-    toolName: row.tool_name,
-    args: parseJsonValue(row.args),
-    result: parseJsonValue(row.result),
-    error: row.error || undefined,
-    status: row.status,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at
-  };
-}
-
-function mapContextSummaryRow(row: {
-  id: string;
-  run_id: string;
-  session_id: string | null;
-  step_id: string | null;
-  summary: string;
-  created_at: number;
-}): RunContextSummary | null {
-  const parsedSummary = parseJsonValue<Omit<RunContextSummary, 'id' | 'runId' | 'sessionId' | 'stepId' | 'createdAt'>>(row.summary);
-  if (!parsedSummary) {
-    return null;
-  }
-
-  return {
-    id: row.id,
-    runId: row.run_id,
-    sessionId: row.session_id || undefined,
-    stepId: row.step_id || undefined,
-    activeTaskSummary: parsedSummary.activeTaskSummary || '',
-    activeSkillsSummary: parsedSummary.activeSkillsSummary || '',
-    availableSkillsSummary: parsedSummary.availableSkillsSummary || '',
-    availableToolsSummary: parsedSummary.availableToolsSummary || '',
-    compactedHistorySummary: parsedSummary.compactedHistorySummary || '',
-    unresolvedApprovals: parsedSummary.unresolvedApprovals || '',
-    selectedToolResults: parsedSummary.selectedToolResults || '',
-    workspaceRetrieval: parsedSummary.workspaceRetrieval || '',
-    memoryDigest: parsedSummary.memoryDigest || '',
-    layers: Array.isArray(parsedSummary.layers)
-      ? parsedSummary.layers.map((layer) => ({
-          id: String(layer.id || ''),
-          title: String(layer.title || ''),
-          kind: layer.kind === 'system' || layer.kind === 'support' || layer.kind === 'history' ? layer.kind : 'support',
-          messageCount: Number.isFinite(layer.messageCount) ? layer.messageCount : 0,
-          charCount: Number.isFinite(layer.charCount) ? layer.charCount : 0,
-          summary: String(layer.summary || '')
-        }))
-      : [],
-    recentMessageCount: Number.isFinite(parsedSummary.recentMessageCount) ? parsedSummary.recentMessageCount : 0,
-    omittedMessageCount: Number.isFinite(parsedSummary.omittedMessageCount) ? parsedSummary.omittedMessageCount : 0,
-    budget: {
-      maxContextChars: parsedSummary.budget?.maxContextChars || 0,
-      systemPromptChars: parsedSummary.budget?.systemPromptChars || 0,
-      supportChars: parsedSummary.budget?.supportChars || 0,
-      recentHistoryChars: parsedSummary.budget?.recentHistoryChars || 0,
-      totalChars: parsedSummary.budget?.totalChars || 0
-    },
-    createdAt: row.created_at
-  };
 }
 
 function getSessionAgentId(sessionId: string): string | null {
@@ -747,7 +206,9 @@ export function getSessionById(sessionId: string): Session | null {
 
   return {
     ...mapSessionRowToSummary(sessionRow),
-    messages: messages.map(mapMessageRowToChatMessage)
+    messages: messages
+      .filter((message) => isVisibleSessionMessage(message))
+      .map(mapMessageRowToChatMessage)
   };
 }
 
@@ -767,6 +228,7 @@ export function setActiveSessionId(sessionId: string | null, agentId?: string) {
 
 export function updateSessionMessages(sessionId: string, messages: ChatMessage[]) {
   const db = getDb();
+  const visibleMessages = messages.filter((message) => isVisibleSessionMessage(message));
   
   const transaction = db.transaction(() => {
     const now = Date.now();
@@ -785,11 +247,11 @@ export function updateSessionMessages(sessionId: string, messages: ChatMessage[]
       model?: string;
     }>;
     const existingMessages = existingRows.map(mapMessageRowToChatMessage);
-    const sharedPrefixLength = getSharedMessagePrefixLength(existingMessages, messages);
+    const sharedPrefixLength = getSharedMessagePrefixLength(existingMessages, visibleMessages);
     const insert = db.prepare('INSERT INTO messages (id, session_id, role, content, timestamp, name, tool_call_id, tool_calls, usage, model) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
 
-    if (sharedPrefixLength === existingMessages.length && messages.length >= existingMessages.length) {
-      for (const msg of messages.slice(sharedPrefixLength)) {
+    if (sharedPrefixLength === existingMessages.length && visibleMessages.length >= existingMessages.length) {
+      for (const msg of visibleMessages.slice(sharedPrefixLength)) {
         insert.run(
           uuidv4(),
           sessionId,
@@ -808,7 +270,7 @@ export function updateSessionMessages(sessionId: string, messages: ChatMessage[]
 
     db.prepare('DELETE FROM messages WHERE session_id = ?').run(sessionId);
 
-    for (const msg of messages) {
+    for (const msg of visibleMessages) {
       insert.run(
         uuidv4(), 
         sessionId, 
@@ -889,108 +351,27 @@ export function clearAllSessions() {
 export function getAgentStats(): AgentStats[] {
   const db = getDb();
   const sessions = db.prepare('SELECT id, agent_id FROM sessions').all() as {id: string, agent_id: string}[];
-  const messages = db.prepare('SELECT session_id, role, usage FROM messages').all() as {session_id: string, role: string, usage: string | null}[];
-  const runs = db.prepare('SELECT agent_id, status FROM runs').all() as {agent_id: string, status: RunStatus}[];
+  const messages = db.prepare('SELECT session_id, role, content, usage, tool_calls FROM messages').all() as {
+    session_id: string,
+    role: ChatMessage['role'],
+    content: string,
+    usage: string | null,
+    tool_calls: string | null
+  }[];
+  const runs = db.prepare('SELECT id, agent_id, status FROM runs').all() as {id: string, agent_id: string, status: RunStatus}[];
   const approvals = db.prepare('SELECT run_id, status FROM approval_records').all() as {run_id: string, status: ApprovalRecord['status']}[];
   const toolCalls = db.prepare('SELECT run_id, status FROM tool_call_records').all() as {
     run_id: string,
     status: ToolCallRecord['status']
   }[];
-  const statsMap = new Map<string, AgentStats>();
-  const sessionAgentMap = new Map(sessions.map(session => [session.id, session.agent_id || DEFAULT_AGENT_ID]));
-  const runAgentMap = new Map<string, string>();
-
-  const ensureAgentStats = (agentId: string) => {
-    const normalizedAgentId = agentId || DEFAULT_AGENT_ID;
-    if (!statsMap.has(normalizedAgentId)) {
-      statsMap.set(normalizedAgentId, {
-        agentId: normalizedAgentId,
-        totalSessions: 0,
-        totalMessages: 0,
-        promptTokens: 0,
-        completionTokens: 0,
-        totalTokens: 0,
-        totalRuns: 0,
-        completedRuns: 0,
-        failedRuns: 0,
-        cancelledRuns: 0,
-        waitingApprovalRuns: 0,
-        approvalRequests: 0,
-        approvalApproved: 0,
-        toolCalls: 0,
-        successfulToolCalls: 0
-      });
-    }
-    return statsMap.get(normalizedAgentId)!;
-  };
-
-  for (const session of sessions) {
-    const agentId = session.agent_id || DEFAULT_AGENT_ID;
-    const stat = ensureAgentStats(agentId);
-    stat.totalSessions += 1;
-  }
-
-  for (const msg of messages) {
-    const agentId = sessionAgentMap.get(msg.session_id);
-    if (!agentId) {
-      continue;
-    }
-
-    const stat = ensureAgentStats(agentId);
-    stat.totalMessages += 1;
-    const usage = parseUsage(msg.usage);
-    if (usage) {
-      stat.promptTokens += usage.promptTokens;
-      stat.completionTokens += usage.completionTokens;
-      stat.totalTokens += usage.totalTokens;
-    }
-  }
-
-  for (const run of runs) {
-    const agentId = run.agent_id || DEFAULT_AGENT_ID;
-    const stat = ensureAgentStats(agentId);
-    stat.totalRuns += 1;
-    if (run.status === 'completed') {
-      stat.completedRuns += 1;
-    } else if (run.status === 'failed') {
-      stat.failedRuns += 1;
-    } else if (run.status === 'cancelled') {
-      stat.cancelledRuns += 1;
-    } else if (run.status === 'waiting_approval') {
-      stat.waitingApprovalRuns += 1;
-    }
-  }
-
-  const runRows = db.prepare('SELECT id, agent_id FROM runs').all() as { id: string; agent_id: string }[];
-  for (const run of runRows) {
-    runAgentMap.set(run.id, run.agent_id || DEFAULT_AGENT_ID);
-  }
-
-  for (const approval of approvals) {
-    const agentId = runAgentMap.get(approval.run_id);
-    if (!agentId) {
-      continue;
-    }
-    const stat = ensureAgentStats(agentId);
-    stat.approvalRequests += 1;
-    if (approval.status === 'approved') {
-      stat.approvalApproved += 1;
-    }
-  }
-
-  for (const toolCall of toolCalls) {
-    const agentId = runAgentMap.get(toolCall.run_id);
-    if (!agentId) {
-      continue;
-    }
-    const stat = ensureAgentStats(agentId);
-    stat.toolCalls += 1;
-    if (toolCall.status === 'success') {
-      stat.successfulToolCalls += 1;
-    }
-  }
-
-  return Array.from(statsMap.values());
+  return buildAgentStats({
+    defaultAgentId: DEFAULT_AGENT_ID,
+    sessions,
+    messages,
+    runs,
+    approvals,
+    toolCalls
+  });
 }
 
 function getNextRunStepIndex(database: Database.Database, runId: string) {
@@ -1089,48 +470,6 @@ export function getLatestRun(sessionId: string): RunSummary | null {
   } | undefined;
 
   return row ? mapRunRowToSummary(row) : null;
-}
-
-function buildRunQueryWhere(query: RunQuery) {
-  const clauses: string[] = [];
-  const params: Array<string | number> = [];
-  const search = query.search?.trim().toLowerCase();
-  const status = query.status ?? 'all';
-  const sessionId = query.sessionId?.trim();
-  const agentId = query.agentId?.trim();
-
-  if (status !== 'all') {
-    clauses.push('status = ?');
-    params.push(status);
-  }
-
-  if (sessionId) {
-    clauses.push('session_id = ?');
-    params.push(sessionId);
-  }
-
-  if (agentId) {
-    clauses.push('agent_id = ?');
-    params.push(agentId);
-  }
-
-  if (search) {
-    const keyword = `%${search}%`;
-    clauses.push(`(
-      LOWER(id) LIKE ?
-      OR LOWER(goal) LIKE ?
-      OR LOWER(user_input) LIKE ?
-      OR LOWER(COALESCE(final_response, '')) LIKE ?
-      OR LOWER(COALESCE(error, '')) LIKE ?
-      OR LOWER(session_id) LIKE ?
-    )`);
-    params.push(keyword, keyword, keyword, keyword, keyword, keyword);
-  }
-
-  return {
-    whereClause: clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '',
-    params
-  };
 }
 
 export function queryRuns(query: RunQuery = {}): RunQueryResult {
@@ -1280,6 +619,17 @@ export function updateRun(
 
   database.prepare('UPDATE sessions SET updated_at = ? WHERE id = ?').run(updatedAt, current.sessionId);
   return getRunById(runId);
+}
+
+function touchRunActivity(runId: string, updatedAt: number = Date.now()) {
+  const current = getRunById(runId);
+  if (!current) {
+    return;
+  }
+
+  const database = getDb();
+  database.prepare('UPDATE runs SET updated_at = ? WHERE id = ?').run(updatedAt, runId);
+  database.prepare('UPDATE sessions SET updated_at = ? WHERE id = ?').run(updatedAt, current.sessionId);
 }
 
 export function createRunStep(
@@ -1447,6 +797,7 @@ export function createToolCallRecord(runId: string, stepId: string | null, toolN
       id, run_id, step_id, tool_name, args, status, created_at, updated_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `).run(id, runId, stepId, toolName, serializeJson(args), 'running', now, now);
+  touchRunActivity(runId, now);
   return id;
 }
 
@@ -1460,10 +811,11 @@ export function updateToolCallRecord(
 ) {
   const database = getDb();
   const current = database.prepare(`
-    SELECT result, error, status
+    SELECT run_id, result, error, status
     FROM tool_call_records
     WHERE id = ?
   `).get(recordId) as {
+    run_id: string;
     result: string | null;
     error: string | null;
     status: string;
@@ -1484,6 +836,10 @@ export function updateToolCallRecord(
     Date.now(),
     recordId
   );
+
+  if (current.run_id) {
+    touchRunActivity(current.run_id);
+  }
 }
 
 export function getToolCallRecords(runId: string): ToolCallRecord[] {
@@ -1546,6 +902,7 @@ export function createApprovalRecord(args: {
     now,
     now
   );
+  touchRunActivity(args.runId, now);
   return getApprovalRecord(id)!;
 }
 
@@ -1586,11 +943,15 @@ export function getApprovalRecord(approvalId: string): ApprovalRecord | null {
 export function resolveApprovalRecord(approvalId: string, approved: boolean) {
   const database = getDb();
   const now = Date.now();
+  const runRow = database.prepare('SELECT run_id FROM approval_records WHERE id = ?').get(approvalId) as { run_id: string } | undefined;
   database.prepare(`
     UPDATE approval_records
     SET status = ?, updated_at = ?, resolved_at = ?
     WHERE id = ?
   `).run(approved ? 'approved' : 'denied', now, now, approvalId);
+  if (runRow?.run_id) {
+    touchRunActivity(runRow.run_id, now);
+  }
   return getApprovalRecord(approvalId);
 }
 
@@ -1612,7 +973,7 @@ export function getPendingApproval(sessionId?: string): ApprovalRecord | null {
           resolved_at
         FROM approval_records
         WHERE session_id = ? AND status = 'pending'
-        ORDER BY updated_at DESC, created_at DESC
+        ORDER BY updated_at DESC, created_at DESC, rowid DESC
         LIMIT 1
       `).get(sessionId)
     : database.prepare(`
@@ -1630,7 +991,7 @@ export function getPendingApproval(sessionId?: string): ApprovalRecord | null {
           resolved_at
         FROM approval_records
         WHERE status = 'pending'
-        ORDER BY updated_at DESC, created_at DESC
+        ORDER BY updated_at DESC, created_at DESC, rowid DESC
         LIMIT 1
       `).get();
 
@@ -1720,10 +1081,12 @@ export function getRunTrace(query: RunTraceQuery | string): RunTrace | null {
 
 export function saveContextSnapshot(runId: string, snapshot: unknown, stepId?: string) {
   const database = getDb();
+  const now = Date.now();
   database.prepare(`
     INSERT INTO context_snapshots (id, run_id, step_id, snapshot, created_at)
     VALUES (?, ?, ?, ?, ?)
-  `).run(uuidv4(), runId, stepId || null, serializeJson(snapshot) || '{}', Date.now());
+  `).run(uuidv4(), runId, stepId || null, serializeJson(snapshot) || '{}', now);
+  touchRunActivity(runId, now);
 }
 
 export function getLatestContextSnapshot<T>(runId: string): T | null {
@@ -1759,6 +1122,7 @@ export function saveRunContextSummary(
 ) {
   const database = getDb();
   const run = getRunById(runId);
+  const now = Date.now();
   database.prepare(`
     INSERT INTO context_summaries (id, run_id, session_id, step_id, summary, created_at)
     VALUES (?, ?, ?, ?, ?, ?)
@@ -1768,8 +1132,9 @@ export function saveRunContextSummary(
     run?.sessionId || null,
     stepId || null,
     serializeJson(summary) || '{}',
-    Date.now()
+    now
   );
+  touchRunActivity(runId, now);
 }
 
 export function getLatestRunContextSummary(runId: string): RunContextSummary | null {
@@ -1843,137 +1208,6 @@ export function getRecentSessionContextSummaries(sessionId: string, limit = 3, e
     .filter((summary): summary is RunContextSummary => Boolean(summary));
 }
 
-function buildMonitoringWhereClause(query: MonitoringTokenQuery) {
-  const clauses = ['messages.usage IS NOT NULL'];
-  const params: Array<string | number> = [];
-  const agentId = query.agentId?.trim();
-  const model = query.model?.trim();
-  const role = query.role?.trim();
-  const sessionId = query.sessionId?.trim();
-  const search = query.search?.trim().toLowerCase();
-  const startTime = Number.isFinite(query.startTime) ? Number(query.startTime) : undefined;
-  const endTime = Number.isFinite(query.endTime) ? Number(query.endTime) : undefined;
-
-  if (agentId) {
-    clauses.push('sessions.agent_id = ?');
-    params.push(agentId);
-  }
-
-  if (model) {
-    clauses.push('COALESCE(messages.model, \'\') = ?');
-    params.push(model);
-  }
-
-  if (role && role !== 'all') {
-    clauses.push('messages.role = ?');
-    params.push(role);
-  }
-
-  if (sessionId) {
-    clauses.push('messages.session_id = ?');
-    params.push(sessionId);
-  }
-
-  if (typeof startTime === 'number') {
-    clauses.push('messages.timestamp >= ?');
-    params.push(startTime);
-  }
-
-  if (typeof endTime === 'number') {
-    clauses.push('messages.timestamp <= ?');
-    params.push(endTime);
-  }
-
-  if (search) {
-    const keyword = `%${search}%`;
-    clauses.push(`(
-      LOWER(COALESCE(messages.content, '')) LIKE ?
-      OR LOWER(COALESCE(messages.model, '')) LIKE ?
-      OR LOWER(COALESCE(sessions.title, '')) LIKE ?
-      OR LOWER(COALESCE(sessions.agent_id, '')) LIKE ?
-    )`);
-    params.push(keyword, keyword, keyword, keyword);
-  }
-
-  return {
-    whereClause: `WHERE ${clauses.join(' AND ')}`,
-    params,
-    normalizedAgentId: agentId
-  };
-}
-
-function buildTokenMetricFacets(
-  items: MonitoringTokenUsageItem[],
-  keySelector: (item: MonitoringTokenUsageItem) => string
-): TokenMetricFacet[] {
-  const facetMap = new Map<string, TokenMetricFacet>();
-
-  for (const item of items) {
-    const value = keySelector(item) || 'Unknown';
-    const current = facetMap.get(value) ?? {
-      value,
-      count: 0,
-      promptTokens: 0,
-      completionTokens: 0,
-      totalTokens: 0
-    };
-    current.count += 1;
-    current.promptTokens += item.promptTokens;
-    current.completionTokens += item.completionTokens;
-    current.totalTokens += item.totalTokens;
-    facetMap.set(value, current);
-  }
-
-  return Array.from(facetMap.values()).sort((left, right) => {
-    if (right.totalTokens !== left.totalTokens) {
-      return right.totalTokens - left.totalTokens;
-    }
-    if (right.count !== left.count) {
-      return right.count - left.count;
-    }
-    return left.value.localeCompare(right.value);
-  });
-}
-
-function mapMonitoringRows(rows: Array<{
-  id: string;
-  session_id: string;
-  session_title: string;
-  agent_id: string | null;
-  role: ChatMessage['role'];
-  content: string;
-  timestamp: number;
-  usage: string;
-  model: string | null;
-}>): MonitoringTokenUsageItem[] {
-  const agentModelMap = new Map(
-    getAgents().map((agent) => [agent.id, agent.model || ''])
-  );
-
-  return rows.flatMap((row) => {
-    const usage = parseUsage(row.usage);
-    if (!usage) {
-      return [];
-    }
-
-    const agentId = row.agent_id || DEFAULT_AGENT_ID;
-    const fallbackModel = agentModelMap.get(agentId) || '';
-    return [{
-      id: row.id,
-      sessionId: row.session_id,
-      sessionTitle: row.session_title,
-      agentId,
-      role: row.role,
-      content: row.content,
-      timestamp: row.timestamp,
-      model: row.model || fallbackModel || 'Unknown',
-      promptTokens: usage.promptTokens,
-      completionTokens: usage.completionTokens,
-      totalTokens: usage.totalTokens
-    }];
-  });
-}
-
 export function getTokenUsageDetails(query: MonitoringTokenQuery = {}): MonitoringTokenQueryResult {
   const db = getDb();
   const page = Number.isFinite(query.page) && Number(query.page) > 0 ? Math.floor(Number(query.page)) : 1;
@@ -1999,6 +1233,7 @@ export function getTokenUsageDetails(query: MonitoringTokenQuery = {}): Monitori
       messages.content,
       messages.timestamp,
       messages.usage,
+      messages.tool_calls,
       messages.model
     FROM messages
     INNER JOIN sessions ON sessions.id = messages.session_id
@@ -2017,6 +1252,7 @@ export function getTokenUsageDetails(query: MonitoringTokenQuery = {}): Monitori
     content: string;
     timestamp: number;
     usage: string;
+    tool_calls: string | null;
     model: string | null;
   }>;
   const aggregateRows = db.prepare(`
@@ -2031,10 +1267,12 @@ export function getTokenUsageDetails(query: MonitoringTokenQuery = {}): Monitori
     content: string;
     timestamp: number;
     usage: string;
+    tool_calls: string | null;
     model: string | null;
   }>;
-  const items = mapMonitoringRows(rows);
-  const aggregateItems = mapMonitoringRows(aggregateRows);
+  const agentModelMap = new Map(getAgents().map((agent) => [agent.id, agent.model || '']));
+  const items = mapMonitoringRows(rows, (agentId) => agentModelMap.get(agentId));
+  const aggregateItems = mapMonitoringRows(aggregateRows, (agentId) => agentModelMap.get(agentId));
   const aggregations = aggregateItems.reduce((acc, item) => ({
     promptTokens: acc.promptTokens + item.promptTokens,
     completionTokens: acc.completionTokens + item.completionTokens,

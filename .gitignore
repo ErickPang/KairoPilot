@@ -26,8 +26,11 @@ demo.json
 *.njsproj
 *.sln
 *.sw?
+*.test.ts
 name.md
 guihua.md
 ceshi.md
 .claude/*
 .qwen/*
+HARNESS_ANALYSIS.md
+

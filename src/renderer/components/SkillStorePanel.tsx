@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { IconChevronDown, IconFolder, IconRefresh, IconSkill } from './Icons';
 import './PluginStorePanel.css';
 import { useTranslation } from '../hooks/useTranslation';
@@ -48,7 +48,7 @@ function resolveImportErrorMessage(
   return t(SKILL_IMPORT_ERROR.unknown);
 }
 
-export function SkillStorePanel() {
+export const SkillStorePanel = memo(function SkillStorePanel() {
   const { t } = useTranslation();
   const [skills, setSkills] = useState<Record<string, SkillSummary[]>>({});
   const [storeSkillsByTab, setStoreSkillsByTab] = useState<Record<string, SkillStoreEntry[]>>({});
@@ -148,11 +148,11 @@ export function SkillStorePanel() {
     void loadBaseData();
   }, [loadBaseData]);
 
-  const getCategoryTitle = (agentId: string) => {
+  const getCategoryTitle = useCallback((agentId: string) => {
     if (agentId === 'public') return t('skills.publicCategory');
     const agent = agents.find(a => a.id === agentId);
     return agent ? t('skills.agentCategory', { agent: agent.name }) : t('skills.agentCategory', { agent: agentId });
-  };
+  }, [agents, t]);
 
   const getScopeLabel = (scope: string) => {
     if (scope === 'public') {
@@ -243,10 +243,24 @@ export function SkillStorePanel() {
   );
   const filteredStoreSkills = useMemo(() => {
     if (!normalizedMarketplaceSearchText) {
-      return visibleStoreSkills;
+      return [...visibleStoreSkills].sort((a, b) => {
+        const installDelta = Number(b.installedScopes.length > 0) - Number(a.installedScopes.length > 0);
+        if (installDelta !== 0) {
+          return installDelta;
+        }
+        return a.name.localeCompare(b.name);
+      });
     }
 
-    return visibleStoreSkills.filter((skill) => getMarketplaceSearchableText(skill).includes(normalizedMarketplaceSearchText));
+    return visibleStoreSkills
+      .filter((skill) => getMarketplaceSearchableText(skill).includes(normalizedMarketplaceSearchText))
+      .sort((a, b) => {
+        const installDelta = Number(b.installedScopes.length > 0) - Number(a.installedScopes.length > 0);
+        if (installDelta !== 0) {
+          return installDelta;
+        }
+        return a.name.localeCompare(b.name);
+      });
   }, [normalizedMarketplaceSearchText, visibleStoreSkills]);
   const marketplaceTotalPages = useMemo(
     () => Math.max(1, Math.ceil(filteredStoreSkills.length / MARKETPLACE_PAGE_SIZE)),
@@ -563,8 +577,18 @@ export function SkillStorePanel() {
     }
   };
 
-  const publicSkills = skills.public ?? [];
-  const agentSkillEntries = Object.entries(skills).filter(([key]) => key !== 'public');
+  const publicSkills = useMemo(() => skills.public ?? [], [skills]);
+  const sortedPublicSkills = useMemo(
+    () => [...publicSkills].sort((a, b) => a.name.localeCompare(b.name)),
+    [publicSkills]
+  );
+  const agentSkillEntries = useMemo(
+    () =>
+      Object.entries(skills)
+        .filter(([key]) => key !== 'public')
+        .sort(([agentA], [agentB]) => getCategoryTitle(agentA).localeCompare(getCategoryTitle(agentB))),
+    [getCategoryTitle, skills]
+  );
   const totalInstalled = publicSkills.length + agentSkillEntries.reduce((sum, [, agentSkills]) => sum + agentSkills.length, 0);
   const agentInstalled = totalInstalled - publicSkills.length;
 
@@ -581,7 +605,13 @@ export function SkillStorePanel() {
             </div>
             <div className="config-subtitle">{t('skills.subtitle')}</div>
           </div>
-          <button onClick={() => { void handleRefresh(); }} className="btn btn-secondary" disabled={loading || savingRegistry || hasMarketplaceLoading}>
+          <button
+            type="button"
+            onClick={() => { void handleRefresh(); }}
+            className={`btn btn-secondary ${loading || hasMarketplaceLoading ? 'is-loading' : ''}`}
+            disabled={loading || savingRegistry || hasMarketplaceLoading}
+            title={t('common.refresh')}
+          >
             <IconRefresh size={16} className={loading || hasMarketplaceLoading ? 'spinning' : ''} />
           </button>
         </div>
@@ -650,38 +680,42 @@ export function SkillStorePanel() {
 
             <SkillSectionPanel
               title={getCategoryTitle('public')}
-              count={publicSkills.length}
+              count={sortedPublicSkills.length}
               defaultOpen={true}
             >
-              {publicSkills.length === 0 ? (
+              {sortedPublicSkills.length === 0 ? (
                 <div className="empty-state">{t('skills.noPublic')}</div>
               ) : (
                 <div className="skills-grid">
-                  {publicSkills.map(skill => (
+                  {sortedPublicSkills.map(skill => (
                     <SkillItem key={skill.id} skill={skill} />
                   ))}
                 </div>
               )}
             </SkillSectionPanel>
 
-            {agentSkillEntries.map(([agentId, agentSkills]) => (
-              <SkillSectionPanel
-                key={agentId}
-                title={getCategoryTitle(agentId)}
-                count={agentSkills.length}
-                defaultOpen={false}
-              >
-                <div className="skills-grid">
-                  {agentSkills.length === 0 ? (
-                    <div className="empty-state">{t('skills.noAgent')}</div>
-                  ) : (
-                    agentSkills.map(skill => (
-                      <SkillItem key={skill.id} skill={skill} />
-                    ))
-                  )}
-                </div>
-              </SkillSectionPanel>
-            ))}
+            {agentSkillEntries.map(([agentId, agentSkills]) => {
+              const sortedAgentSkills = [...agentSkills].sort((a, b) => a.name.localeCompare(b.name));
+
+              return (
+                <SkillSectionPanel
+                  key={agentId}
+                  title={getCategoryTitle(agentId)}
+                  count={sortedAgentSkills.length}
+                  defaultOpen={false}
+                >
+                  <div className="skills-grid">
+                    {sortedAgentSkills.length === 0 ? (
+                      <div className="empty-state">{t('skills.noAgent')}</div>
+                    ) : (
+                      sortedAgentSkills.map(skill => (
+                        <SkillItem key={skill.id} skill={skill} />
+                      ))
+                    )}
+                  </div>
+                </SkillSectionPanel>
+              );
+            })}
           </div>
         )}
 
@@ -870,7 +904,7 @@ export function SkillStorePanel() {
                       value={sourceDraftType}
                       onChange={(value) => setSourceDraftType(value as SkillsRegistrySourceType)}
                       options={sourceTypeOptions}
-                      style={{ width: '100%' }}
+                      className="select-fill"
                     />
                   </label>
                   <label className="skill-source-field skill-source-field-full">
@@ -888,7 +922,8 @@ export function SkillStorePanel() {
                 <button type="button" className="btn btn-secondary" onClick={handleCloseSourceModal} disabled={savingRegistry}>
                   {t('common.cancel')}
                 </button>
-                <button type="button" className="btn btn-primary" onClick={() => { void handleAddRegistrySource(); }} disabled={savingRegistry}>
+                <button type="button" className={`btn btn-primary ${savingRegistry ? 'is-loading' : ''}`} onClick={() => { void handleAddRegistrySource(); }} disabled={savingRegistry}>
+                  {savingRegistry && <IconRefresh size={14} className="spinning" />}
                   {savingRegistry ? t('skills.savingSource') : t('skills.saveSource')}
                 </button>
               </div>
@@ -914,7 +949,7 @@ export function SkillStorePanel() {
                   value={importScope}
                   onChange={setImportScope}
                   options={scopeSelectOptions}
-                  style={{ width: '100%' }}
+                  className="select-fill"
                   dropdownTitle={t('skills.installScope')}
                 />
               </div>
@@ -1011,7 +1046,7 @@ export function SkillStorePanel() {
                     value={reviewScope}
                     onChange={setReviewScope}
                     options={scopeSelectOptions}
-                    style={{ width: '100%' }}
+                    className="select-fill"
                     dropdownTitle={t('skills.installScope')}
                   />
                 </div>
@@ -1115,7 +1150,7 @@ export function SkillStorePanel() {
       )}
     </div>
   );
-}
+});
 
 function SkillSectionPanel({
   title,
