@@ -1,6 +1,6 @@
 import { memo } from 'react';
 import { AgentConfig, ModelConfig } from '../../types';
-import { IconBot, IconPlus, IconCheck, IconEdit, IconTrash, IconCpu, IconFolder } from '../Icons';
+import { IconCheck, IconEdit, IconTrash, IconCpu, IconFolder } from '../Icons';
 import { useTranslation } from '../../hooks/useTranslation';
 
 interface AgentListProps {
@@ -23,19 +23,11 @@ export const AgentList = memo(function AgentList({
   onSetActiveAgent 
 }: AgentListProps) {
   const { t } = useTranslation();
+  const sortedAgents = [...agents].sort((a, b) => a.name.localeCompare(b.name));
 
   return (
-    <div className="config-section">
-      <div className="config-section-header">
-        <h3 className="config-section-title" style={{ margin: 0, border: 'none', padding: 0 }}>
-          <IconBot size={20} /> {t('config.agents')}
-        </h3>
-        <button onClick={onCreateAgent} className="btn btn-primary">
-          <IconPlus size={16} /> {t('config.addAgent')}
-        </button>
-      </div>
-
-      {agents.map(agent => {
+    <div className="config-section config-page-section">
+      {sortedAgents.map(agent => {
         const isActive = agent.id === activeAgentId;
         const linkedModel = models.find(m => agent.model.startsWith(`${m.id}/`));
         const modelId = agent.model.includes('/') ? agent.model.split('/')[1] : '';
@@ -43,25 +35,26 @@ export const AgentList = memo(function AgentList({
         return (
           <div key={agent.id} className={`config-card ${isActive ? 'active' : ''}`}>
             <div className="card-info">
-              <h4>
-                {agent.name}
-                {isActive && <span className="badge badge-primary" style={{ marginLeft: '0.5rem' }}>{t('config.active')}</span>}
-              </h4>
+              <div className="config-card-label-row">
+                <h4>{agent.name}</h4>
+                {isActive && <span className="badge badge-primary">{t('config.active')}</span>}
+              </div>
               <div className="card-meta">
-                <span title={t('config.linkedModel')}>
-                  <IconCpu size={14} style={{ marginRight: '4px', verticalAlign: 'text-bottom' }} />
+                <span className="card-meta-item" title={t('config.linkedModel')}>
+                  <IconCpu size={14} className="card-meta-icon" />
                   {linkedModel ? `${linkedModel.name} (${modelId})` : 'Unknown'}
                 </span>
-                <span>•</span>
-                <span title={t('config.workspace')}>
-                  <IconFolder size={14} style={{ marginRight: '4px', verticalAlign: 'text-bottom' }} />
+                <span className="card-meta-divider" aria-hidden="true">•</span>
+                <span className="card-meta-item" title={t('config.workspace')}>
+                  <IconFolder size={14} className="card-meta-icon" />
                   {agent.workspace ? t('config.customWorkspace') : t('config.defaultWorkspace')}
                 </span>
               </div>
             </div>
             <div className="card-actions">
               {!isActive && (
-                <button 
+                <button
+                  type="button"
                   onClick={() => onSetActiveAgent(agent.id)}
                   className="btn-icon"
                   title={t('config.setActive')}
@@ -69,7 +62,8 @@ export const AgentList = memo(function AgentList({
                   <IconCheck size={18} />
                 </button>
               )}
-              <button 
+              <button
+                type="button"
                 onClick={() => onEditAgent(agent)}
                 className="btn-icon"
                 title={t('common.edit')}
@@ -77,7 +71,8 @@ export const AgentList = memo(function AgentList({
                 <IconEdit size={18} />
               </button>
               {agent.id !== 'mainAgent' && (
-                <button 
+                <button
+                  type="button"
                   onClick={() => onDeleteAgent(agent.id)}
                   className="btn-icon danger"
                   title={t('common.delete')}
@@ -91,9 +86,9 @@ export const AgentList = memo(function AgentList({
       })}
 
       {agents.length === 0 && (
-        <div style={{ padding: '3rem', textAlign: 'center', opacity: 0.5, border: '1px dashed var(--border)', borderRadius: 'var(--radius-lg)' }}>
+        <div className="config-list-empty">
           <p>{t('config.noAgents')}</p>
-          <button onClick={onCreateAgent} className="btn btn-primary" style={{ marginTop: '1rem' }}>
+          <button type="button" onClick={onCreateAgent} className="btn btn-primary">
             {t('config.createFirstAgent')}
           </button>
         </div>

@@ -1,18 +1,21 @@
-import { useState, useEffect, useCallback } from 'react';
-import { ModelConfig, AgentConfig, FetchModelsResult, ProviderCapabilitySnapshot } from '../types';
-import { IconSettings } from './Icons';
+import { memo, useState, useEffect, useCallback } from 'react';
+import { ModelConfig, AgentConfig, FetchModelsResult, ProviderCapabilitySnapshot, AppNotice } from '../types';
 import { useTranslation } from '../hooks/useTranslation';
 import { ModelList } from './config/ModelList';
 import { AgentList } from './config/AgentList';
 import { ModelEditor } from './config/ModelEditor';
 import { AgentEditor } from './config/AgentEditor';
 import { GeneralSettings } from './config/GeneralSettings';
+import { IconBot, IconCpu, IconPlus, IconSettings } from './Icons';
 import { KAIRO_INVOKE } from '../../shared/ipc';
+import { createErrorNotice } from '../hooks/errorUtils';
 
 interface ConfigPanelProps {
   models: ModelConfig[];
   agents: AgentConfig[];
   activeAgentId: string | null;
+  onClearNotice: () => void;
+  onReportNotice: (notice: AppNotice) => void;
   onSaveModel: (model: ModelConfig) => void;
   onDeleteModel: (id: string) => void;
   onSaveAgent: (agent: AgentConfig) => void;
@@ -34,8 +37,9 @@ const EmptyModelConfig: ModelConfig = {
   availableModels: []
 };
 
-export function ConfigPanel({ 
+export const ConfigPanel = memo(function ConfigPanel({ 
   models, agents, activeAgentId, 
+  onClearNotice, onReportNotice,
   onSaveModel, onDeleteModel, 
   onSaveAgent, onDeleteAgent, onSetActiveAgent,
   onDescribeProvider, onFetchModels, availableModels, activeSection 
@@ -70,30 +74,31 @@ export function ConfigPanel({
 
   const handleSaveModel = useCallback(() => {
     if (editingModel) {
+      onClearNotice();
       const normalizedName = editingModel.name.trim();
       const normalizedApiKey = editingModel.apiKey.trim();
       if (!/^[a-zA-Z][a-zA-Z0-9_-]*$/.test(normalizedName)) {
-        alert('模型名称只能使用英文、数字、下划线或短横线，且必须以英文开头');
+        onReportNotice(createErrorNotice(t('config.validation.modelName'), 'model_validation'));
         return;
       }
       if (!editingModel.provider) {
-        alert('请先选择提供商');
+        onReportNotice(createErrorNotice(t('config.validation.provider'), 'model_validation'));
         return;
       }
       if (editingModel.provider !== 'ollama' && !normalizedApiKey) {
-        alert('请先填写 API Key');
+        onReportNotice(createErrorNotice(t('config.validation.apiKey'), 'model_validation'));
         return;
       }
       const selectedModelIds = (editingModel.availableModels || []).map(item => item.id).filter(Boolean);
       if (selectedModelIds.length === 0 && !editingModel.model.trim()) {
-        alert('请至少选择一个模型ID');
+        onReportNotice(createErrorNotice(t('config.validation.modelId'), 'model_validation'));
         return;
       }
       onSaveModel({ ...editingModel, id: normalizedName, name: normalizedName, apiKey: normalizedApiKey });
       setView('list');
       setEditingModel(null);
     }
-  }, [editingModel, onSaveModel]);
+  }, [editingModel, onClearNotice, onReportNotice, onSaveModel, t]);
 
   const handleEditAgent = useCallback((agent: AgentConfig) => {
     setEditingAgent({ ...agent });
@@ -120,27 +125,85 @@ export function ConfigPanel({
     }
   }, [editingAgent, onSaveAgent]);
 
+  const headerMeta = (() => {
+    if (view === 'edit-model') {
+      return {
+        Icon: IconCpu,
+        title: editingModel?.id ? t('config.editModel') : t('config.newModel'),
+        description: t('settings.modelEditorDescription')
+      };
+    }
+
+    if (view === 'edit-agent') {
+      return {
+        Icon: IconBot,
+        title: editingAgent?.id ? t('config.editAgent') : t('config.newAgent'),
+        description: t('settings.agentEditorDescription')
+      };
+    }
+
+    if (activeSection === 'model') {
+      return {
+        Icon: IconCpu,
+        title: t('config.models'),
+        description: t('settings.modelOverviewDescription')
+      };
+    }
+
+    if (activeSection === 'agent') {
+      return {
+        Icon: IconBot,
+        title: t('config.agents'),
+        description: t('settings.agentOverviewDescription')
+      };
+    }
+
+    return {
+      Icon: IconSettings,
+      title: t('settings.generalOverviewTitle'),
+      description: t('settings.generalOverviewDescription')
+    };
+  })();
+  const HeaderIcon = headerMeta.Icon;
+  const headerAction = view === 'list'
+    ? activeSection === 'model'
+      ? {
+          label: t('config.addModel'),
+          onClick: handleCreateModel
+        }
+      : activeSection === 'agent'
+        ? {
+            label: t('config.addAgent'),
+            onClick: () => { void handleCreateAgent(); }
+          }
+        : null
+    : null;
+
   return (
     <div className="config-panel">
       {view === 'list' && (
         <>
-          <div className="config-header">
-            <div>
-              <div className="config-title">
-                <div style={{ 
-                  width: '32px', height: '32px', borderRadius: 'var(--radius-md)', 
-                  background: 'var(--primary)', display: 'flex', alignItems: 'center', 
-                  justifyContent: 'center', color: 'var(--primary-fg)', marginRight: '0.75rem' 
-                }}>
-                  <IconSettings size={20} />
+          <div className="config-header config-page-header">
+            <div className="config-page-title-block">
+              <div className="config-page-title-row">
+                <div className="config-page-title-main">
+                  <div className="config-page-icon">
+                    <HeaderIcon size={20} />
+                  </div>
+                  <div>
+                    <div className="config-title">{headerMeta.title}</div>
+                  </div>
                 </div>
-                {t('settings.title')}
+                {headerAction && (
+                  <button type="button" className="btn btn-primary config-page-header-action" onClick={headerAction.onClick}>
+                    <IconPlus size={16} /> {headerAction.label}
+                  </button>
+                )}
               </div>
-              <div className="config-subtitle">{t('settings.subtitle')}</div>
+              <div className="config-subtitle config-page-subtitle">{headerMeta.description}</div>
             </div>
           </div>
-
-          <div className="config-content">
+          <div className="config-content config-content-standalone config-detail-shell">
             {(activeSection === 'model' || !activeSection) && (
               <ModelList 
                 models={models}
@@ -171,6 +234,8 @@ export function ConfigPanel({
           setEditingModel={setEditingModel}
           isEditingExisting={isEditingExistingModel}
           availableModels={availableModels}
+          onClearNotice={onClearNotice}
+          onReportNotice={onReportNotice}
           onDescribeProvider={onDescribeProvider}
           onFetchModels={onFetchModels}
           onSave={handleSaveModel}
@@ -196,4 +261,4 @@ export function ConfigPanel({
       )}
     </div>
   );
-}
+});

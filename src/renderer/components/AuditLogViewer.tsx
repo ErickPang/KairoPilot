@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { memo, useState, useEffect, useMemo, useCallback } from 'react';
 import { AuditLogEntry, AuditLogQueryResult, RunQueryResult, RunQueryStatus, RunStep, RunSummary, RunTrace } from '../types';
 import { IconArrowLeft, IconRefresh, IconShield, IconTool, IconCheck, IconX } from './Icons';
 import { Select } from './Select';
@@ -6,6 +6,7 @@ import { useTranslation } from '../hooks/useTranslation';
 import './AuditLogViewer.css';
 import { KAIRO_INVOKE } from '../../shared/ipc';
 import { resolvePreferredTraceSelection } from './chat_trace_utils';
+import { getErrorMessage, logRendererError } from '../hooks/errorUtils';
 
 const RUN_PAGE_SIZE = 12;
 const AUDIT_PAGE_SIZE = 20;
@@ -16,6 +17,7 @@ type TraceDetailFilter = 'all' | 'io' | 'tools' | 'approvals' | 'audits' | 'summ
 interface AuditLogViewerProps {
   scopedRunId?: string | null;
   onClearScopedRun?: () => void;
+  onReportError?: (message: string, source: string) => void;
   latestRun?: RunSummary | null;
   activeRunSteps?: RunStep[];
   handleCancelRun?: () => void;
@@ -84,9 +86,10 @@ function getStatusTone(status?: string) {
   return 'success';
 }
 
-export default function AuditLogViewer({
+const AuditLogViewer = memo(function AuditLogViewer({
   scopedRunId,
   onClearScopedRun,
+  onReportError,
   latestRun,
   activeRunSteps = [],
   handleCancelRun,
@@ -162,12 +165,13 @@ export default function AuditLogViewer({
       });
       setRunResult(data);
     } catch (error) {
-      console.error('Failed to load runs:', error);
+      logRendererError('Failed to load runs', error);
+      onReportError?.(t('audit.error.loadRuns', { error: getErrorMessage(error) }), 'audit_runs');
       setRunResult(createEmptyRunResult());
     } finally {
       setRunsLoading(false);
     }
-  }, [runPage, runSearchText, runStatusFilter]);
+  }, [onReportError, runPage, runSearchText, runStatusFilter, t]);
 
   const fetchLogs = useCallback(async () => {
     if (!currentRunId) {
@@ -188,12 +192,13 @@ export default function AuditLogViewer({
       });
       setResult(data);
     } catch (error) {
-      console.error('Failed to load audit logs:', error);
+      logRendererError('Failed to load audit logs', error);
+      onReportError?.(t('audit.error.loadLogs', { error: getErrorMessage(error) }), 'audit_logs');
       setResult(createEmptyAuditResult());
     } finally {
       setLoading(false);
     }
-  }, [currentRunId, page, searchText, statusFilter, tagFilter, toolFilter]);
+  }, [currentRunId, onReportError, page, searchText, statusFilter, t, tagFilter, toolFilter]);
 
   const fetchTrace = useCallback(async (runId: string | null) => {
     if (!runId) {
@@ -217,12 +222,13 @@ export default function AuditLogViewer({
       setTrace(data);
       setSelectedStepId((current) => resolvePreferredTraceSelection(data?.steps || [], current).stepId);
     } catch (error) {
-      console.error('Failed to load run trace:', error);
+      logRendererError('Failed to load run trace', error);
+      onReportError?.(t('audit.error.loadTrace', { error: getErrorMessage(error) }), 'audit_trace');
       setTrace(null);
     } finally {
       setTraceLoading(false);
     }
-  }, []);
+  }, [onReportError, t]);
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
@@ -303,7 +309,8 @@ export default function AuditLogViewer({
         setSelectedStepId((current) => resolvePreferredTraceSelection(data?.steps || [], current).stepId);
       } catch (error) {
         if (!cancelled) {
-          console.error('Failed to load run trace:', error);
+          logRendererError('Failed to load run trace', error);
+          onReportError?.(t('audit.error.loadTrace', { error: getErrorMessage(error) }), 'audit_trace');
           setTrace(null);
         }
       } finally {
@@ -318,7 +325,7 @@ export default function AuditLogViewer({
     return () => {
       cancelled = true;
     };
-  }, [activeRunSteps.length, currentRunId, isDetailPage, latestRun?.id, latestRun?.status, latestRun?.updatedAt]);
+  }, [activeRunSteps.length, currentRunId, isDetailPage, latestRun?.id, latestRun?.status, latestRun?.updatedAt, onReportError, t]);
 
   const runSteps = useMemo(() => {
     if (latestRun?.id === currentRunId && activeRunSteps.length > 0) {
@@ -498,7 +505,7 @@ export default function AuditLogViewer({
                   setRunPage(1);
                 }}
                 options={runStatusSelectOptions}
-                style={{ width: '100%' }}
+                className="select-fill"
               />
               <button className="btn btn-secondary audit-control-button" onClick={handleClearRunFilters}>
                 {t('audit.clearFilters')}
@@ -516,7 +523,7 @@ export default function AuditLogViewer({
             <div className="audit-list-body">
               {runsLoading ? (
                 <div className="audit-viewer-loading">
-                  <IconRefresh size={32} className="spinning" style={{ opacity: 0.5, marginBottom: '1rem', display: 'inline-block' }} />
+                  <IconRefresh size={32} className="spinning audit-loading-spinner" />
                   <div>{t('common.loading')}</div>
                 </div>
               ) : runResult.items.length === 0 ? (
@@ -592,7 +599,7 @@ export default function AuditLogViewer({
     <div className="config-panel">
       <div className="config-header animate-stagger-1">
         <div>
-          <button type="button" className="audit-back-button" onClick={handleBackToList}>
+          <button type="button" className="btn btn-secondary audit-control-button audit-toolbar-back" onClick={handleBackToList}>
             <IconArrowLeft size={16} />
             {t('audit.backToRunList')}
           </button>
@@ -937,7 +944,7 @@ export default function AuditLogViewer({
                     setPage(1);
                   }}
                   options={statusSelectOptions}
-                  style={{ width: '100%' }}
+                  className="select-fill"
                 />
                 <Select
                   value={toolFilter}
@@ -946,7 +953,7 @@ export default function AuditLogViewer({
                     setPage(1);
                   }}
                   options={toolSelectOptions}
-                  style={{ width: '100%' }}
+                  className="select-fill"
                 />
                 <Select
                   value={tagFilter}
@@ -955,7 +962,7 @@ export default function AuditLogViewer({
                     setPage(1);
                   }}
                   options={tagSelectOptions}
-                  style={{ width: '100%' }}
+                  className="select-fill"
                 />
                 <button className="btn btn-secondary audit-control-button" onClick={handleClearLogFilters}>
                   {t('audit.clearFilters')}
@@ -999,12 +1006,12 @@ export default function AuditLogViewer({
                         <div>
                           {log.error ? (
                             <span className="badge audit-log-badge is-error">
-                              <IconX size={14} style={{ marginRight: '4px', verticalAlign: 'text-bottom' }} />
+                              <IconX size={14} className="audit-log-badge-icon" />
                               {t('common.error')}
                             </span>
                           ) : (
                             <span className="badge audit-log-badge is-success">
-                              <IconCheck size={14} style={{ marginRight: '4px', verticalAlign: 'text-bottom' }} />
+                              <IconCheck size={14} className="audit-log-badge-icon" />
                               {t('common.success')}
                             </span>
                           )}
@@ -1069,4 +1076,6 @@ export default function AuditLogViewer({
       </div>
     </div>
   );
-}
+});
+
+export default AuditLogViewer;

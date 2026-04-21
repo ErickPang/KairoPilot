@@ -73,6 +73,7 @@ When a user asks you to perform a task and a relevant skill exists:
 2. Read the returned instructions carefully.
 3. Use read_skill_resource only when the skill refers to additional files that must be loaded on demand.
 4. Use run_skill_script only when the loaded skill explicitly requires a bundled script and the task genuinely needs execution.
+5. Do NOT use general filesystem tools like read_file or list_directory to inspect skill packages. Skill resources must be accessed through the dedicated skill tools after load_skill succeeds.
 Do NOT attempt to guess or perform a skill-guided workflow without loading the corresponding skill first.
 </skills_instructions>`;
 

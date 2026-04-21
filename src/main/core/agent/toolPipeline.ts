@@ -5,7 +5,9 @@ import {
 } from '../../store/chat';
 import type { ToolDefinition } from '../llm/types';
 import { PermissionGuard, redactSensitiveValue } from '../security/permissions';
+import { unwrapToolExecutionResult } from '../tools/result';
 import { normalizeExecuteCommandInput } from '../tools/shell';
+import { getConfiguredWebSearchProviders } from '../tools/web';
 import type { RuntimeUpdate } from './runEngine';
 
 export type PermissionDecision =
@@ -90,7 +92,28 @@ export async function executeApprovedTool(params: ExecuteApprovedToolParams) {
   });
 
   try {
-    const output = await tool.execute(args);
+    const rawOutput = await tool.execute(args);
+    const executionResult = unwrapToolExecutionResult(rawOutput);
+    if (!executionResult.ok) {
+      await recordToolFailure({
+        runId,
+        sessionId,
+        permissionGuard,
+        toolName,
+        callId,
+        args,
+        errorMessage: executionResult.error,
+        onUpdate,
+        toolStepId,
+        toolRecordId,
+        policyTags: [...policyTags, 'decision:error'],
+        auditLog,
+        emitUpdate,
+        appendToolMessage
+      });
+      return;
+    }
+    const output = executionResult.data;
     const redactedOutput = permissionGuard.shouldRedactSensitiveOutput()
       ? redactSensitiveValue(output)
       : output;
@@ -303,6 +326,16 @@ export function checkPermission(
 
   if (toolName === 'run_skill_script') {
     const scriptPath = typeof args.scriptPath === 'string' ? args.scriptPath.trim().toLowerCase() : '';
+    const supportedScriptExtensions = ['.js', '.mjs', '.cjs', '.py', '.sh'];
+    const isSupportedSkillScript = scriptPath.startsWith('scripts/')
+      && supportedScriptExtensions.some((extension) => scriptPath.endsWith(extension));
+    if (!isSupportedSkillScript) {
+      return {
+        kind: 'deny',
+        args,
+        error: `Permission Denied: Skill scripts must stay under scripts/ and use one of ${supportedScriptExtensions.join(', ')}.`
+      };
+    }
     let command = typeof args.command === 'string' ? args.command.trim() : '';
     if (!command) {
       if (scriptPath.endsWith('.js') || scriptPath.endsWith('.mjs') || scriptPath.endsWith('.cjs')) {
@@ -330,14 +363,45 @@ export function checkPermission(
     }
   }
 
-  if (toolName === 'web_search' || toolName === 'fetch_webpage') {
-    const urlToCheck = (args.url || 'https://html.duckduckgo.com/html/') as string;
-    if (!permissionGuard.checkNetwork(urlToCheck)) {
-      return {
-        kind: 'deny',
-        args,
-        error: 'Real-time web access is disabled for this agent. Enable network permission in Agent configuration before requesting latest or current information.'
-      };
+  if (toolName === 'web_search' || toolName === 'fetch_webpage' || toolName === 'http_request') {
+    if (toolName === 'web_search') {
+      const searchProviders = getConfiguredWebSearchProviders();
+      const allowedSearchProviders = searchProviders
+        .filter((provider) => provider.permissionUrls.some((permissionUrl) => permissionGuard.checkNetwork(permissionUrl)))
+        .map((provider) => provider.id);
+
+      if (allowedSearchProviders.length === 0) {
+        const allowedTargets = permissionGuard.getAllowedNetworkTargets();
+        const hasAllowlist = allowedTargets.length > 0;
+        const providerTargets = searchProviders
+          .map((provider) => `${provider.label}: ${provider.permissionUrls.join(' | ')}`)
+          .join(', ');
+        const allowlistHint = hasAllowlist
+          ? ` Current allowed network targets: ${allowedTargets.join(', ')}.`
+          : ' No allowed network targets are configured, so this usually means the execution profile or network toggle is still blocking access.';
+        return {
+          kind: 'deny',
+          args,
+          error: `Real-time web access is not available for this request. web_search requires at least one reachable search provider. Supported providers: ${providerTargets}.${allowlistHint}`
+        };
+      }
+
+      args.__allowedSearchProviders = allowedSearchProviders;
+    } else {
+      const urlToCheck = args.url as string;
+      if (!permissionGuard.checkNetwork(urlToCheck)) {
+        const allowedTargets = permissionGuard.getAllowedNetworkTargets();
+        const hasAllowlist = allowedTargets.length > 0;
+        const allowlistHint = hasAllowlist
+          ? ` Current allowed network targets: ${allowedTargets.join(', ')}.`
+          : ' No allowed network targets are configured, so this usually means the execution profile or network toggle is still blocking access.';
+        const toolLabel = toolName === 'http_request' ? 'http_request' : 'fetch_webpage';
+        return {
+          kind: 'deny',
+          args,
+          error: `Real-time web access is not available for this request. ${toolLabel} requires access to the target page URL.${allowlistHint}`
+        };
+      }
     }
   }
 

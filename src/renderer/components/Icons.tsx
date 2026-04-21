@@ -14,11 +14,14 @@ import {
   Folder,
   Cpu,
   ArrowLeft,
+  ArrowUp,
+  ArrowDown,
   Check,
   Terminal,
   ChevronDown,
   Puzzle,
   Activity,
+  Search,
   Zap
 } from 'lucide-react';
 import { CSSProperties } from 'react';
@@ -36,6 +39,14 @@ export const IconDashboard = ({ size = 24, className = '', ...props }: IconProps
 
 export const IconArrowLeft = ({ size = 24, className = '', ...props }: IconProps) => (
   <ArrowLeft size={size} className={className} strokeWidth={1.5} {...props} />
+);
+
+export const IconArrowUp = ({ size = 24, className = '', ...props }: IconProps) => (
+  <ArrowUp size={size} className={className} strokeWidth={1.5} {...props} />
+);
+
+export const IconArrowDown = ({ size = 24, className = '', ...props }: IconProps) => (
+  <ArrowDown size={size} className={className} strokeWidth={1.5} {...props} />
 );
 
 export const IconCheck = ({ size = 24, className = '', ...props }: IconProps) => (
@@ -112,4 +123,8 @@ export const IconPlugin = ({ size = 24, className = '', ...props }: IconProps) =
 
 export const IconSkill = ({ size = 24, className = '', ...props }: IconProps) => (
   <Zap size={size} className={className} strokeWidth={1.5} {...props} />
+);
+
+export const IconSearch = ({ size = 24, className = '', ...props }: IconProps) => (
+  <Search size={size} className={className} strokeWidth={1.5} {...props} />
 );

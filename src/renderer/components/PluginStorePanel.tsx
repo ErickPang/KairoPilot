@@ -1,9 +1,10 @@
-import { useState, useEffect } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { IconPlugin, IconTrash, IconRefresh } from './Icons';
 import './PluginStorePanel.css';
 import { useTranslation } from '../hooks/useTranslation';
-import type { AgentConfig } from '../types';
+import type { AgentConfig, AppConfirmationOptions, AppNotice } from '../types';
 import { KAIRO_INVOKE } from '../../shared/ipc';
+import { createErrorNotice } from '../hooks/errorUtils';
 
 interface PluginManifest {
   id: string;
@@ -20,14 +21,19 @@ interface InstalledPlugin extends PluginManifest {
   scope: string; // 'public' | 'agent:{agentId}'
 }
 
-export function PluginStorePanel() {
+interface PluginStorePanelProps {
+  onClearNotice: () => void;
+  onReportNotice: (notice: AppNotice) => void;
+  onRequestConfirmation: (request: AppConfirmationOptions) => Promise<boolean>;
+}
+
+export const PluginStorePanel = memo(function PluginStorePanel({ onClearNotice, onReportNotice, onRequestConfirmation }: PluginStorePanelProps) {
   const { t } = useTranslation();
   const [storePlugins, setStorePlugins] = useState<PluginManifest[]>([]);
   const [installedPlugins, setInstalledPlugins] = useState<InstalledPlugin[]>([]);
   const [agents, setAgents] = useState<AgentConfig[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionInProgress, setActionInProgress] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [installModalOpen, setInstallModalOpen] = useState(false);
   const [selectedPluginId, setSelectedPluginId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'installed' | 'store'>('installed');
@@ -45,9 +51,9 @@ export function PluginStorePanel() {
     setSelectedPluginId(null);
   };
 
-  const loadPlugins = async () => {
+  const loadPlugins = useCallback(async () => {
     setLoading(true);
-    setError(null);
+    onClearNotice();
     try {
       const [store, installed, fetchedAgents] = await Promise.all([
         window.kairo.invoke(KAIRO_INVOKE.pluginsGetStore),
@@ -58,35 +64,36 @@ export function PluginStorePanel() {
       // Inject native tools as installed plugins
       const nativeTools: InstalledPlugin[] = [
         { id: 'web_search', name: 'Web Search', description: 'Search the internet for real-time information.', version: '1.0.0', author: 'KairoPilot', installedAt: Date.now(), filePath: 'built-in', scope: 'public', icon: '🔍' },
-        { id: 'web_fetch', name: 'Web Fetch', description: 'Fetch and read content from specific URLs.', version: '1.0.0', author: 'KairoPilot', installedAt: Date.now(), filePath: 'built-in', scope: 'public', icon: '🌐' }
+        { id: 'fetch_webpage', name: 'Fetch Webpage', description: 'Fetch and read content from specific URLs.', version: '1.0.0', author: 'KairoPilot', installedAt: Date.now(), filePath: 'built-in', scope: 'public', icon: '🌐' }
       ];
       
       setStorePlugins(store as unknown as PluginManifest[]);
       setInstalledPlugins([...nativeTools, ...(installed as unknown as InstalledPlugin[])]);
       setAgents(fetchedAgents as AgentConfig[]);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to fetch plugins');
+      onReportNotice(createErrorNotice(t('plugins.error.load', { error: e instanceof Error ? e.message : 'Unknown error' }), 'load_plugins'));
     } finally {
       setLoading(false);
     }
-  };
+  }, [onClearNotice, onReportNotice, t]);
 
   useEffect(() => {
-    loadPlugins();
-  }, []);
+    void loadPlugins();
+  }, [loadPlugins]);
 
   const handleInstall = async (id: string, scope: string = 'public') => {
     setActionInProgress(id);
+    onClearNotice();
     try {
       const result = await window.kairo.invoke(KAIRO_INVOKE.pluginsInstall, { id, scope });
       if (result.success) {
         await loadPlugins();
         setActiveTab('installed');
       } else {
-        setError(result.error || 'Failed to install plugin');
+        onReportNotice(createErrorNotice(t('plugins.error.install', { error: result.error || 'Unknown error' }), 'install_plugin'));
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to install plugin');
+      onReportNotice(createErrorNotice(t('plugins.error.install', { error: e instanceof Error ? e.message : 'Unknown error' }), 'install_plugin'));
     } finally {
       setActionInProgress(null);
     }
@@ -94,42 +101,67 @@ export function PluginStorePanel() {
 
   const handleUninstall = async (id: string, scope: string) => {
     setActionInProgress(`${id}-${scope}`);
+    onClearNotice();
     try {
       const result = await window.kairo.invoke(KAIRO_INVOKE.pluginsUninstall, { id, scope });
       if (result.success) {
         await loadPlugins();
       } else {
-        setError(result.error || 'Failed to uninstall plugin');
+        onReportNotice(createErrorNotice(t('plugins.error.uninstall', { error: result.error || 'Unknown error' }), 'uninstall_plugin'));
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to install plugin');
+      onReportNotice(createErrorNotice(t('plugins.error.uninstall', { error: e instanceof Error ? e.message : 'Unknown error' }), 'uninstall_plugin'));
     } finally {
       setActionInProgress(null);
     }
   };
 
-  const uninstalledPlugins = storePlugins.filter(p => !installedPlugins.find(ip => ip.id === p.id));
+  const uninstalledPlugins = useMemo(
+    () =>
+      storePlugins
+        .filter((plugin) => !installedPlugins.find((installedPlugin) => installedPlugin.id === plugin.id))
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    [installedPlugins, storePlugins]
+  );
 
-  const publicPlugins = installedPlugins.filter(p => p.scope === 'public');
+  const publicPlugins = useMemo(
+    () =>
+      installedPlugins
+        .filter((plugin) => plugin.scope === 'public')
+        .sort((a, b) => {
+          if (a.filePath === 'built-in' && b.filePath !== 'built-in') {
+            return -1;
+          }
+          if (a.filePath !== 'built-in' && b.filePath === 'built-in') {
+            return 1;
+          }
+          if (b.installedAt !== a.installedAt) {
+            return b.installedAt - a.installedAt;
+          }
+          return a.name.localeCompare(b.name);
+        }),
+    [installedPlugins]
+  );
+
+  const sortedAgents = useMemo(
+    () => [...agents].sort((a, b) => a.name.localeCompare(b.name)),
+    [agents]
+  );
 
   return (
     <div className="config-panel">
-      <div className="config-header" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '0.625rem' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
+      <div className="config-header plugin-panel-header">
+        <div className="plugin-panel-header-row">
           <div>
             <div className="config-title">
-              <div style={{ 
-                width: '32px', height: '32px', borderRadius: 'var(--radius-md)', 
-                background: 'var(--primary)', display: 'flex', alignItems: 'center', 
-                justifyContent: 'center', color: 'var(--primary-fg)', marginRight: '0.75rem' 
-              }}>
+              <div className="plugin-panel-title-icon">
                 <IconPlugin size={20} />
               </div>
               {t('nav.plugins')}
             </div>
             <div className="config-subtitle">{t('plugins.subtitle')}</div>
           </div>
-          <button onClick={loadPlugins} className="btn btn-secondary" disabled={loading}>
+          <button type="button" onClick={loadPlugins} className={`btn btn-secondary ${loading ? 'is-loading' : ''}`} disabled={loading} title={t('common.refresh')}>
             <IconRefresh size={16} className={loading ? 'spinning' : ''} />
           </button>
         </div>
@@ -150,18 +182,9 @@ export function PluginStorePanel() {
         </div>
       </div>
 
-      <div className="config-content" style={{ overflowY: 'auto' }}>
-        {error && (
-          <div style={{ 
-            padding: '1rem', background: 'var(--danger-bg, #fee2e2)', 
-            color: 'var(--danger, #dc2626)', borderRadius: 'var(--radius-md)', marginBottom: '1rem' 
-          }}>
-            {error}
-          </div>
-        )}
-
+      <div className="config-content plugin-panel-content">
         {loading && (
-          <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--muted-fg)' }}>
+          <div className="plugin-panel-loading">
             {t('plugins.loading')}
           </div>
         )}
@@ -172,12 +195,13 @@ export function PluginStorePanel() {
             {publicPlugins.length === 0 ? (
               <div className="empty-state">{t('plugins.noInstalled')}</div>
             ) : (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '0.875rem' }}>
+              <div className="plugin-grid">
                 {publicPlugins.map(plugin => (
                   <InstalledPluginItem 
                     key={`${plugin.id}-${plugin.scope}`} 
                     plugin={plugin} 
                     onUninstall={() => handleUninstall(plugin.id, plugin.scope)}
+                    onRequestConfirmation={onRequestConfirmation}
                     isWorking={actionInProgress === `${plugin.id}-${plugin.scope}`}
                     isNative={plugin.filePath === 'built-in'}
                   />
@@ -190,32 +214,28 @@ export function PluginStorePanel() {
         {!loading && activeTab === 'store' && (
           <div>
             {uninstalledPlugins.length === 0 ? (
-              <div className="empty-state" style={{ marginTop: '2.5rem', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center' }}>
-                <div style={{ fontSize: '3rem', marginBottom: '0.75rem' }}>🛒</div>
-                <h3 style={{ margin: '0 0 0.5rem 0' }}>{t('plugins.marketplace')}</h3>
-                <p style={{ margin: 0, color: 'var(--muted-fg)' }}>{t('plugins.allInstalled')}</p>
+              <div className="empty-state plugin-empty-state">
+                <div className="plugin-empty-icon">🛒</div>
+                <h3 className="plugin-empty-title">{t('plugins.marketplace')}</h3>
+                <p className="plugin-empty-description">{t('plugins.allInstalled')}</p>
               </div>
             ) : (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '0.875rem' }}>
+              <div className="plugin-grid">
                 {uninstalledPlugins.map(plugin => (
-                  <div key={plugin.id} className="config-card" style={{ display: 'flex', flexDirection: 'column', gap: '0.625rem', height: '100%' }}>
-                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.875rem' }}>
-                      <div style={{ 
-                        fontSize: '2rem', width: '48px', height: '48px', 
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        background: 'var(--sidebar-bg)', borderRadius: 'var(--radius-md)'
-                      }}>
+                  <div key={plugin.id} className="config-card plugin-card">
+                    <div className="plugin-card-header">
+                      <div className="plugin-card-icon">
                         {plugin.icon || '🧩'}
                       </div>
-                      <div style={{ flex: 1 }}>
-                        <h4 style={{ margin: '0 0 0.25rem 0' }}>{plugin.name}</h4>
-                        <div style={{ fontSize: '0.8rem', color: 'var(--muted-fg)' }}>
+                      <div className="plugin-card-copy">
+                        <h4 className="plugin-card-title">{plugin.name}</h4>
+                        <div className="plugin-card-meta">
                           v{plugin.version} • {t('plugins.by', { author: plugin.author })}
                         </div>
                       </div>
                     </div>
                     
-                    <p style={{ margin: 0, fontSize: '0.9rem', color: 'var(--foreground)', flex: 1 }}>
+                    <p className="plugin-card-description">
                       {plugin.description}
                     </p>
 
@@ -239,79 +259,93 @@ export function PluginStorePanel() {
       {installModalOpen && (
         <div className="modal-overlay" onClick={() => setInstallModalOpen(false)}>
           <div className="modal-content" onClick={e => e.stopPropagation()}>
-            <h3 style={{ marginBottom: '1rem', color: 'var(--foreground)' }}>{t('plugins.installScope')}</h3>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', maxHeight: '300px', overflowY: 'auto' }}>
-              <button 
-                className="btn btn-secondary" 
+            <h3 className="plugin-modal-title">{t('plugins.installScope')}</h3>
+            <div className="plugin-modal-scope-list">
+              <button
+                type="button"
+                className="btn btn-secondary plugin-modal-scope-btn"
                 onClick={() => handleConfirmInstall('public')}
-                style={{ justifyContent: 'flex-start', padding: '0.75rem', backgroundColor: 'var(--background)' }}
               >
                 {t('plugins.publicScope')}
               </button>
-              {agents.map(agent => (
-                <button 
+              {sortedAgents.map(agent => (
+                <button
+                  type="button"
                   key={agent.id}
-                  className="btn btn-secondary" 
+                  className="btn btn-secondary plugin-modal-scope-btn"
                   onClick={() => handleConfirmInstall(`agent:${agent.id}`)}
-                  style={{ justifyContent: 'flex-start', padding: '0.75rem', backgroundColor: 'var(--background)' }}
                 >
                   {t('plugins.agentScope', { agent: agent.name })}
                 </button>
               ))}
             </div>
-            <div style={{ marginTop: '1rem', display: 'flex', justifyContent: 'flex-end' }}>
-              <button className="btn" onClick={() => setInstallModalOpen(false)}>{t('common.cancel')}</button>
+            <div className="plugin-modal-actions">
+              <button type="button" className="btn" onClick={() => setInstallModalOpen(false)}>{t('common.cancel')}</button>
             </div>
           </div>
         </div>
       )}
     </div>
   );
-}
+});
 
-function InstalledPluginItem({ plugin, onUninstall, isWorking, isNative }: { plugin: InstalledPlugin, onUninstall: () => void, isWorking: boolean, isNative?: boolean }) {
+function InstalledPluginItem({
+  plugin,
+  onUninstall,
+  onRequestConfirmation,
+  isWorking,
+  isNative
+}: {
+  plugin: InstalledPlugin;
+  onUninstall: () => void;
+  onRequestConfirmation: (request: AppConfirmationOptions) => Promise<boolean>;
+  isWorking: boolean;
+  isNative?: boolean;
+}) {
   const { t } = useTranslation();
   
   return (
-    <div className="config-card" style={{ display: 'flex', flexDirection: 'column', gap: '0.625rem', height: '100%' }}>
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.875rem' }}>
-        <div style={{ 
-          fontSize: '2rem', width: '48px', height: '48px', 
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          background: 'var(--sidebar-bg)', borderRadius: 'var(--radius-md)'
-        }}>
+    <div className="config-card plugin-card">
+      <div className="plugin-card-header">
+        <div className="plugin-card-icon">
           {plugin.icon || '🧩'}
         </div>
-        <div style={{ flex: 1 }}>
-          <h4 style={{ margin: '0 0 0.25rem 0' }}>{plugin.name}</h4>
-          <div style={{ fontSize: '0.8rem', color: 'var(--muted-fg)' }}>
+        <div className="plugin-card-copy">
+          <h4 className="plugin-card-title">{plugin.name}</h4>
+          <div className="plugin-card-meta">
             v{plugin.version} • {t('plugins.by', { author: plugin.author })}
           </div>
         </div>
       </div>
       
-      <p style={{ margin: 0, fontSize: '0.9rem', color: 'var(--foreground)', flex: 1 }}>
+      <p className="plugin-card-description">
         {plugin.description}
       </p>
 
-      <div style={{ fontSize: '0.8rem', color: 'var(--muted-fg)', marginTop: '0.35rem' }}>
+      <div className="plugin-card-meta">
         <strong>{t('plugins.installedAt')}:</strong> {new Date(plugin.installedAt).toLocaleString()}
       </div>
 
-      <div className="store-card-actions" style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '0.35rem' }}>
+      <div className="store-card-actions">
         <button 
-          className="btn btn-secondary btn-sm btn-danger"
-          onClick={(e) => {
+          type="button"
+          className={`btn btn-secondary btn-sm btn-danger plugin-uninstall-btn ${isNative ? 'is-native' : ''} ${isWorking ? 'is-loading' : ''}`}
+          onClick={async (e) => {
             e.stopPropagation();
-            if(confirm(t('common.confirm') + ' ' + t('plugins.uninstall') + '?')) {
+            const confirmed = await onRequestConfirmation({
+              title: t('common.confirm'),
+              message: `${t('common.confirm')} ${t('plugins.uninstall')}?`,
+              confirmLabel: t('plugins.uninstall'),
+              variant: 'danger'
+            });
+            if (confirmed) {
               onUninstall();
             }
           }}
           disabled={isWorking || isNative}
-          style={{ opacity: isNative ? 0.5 : 1, cursor: isNative ? 'not-allowed' : 'pointer' }}
         >
           {isWorking ? <IconRefresh size={14} className="spinning" /> : <IconTrash size={14} />}
-          <span style={{ marginLeft: '4px' }}>{isNative ? t('plugins.installed') : t('plugins.uninstall')}</span>
+          <span className="btn-text-inline">{isNative ? t('plugins.installed') : t('plugins.uninstall')}</span>
         </button>
       </div>
     </div>

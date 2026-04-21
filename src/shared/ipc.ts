@@ -31,9 +31,11 @@ export const KAIRO_INVOKE = {
   configGetAgents: 'config:get-agents',
   configGetAll: 'config:get-all',
   configGetModels: 'config:get-models',
+  configGetWebSearch: 'config:get-web-search',
   configSave: 'config:save',
   configSaveAgent: 'config:save-agent',
   configSaveModel: 'config:save-model',
+  configSaveWebSearch: 'config:save-web-search',
   configSetActiveAgent: 'config:set-active-agent',
   llmDescribeProvider: 'llm:describe-provider',
   llmListModels: 'llm:listModels',
@@ -59,7 +61,6 @@ export const KAIRO_INVOKE = {
 } as const
 
 export const KAIRO_EVENT = {
-  agentAskConfirmation: 'agent:ask-confirmation',
   agentUpdate: 'agent:update',
   mainProcessMessage: 'main-process-message',
   ollamaPullProgress: 'ollama:pull-progress'

@@ -1,9 +1,35 @@
 import { z } from 'zod';
+import { getWebSearchConfig } from '../../store/config';
+import { createDefaultWebSearchConfig } from '../../store/configWebSearchUtils';
 import { ToolDefinition } from '../llm/types';
+import { toolError, toolOk } from './result';
+import { classifyNetworkError } from './web/diagnostics';
+import { fetchHtml, requestUrl } from './web/fetch';
+import { getWebSearchProviders, webProviderTestUtils } from './web/providers';
+import { runSearchRouter } from './web/router';
+const FETCH_WEBPAGE_TIMEOUT_MS = 15_000;
+const HTTP_REQUEST_TIMEOUT_MS = 20_000;
+const HTTP_REQUEST_MAX_LENGTH = 12_000;
+
+export const __webToolTestUtils = {
+  ...webProviderTestUtils
+};
+
+function getEffectiveWebSearchConfig() {
+  try {
+    return getWebSearchConfig();
+  } catch {
+    return createDefaultWebSearchConfig();
+  }
+}
+
+export function getConfiguredWebSearchProviders() {
+  return getWebSearchProviders(getEffectiveWebSearchConfig());
+}
 
 export const WebSearchTool: ToolDefinition = {
   name: 'web_search',
-  description: 'Search the internet for real-time information using DuckDuckGo. Returns titles, snippets, and URLs of the top search results.',
+  description: 'Search the internet for real-time information using multiple providers with automatic fallback. Returns titles, snippets, and URLs of the top search results.',
   parameters: z.object({
     query: z.string().describe('The search query'),
     maxResults: z.number().optional().describe('Maximum number of results to return (default: 5, max: 10)'),
@@ -14,8 +40,9 @@ export const WebSearchTool: ToolDefinition = {
     try {
       const query = typeof args.query === 'string' ? args.query.trim() : '';
       if (!query) {
-        return { error: 'Invalid arguments: query is required' };
+        return toolError('Invalid arguments: query is required');
       }
+
       const preferredMaxResults = typeof args.maxResults === 'number' && Number.isFinite(args.maxResults)
         ? args.maxResults
         : typeof args.num === 'number' && Number.isFinite(args.num)
@@ -26,64 +53,45 @@ export const WebSearchTool: ToolDefinition = {
         ? preferredMaxResults
         : undefined;
       const limit = Math.max(1, Math.min(maxResults || 5, 10));
-      const effectiveQuery = languageHint ? `${query} ${languageHint}` : query;
-      const searchUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(effectiveQuery)}`;
-      
-      const response = await fetch(searchUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-        },
-        signal: AbortSignal.timeout(15000) // 15 seconds timeout
-      });
-      
-      if (!response.ok) {
-        return { error: `Failed to search: HTTP ${response.status}` };
-      }
-      
-      const html = await response.text();
-      const results = [];
-      const regex = /<h2 class="result__title">[\s\S]*?<a[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?<a class="result__snippet[^>]*>([\s\S]*?)<\/a>/gi;
-      let match;
-      
-      while ((match = regex.exec(html)) !== null && results.length < limit) {
-        let url = match[1];
-        if (!url.includes('duckduckgo.com/y.js')) { // skip ads
-          // Extract real URL if it's a redirect
-          const urlMatch = url.match(/uddg=([^&]+)/);
-          if (urlMatch) {
-            url = decodeURIComponent(urlMatch[1]);
-          } else if (url.startsWith('//')) {
-            url = 'https:' + url;
-          }
-          
-          // Clean up HTML entities and tags
-          const cleanHtml = (str: string) => {
-            return str
-              .replace(/<[^>]+>/g, '')
-              .replace(/&#x27;/g, "'")
-              .replace(/&quot;/g, '"')
-              .replace(/&amp;/g, '&')
-              .replace(/&lt;/g, '<')
-              .replace(/&gt;/g, '>')
-              .trim();
-          };
+      const webSearchConfig = getEffectiveWebSearchConfig();
 
-          results.push({
-            title: cleanHtml(match[2]),
-            url: url,
-            snippet: cleanHtml(match[3])
-          });
+      const result = await runSearchRouter({
+        query,
+        maxResults: limit,
+        languageHint,
+        timeoutMs: webSearchConfig.timeoutMs,
+        providers: getWebSearchProviders(webSearchConfig),
+        allowedProviderIds: args.__allowedSearchProviders,
+        preferredProviderIds: webSearchConfig.preferredProviders
+      });
+
+      if (result.ok) {
+        return toolOk({
+          message: result.results.length === 0 ? 'No results found.' : undefined,
+          results: result.results,
+          source: result.source,
+          provider: result.provider,
+          providerKind: result.providerKind,
+          searchUrl: result.searchUrl,
+          diagnostics: result.diagnostics
+        });
+      }
+
+      return toolError(
+        `Web search failed. ${result.reason}`,
+        result.diagnostics,
+        {
+          suggestion: 'If network permission is already enabled, verify that at least one supported search provider is reachable from this machine and permitted by allowedDomains.'
         }
-      }
-      
-      if (results.length === 0) {
-        return { message: "No results found.", results: [] };
-      }
-      
-      return { results };
+      );
     } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      return { error: `Search failed: ${errorMessage}` };
+      return toolError(
+        classifyNetworkError(error, 'the configured web search providers'),
+        undefined,
+        {
+          suggestion: 'If network permission is already enabled, check the target site reachability, DNS, HTTPS interception, or local proxy settings.'
+        }
+      );
     }
   }
 };
@@ -97,22 +105,14 @@ export const FetchWebpageTool: ToolDefinition = {
   }),
   execute: async (args: Record<string, unknown>) => {
     try {
-      const url = args.url as string;
-      const maxLength = args.maxLength as number | undefined;
-      const response = await fetch(url, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-        },
-        signal: AbortSignal.timeout(15000) // 15 seconds timeout
-      });
-      
-      if (!response.ok) {
-        return { error: `Failed to fetch URL: HTTP ${response.status}` };
+      const url = typeof args.url === 'string' ? args.url.trim() : '';
+      if (!url) {
+        return toolError('Invalid arguments: url is required');
       }
-      
-      const html = await response.text();
-      
-      // Simple text extraction
+
+      const maxLength = args.maxLength as number | undefined;
+      const html = await fetchHtml(url, FETCH_WEBPAGE_TIMEOUT_MS);
+
       let text = html
         .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, ' ')
         .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, ' ')
@@ -123,16 +123,166 @@ export const FetchWebpageTool: ToolDefinition = {
         .replace(/&#x27;/g, "'")
         .replace(/\s+/g, ' ')
         .trim();
-        
+
       const limit = maxLength || 8000;
       if (text.length > limit) {
-        text = text.substring(0, limit) + '... [Content truncated]';
+        text = `${text.substring(0, limit)}... [Content truncated]`;
       }
-      
-      return { content: text, length: text.length };
+
+      return toolOk({ content: text, length: text.length, url });
     } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      return { error: `Failed to fetch webpage: ${errorMessage}` };
+      const url = typeof args.url === 'string' ? args.url.trim() : 'the requested URL';
+      return toolError(
+        classifyNetworkError(error, url),
+        undefined,
+        {
+          suggestion: 'Check whether the target URL is reachable from this machine and whether Agent allowedDomains includes this URL or host.'
+        }
+      );
+    }
+  }
+};
+
+function normalizeHttpMethod(value: unknown) {
+  const method = typeof value === 'string' ? value.trim().toUpperCase() : 'GET';
+  return method || 'GET';
+}
+
+function isJsonContentType(contentType: string) {
+  return contentType.includes('application/json') || contentType.endsWith('+json');
+}
+
+function truncateText(value: string, maxLength: number) {
+  if (value.length <= maxLength) {
+    return value;
+  }
+  return `${value.slice(0, Math.max(0, maxLength - 22)).trimEnd()}... [Content truncated]`;
+}
+
+export const HttpRequestTool: ToolDefinition = {
+  name: 'http_request',
+  description: 'Make an HTTP request to a URL and return JSON or text. Supports GET, POST, PUT, PATCH, DELETE, and HEAD for API and documentation access.',
+  parameters: z.object({
+    url: z.string().describe('The target URL to request'),
+    method: z.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD']).optional().describe('HTTP method to use (default: GET)'),
+    headers: z.object({}).catchall(z.string()).optional().describe('Optional request headers'),
+    body: z.string().optional().describe('Optional raw request body for non-JSON requests'),
+    json: z.object({}).catchall(z.unknown()).optional().describe('Optional JSON request body'),
+    responseType: z.enum(['auto', 'text', 'json']).optional().describe('How to decode the response body (default: auto)'),
+    maxLength: z.number().optional().describe(`Maximum number of characters returned for text responses (default: ${HTTP_REQUEST_MAX_LENGTH})`)
+  }),
+  execute: async (args: Record<string, unknown>) => {
+    try {
+      const url = typeof args.url === 'string' ? args.url.trim() : '';
+      if (!url) {
+        return toolError('Invalid arguments: url is required');
+      }
+
+      const method = normalizeHttpMethod(args.method);
+      const headers = args.headers && typeof args.headers === 'object' && !Array.isArray(args.headers)
+        ? Object.fromEntries(
+          Object.entries(args.headers as Record<string, unknown>)
+            .map(([key, value]) => [key, String(value)])
+        )
+        : {};
+      const rawBody = typeof args.body === 'string' ? args.body : undefined;
+      const jsonBody = args.json && typeof args.json === 'object' && !Array.isArray(args.json)
+        ? args.json as Record<string, unknown>
+        : undefined;
+      const responseType = typeof args.responseType === 'string' ? args.responseType : 'auto';
+      const maxLength = typeof args.maxLength === 'number' && Number.isFinite(args.maxLength)
+        ? Math.max(1, Math.min(Math.round(args.maxLength), 100_000))
+        : HTTP_REQUEST_MAX_LENGTH;
+
+      if (rawBody && jsonBody) {
+        return toolError('Invalid arguments: provide either body or json, not both');
+      }
+
+      if ((method === 'GET' || method === 'HEAD') && (rawBody || jsonBody)) {
+        return toolError(`Invalid arguments: ${method} requests do not accept body or json`);
+      }
+
+      const requestBody = jsonBody ? JSON.stringify(jsonBody) : rawBody;
+      if (jsonBody && !Object.keys(headers).some((key) => key.toLowerCase() === 'content-type')) {
+        headers['Content-Type'] = 'application/json';
+      }
+
+      const response = await requestUrl(url, {
+        method,
+        headers,
+        body: requestBody,
+        timeoutMs: HTTP_REQUEST_TIMEOUT_MS
+      });
+      const contentType = response.headers.get('content-type') || '';
+
+      if (method === 'HEAD') {
+        return toolOk({
+          url,
+          method,
+          status: response.status,
+          ok: response.ok,
+          contentType,
+          headers: Object.fromEntries(response.headers.entries())
+        });
+      }
+
+      const text = await response.text();
+      const normalizedText = text.trim();
+
+      if (!response.ok) {
+        return toolError(
+          `HTTP ${response.status} while requesting ${url}`,
+          {
+            url,
+            method,
+            status: response.status,
+            contentType,
+            body: truncateText(normalizedText, maxLength)
+          }
+        );
+      }
+
+      const shouldParseJson = responseType === 'json'
+        || (responseType === 'auto' && isJsonContentType(contentType));
+
+      if (shouldParseJson) {
+        try {
+          const data = normalizedText ? JSON.parse(normalizedText) : null;
+          return toolOk({
+            url,
+            method,
+            status: response.status,
+            ok: response.ok,
+            contentType,
+            data
+          });
+        } catch (error) {
+          if (responseType === 'json') {
+            return toolError(
+              `Response from ${url} is not valid JSON: ${error instanceof Error ? error.message : 'Unknown error'}`
+            );
+          }
+        }
+      }
+
+      return toolOk({
+        url,
+        method,
+        status: response.status,
+        ok: response.ok,
+        contentType,
+        text: truncateText(normalizedText, maxLength),
+        length: normalizedText.length
+      });
+    } catch (error: unknown) {
+      const url = typeof args.url === 'string' ? args.url.trim() : 'the requested URL';
+      return toolError(
+        classifyNetworkError(error, url),
+        undefined,
+        {
+          suggestion: 'Check whether the target URL is reachable from this machine and whether Agent allowedDomains includes this URL or host.'
+        }
+      );
     }
   }
 };

@@ -1267,3 +1267,253 @@
     max-width: 100%;
   }
 }
+
+/* Shared store/workbench refresh */
+.store-tabs {
+  gap: 0.55rem;
+  margin-top: 0.75rem;
+  padding: 0.35rem;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 1rem;
+  background: rgba(245, 248, 252, 0.88);
+}
+
+.store-tab {
+  padding: 0.68rem 1rem;
+  border-radius: 0.85rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.store-tab:hover {
+  background: rgba(255, 255, 255, 0.76);
+}
+
+.store-tab.active {
+  background: linear-gradient(180deg, rgba(37, 99, 235, 0.98), rgba(30, 64, 175, 0.92));
+  box-shadow: 0 16px 24px rgba(37, 99, 235, 0.16);
+}
+
+.empty-state {
+  padding: 1.25rem;
+  border: 1px dashed rgba(148, 163, 184, 0.22);
+  border-radius: 1.2rem;
+  background: rgba(248, 250, 253, 0.8);
+}
+
+.plugin-grid,
+.skills-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 1rem;
+}
+
+.plugin-panel-header {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.plugin-panel-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  width: 100%;
+}
+
+.plugin-panel-title-icon {
+  width: 2rem;
+  height: 2rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 0.75rem;
+  border-radius: 0.8rem;
+  background: var(--primary);
+  color: var(--primary-fg);
+}
+
+.plugin-panel-content {
+  overflow-y: auto;
+}
+
+.plugin-panel-loading {
+  text-align: center;
+  padding: 3rem;
+  color: var(--muted-fg);
+}
+
+.plugin-modal-scope-btn {
+  justify-content: flex-start;
+  padding: 0.75rem;
+  background: rgba(248, 250, 252, 0.96);
+}
+
+.plugin-uninstall-btn.is-native {
+  opacity: 0.5;
+}
+
+.plugin-card,
+.skill-card,
+.skill-overview-card,
+.skill-installed-toolbar,
+.skill-source-preset-card,
+.skill-marketplace-toolbar,
+.skill-marketplace-source-card,
+.skill-section-panel,
+.skill-install-hero,
+.skill-install-review-hero,
+.skill-install-form-card,
+.skill-install-process,
+.skill-install-finding,
+.modal-content {
+  border-radius: 1.35rem;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.84) 0%, rgba(246, 249, 253, 0.88) 100%);
+  box-shadow: none;
+}
+
+.plugin-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-height: 100%;
+  padding: 1rem;
+}
+
+.plugin-card-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.875rem;
+}
+
+.plugin-card-icon {
+  width: 3rem;
+  height: 3rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.7rem;
+  border-radius: 1rem;
+  background: rgba(37, 99, 235, 0.08);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.94);
+  flex-shrink: 0;
+}
+
+.plugin-panel-title-icon svg,
+.plugin-card-icon svg,
+.skill-store-title-icon svg,
+.skill-card-icon svg {
+  width: 1.2rem;
+  height: 1.2rem;
+  flex-shrink: 0;
+}
+
+.plugin-card-copy {
+  flex: 1;
+  min-width: 0;
+}
+
+.plugin-card-title {
+  margin: 0 0 0.25rem;
+  font-size: 1rem;
+}
+
+.plugin-card-meta {
+  font-size: 0.8rem;
+  color: var(--muted-fg);
+  line-height: 1.5;
+}
+
+.plugin-card-description {
+  margin: 0;
+  flex: 1;
+  color: var(--foreground);
+  line-height: 1.65;
+  font-size: 0.92rem;
+}
+
+.plugin-empty-state,
+.skill-marketplace-empty,
+.skill-store-loading {
+  margin-top: 1rem;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.plugin-empty-icon,
+.skill-marketplace-empty-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 4.5rem;
+  height: 4.5rem;
+  margin-bottom: 0.8rem;
+  border-radius: 1.4rem;
+  background: rgba(37, 99, 235, 0.08);
+  font-size: 2rem;
+}
+
+.plugin-empty-title,
+.skill-marketplace-empty-title {
+  margin: 0 0 0.45rem;
+  color: var(--foreground);
+  font-size: 1.05rem;
+}
+
+.plugin-empty-description,
+.skill-marketplace-empty-description {
+  margin: 0;
+  color: var(--muted-fg);
+  line-height: 1.6;
+}
+
+.plugin-modal-title {
+  margin: 0 0 1rem;
+  color: var(--foreground);
+}
+
+.plugin-modal-scope-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-height: 18rem;
+  overflow-y: auto;
+}
+
+.plugin-modal-actions {
+  margin-top: 1rem;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.skill-overview-card {
+  gap: 0.3rem;
+}
+
+.skill-overview-value {
+  color: var(--primary);
+}
+
+.skill-installed-toolbar {
+  gap: 1rem;
+  background: linear-gradient(180deg, rgba(241, 245, 255, 0.7) 0%, rgba(255, 255, 255, 0.84) 100%);
+}
+
+.skill-marketplace-status-badge.is-pending {
+  background: rgba(37, 99, 235, 0.12);
+  color: var(--primary);
+}
+
+.skill-marketplace-error-card,
+.skill-store-alert,
+.skill-import-error {
+  border-radius: 1.1rem;
+}
+
+.store-card-actions {
+  margin-top: 0.15rem;
+}

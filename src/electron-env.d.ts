@@ -42,12 +42,12 @@ interface KairoBridge {
   invoke(
     channel: typeof import('./shared/ipc').KAIRO_INVOKE.agentChat,
     args: { userInput: string } | string
-  ): Promise<{ content?: string; error?: string; status?: string; runId?: string; approvalId?: string }>;
+  ): Promise<import('./shared/contracts').AgentRuntimeInvokeResult>;
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.agentPauseRun, args: { runId: string }): Promise<InvokeSuccess>;
-  invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.agentResumeRun, args: { runId: string }): Promise<{ success: boolean; content?: string; error?: string; status?: string; runId?: string; approvalId?: string }>;
+  invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.agentResumeRun, args: { runId: string }): Promise<import('./shared/contracts').AgentRuntimeInvokeResult>;
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.agentCancelRun, args: { runId: string }): Promise<InvokeSuccess>;
-  invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.agentRetryStep, args: { runId: string; stepId: string }): Promise<{ success: boolean; content?: string; error?: string; status?: string; runId?: string; approvalId?: string }>;
-  invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.agentConfirmResponse, args: { id: string; approved: boolean }): Promise<InvokeSuccess>;
+  invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.agentRetryStep, args: { runId: string; stepId: string }): Promise<import('./shared/contracts').AgentRuntimeInvokeResult>;
+  invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.agentConfirmResponse, args: { id: string; approved: boolean }): Promise<import('./shared/contracts').AgentRuntimeInvokeResult>;
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.agentInit, args: import('./shared/contracts').AgentConfig | string): Promise<InvokeSuccess>;
   invoke(
     channel: typeof import('./shared/ipc').KAIRO_INVOKE.auditGet,
@@ -86,9 +86,11 @@ interface KairoBridge {
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.configGetAgents): Promise<import('./shared/contracts').AgentConfig[]>;
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.configGetAll): Promise<import('./shared/contracts').KairoPilotConfig>;
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.configGetModels): Promise<import('./shared/contracts').ProviderConfig[]>;
+  invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.configGetWebSearch): Promise<import('./shared/contracts').WebSearchConfig>;
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.configSave, config: import('./shared/contracts').LegacyAgentConfig): Promise<InvokeSuccess>;
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.configSaveAgent, agent: import('./shared/contracts').AgentConfig): Promise<InvokeSuccess>;
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.configSaveModel, model: import('./shared/contracts').ModelConfig): Promise<InvokeSuccess>;
+  invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.configSaveWebSearch, config: import('./shared/contracts').WebSearchConfig): Promise<InvokeSuccess>;
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.configSetActiveAgent, id: string): Promise<InvokeSuccess>;
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.llmListModels, config: import('./shared/contracts').ModelConfig): Promise<string[]>;
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.ollamaCheck, baseUrl?: string): Promise<OllamaStatus>;
@@ -110,7 +112,6 @@ interface KairoBridge {
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.systemSelectFile, args?: { filters?: { name: string; extensions: string[] }[] }): Promise<string | null>;
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.systemSelectDirectory): Promise<string | null>;
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.systemStats): Promise<import('./renderer/types').SystemStats | null>;
-  on(channel: typeof import('./shared/ipc').KAIRO_EVENT.agentAskConfirmation, listener: (request: import('./renderer/types').ConfirmationRequest) => void): () => void;
   on(channel: typeof import('./shared/ipc').KAIRO_EVENT.agentUpdate, listener: (payload: AgentUpdatePayload) => void): () => void;
   on(channel: typeof import('./shared/ipc').KAIRO_EVENT.mainProcessMessage, listener: (message: string) => void): () => void;
   on(channel: typeof import('./shared/ipc').KAIRO_EVENT.ollamaPullProgress, listener: (payload: OllamaPullProgress) => void): () => void;

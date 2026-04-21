@@ -1,8 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Message, ModelConfig, SystemStats } from '../types';
-import { IconUser, IconBot, IconTool, IconSend, IconTrash, IconCpu, IconChevronDown, IconCheck } from './Icons';
+import { Message, ModelConfig } from '../types';
+import { IconUser, IconBot, IconTool, IconSend, IconCpu, IconChevronDown, IconCheck } from './Icons';
 import { useTranslation } from '../hooks/useTranslation';
 import type { I18nContextValue } from './layout/I18nContext';
 
@@ -13,11 +13,11 @@ interface ChatInterfaceProps {
   loading: boolean;
   handleSend: () => void;
   handleClear: () => void;
-  systemStats: SystemStats | null;
   messagesEndRef: React.RefObject<HTMLDivElement>;
   models: ModelConfig[];
   activeModelId: string | null;
   activeAgentName: string;
+  focusInputToken: number;
   onModelChange: (modelId: string) => void;
 }
 
@@ -27,6 +27,8 @@ type MessageGroup = {
 };
 
 interface ChatMessagesPanelProps {
+  activeAgentName: string;
+  containerRef: React.RefObject<HTMLDivElement>;
   groupedMessages: MessageGroup[];
   loading: boolean;
   markdownComponents: React.ComponentProps<typeof ReactMarkdown>['components'];
@@ -39,6 +41,8 @@ interface ChatMessagesPanelProps {
 const MARKDOWN_REMARK_PLUGINS = [remarkGfm];
 
 const ChatMessagesPanel = React.memo(function ChatMessagesPanel({
+  activeAgentName,
+  containerRef,
   groupedMessages,
   loading,
   markdownComponents,
@@ -48,22 +52,22 @@ const ChatMessagesPanel = React.memo(function ChatMessagesPanel({
   toRenderableMarkdown
 }: ChatMessagesPanelProps) {
   return (
-    <div className="messages-container">
+    <div ref={containerRef} className="messages-container">
       {messages.length === 0 && (
-        <div
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            height: '100%',
-            color: 'var(--muted-fg)',
-            textAlign: 'center',
-            padding: '2rem'
-          }}
-        >
-          <h2>{t('chat.welcome')}</h2>
-          <p>{t('chat.placeholder')}</p>
+        <div className="chat-empty-state">
+          <span className="chat-empty-kicker">{t('chat.welcome')}</span>
+          <h2 className="chat-empty-title">{activeAgentName}</h2>
+          <p className="chat-empty-description">{t('chat.welcomeDesc')}</p>
+          <div className="chat-empty-notes">
+            <div className="chat-empty-note">
+              <span className="chat-empty-note-label">{t('chat.currentTask')}</span>
+              <strong>{t('chat.placeholder')}</strong>
+            </div>
+            <div className="chat-empty-note">
+              <span className="chat-empty-note-label">{t('chat.availableTools')}</span>
+              <strong>{t('chat.dropFiles')}</strong>
+            </div>
+          </div>
         </div>
       )}
       {groupedMessages.map((group, groupIdx) => {
@@ -78,10 +82,10 @@ const ChatMessagesPanel = React.memo(function ChatMessagesPanel({
                   <summary className="process-steps-summary">{t('chat.viewProcess', { count: group.messages.length })}</summary>
                   <div className="process-steps-list">
                     {group.messages.map((msg, i) => (
-                      <div key={`process-${groupIdx}-${i}`} className={`message ${msg.role}`} style={{ marginTop: i > 0 ? '0.75rem' : 0 }}>
-                        <div className="message-content" style={{ marginLeft: 0 }}>
+                      <div key={`process-${groupIdx}-${i}`} className={`message ${msg.role} ${i > 0 ? 'process-message-offset' : ''}`}>
+                        <div className="message-content process-message-content">
                           {msg.role === 'tool' || msg.role === 'thinking' ? (
-                            <div style={{ whiteSpace: 'pre-wrap' }}>
+                            <div className="message-prewrap">
                               {msg.content}
                               {msg.details && (
                                 <details className="message-details">
@@ -114,7 +118,7 @@ const ChatMessagesPanel = React.memo(function ChatMessagesPanel({
             </div>
             <div className="message-content">
               {msg.role === 'user' || msg.role === 'tool' ? (
-                <div style={{ whiteSpace: 'pre-wrap' }}>
+                <div className="message-prewrap">
                   {msg.content}
                   {msg.details && (
                     <details className="message-details">
@@ -134,24 +138,23 @@ const ChatMessagesPanel = React.memo(function ChatMessagesPanel({
           </div>
         ));
       })}
-      {loading && messages.length > 0 && <div style={{ height: '0.5rem' }} />}
+      {loading && messages.length > 0 && <div className="messages-loading-spacer" />}
       <div ref={messagesEndRef} />
     </div>
   );
 });
 
-export function ChatInterface({
+export const ChatInterface = React.memo(function ChatInterface({
   messages,
   input,
   setInput,
   loading,
   handleSend,
-  handleClear,
-  systemStats,
   messagesEndRef,
   models,
   activeModelId,
   activeAgentName,
+  focusInputToken,
   onModelChange
 }: ChatInterfaceProps) {
   const { t } = useTranslation();
@@ -162,8 +165,11 @@ export function ChatInterface({
   const [activeModelIndex, setActiveModelIndex] = useState(-1);
   const [modelDropdownPlacement, setModelDropdownPlacement] = useState<'top' | 'bottom'>('top');
   const dragCounter = React.useRef(0);
+  const messagesContainerRef = React.useRef<HTMLDivElement>(null);
   const modelDropdownRef = React.useRef<HTMLDivElement>(null);
   const modelTriggerRef = React.useRef<HTMLButtonElement>(null);
+  const textareaRef = React.useRef<HTMLTextAreaElement>(null);
+  const shouldAutoScrollRef = React.useRef(true);
 
   const modelGroups = React.useMemo(
     () =>
@@ -386,8 +392,49 @@ export function ChatInterface({
     setActiveModelIndex(selectedIndex >= 0 ? selectedIndex : flatModelOptions.length > 0 ? 0 : -1);
   }, [activeModelId, flatModelOptions, isModelDropdownOpen]);
 
+  const updateAutoScrollState = React.useCallback(() => {
+    const container = messagesContainerRef.current;
+    if (!container) {
+      shouldAutoScrollRef.current = true;
+      return;
+    }
+
+    const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+    shouldAutoScrollRef.current = distanceFromBottom < 96;
+  }, []);
+
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const container = messagesContainerRef.current;
+    if (!container) {
+      return;
+    }
+
+    updateAutoScrollState();
+    const handleScroll = () => {
+      updateAutoScrollState();
+    };
+
+    container.addEventListener('scroll', handleScroll, { passive: true });
+    return () => {
+      container.removeEventListener('scroll', handleScroll);
+    };
+  }, [updateAutoScrollState]);
+
+  useLayoutEffect(() => {
+    if (messages.length > 0 && !shouldAutoScrollRef.current) {
+      return;
+    }
+
+    const frameId = window.requestAnimationFrame(() => {
+      messagesEndRef.current?.scrollIntoView({
+        behavior: 'auto',
+        block: 'end'
+      });
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+    };
   }, [loading, messages, messagesEndRef]);
 
   useEffect(() => {
@@ -405,6 +452,16 @@ export function ChatInterface({
       window.removeEventListener('keydown', onKeyDown);
     };
   }, [previewImageSrc]);
+
+  useEffect(() => {
+    if (!focusInputToken) {
+      return;
+    }
+
+    textareaRef.current?.focus();
+    const inputLength = textareaRef.current?.value.length ?? 0;
+    textareaRef.current?.setSelectionRange(inputLength, inputLength);
+  }, [focusInputToken]);
 
   const adjustPreviewZoom = React.useCallback((delta: number) => {
     setPreviewZoom((prev) => {
@@ -484,18 +541,20 @@ export function ChatInterface({
       {isDragging && <div className="drag-overlay">{t('chat.dropFiles')}</div>}
 
       <div className="chat-header">
-        <div className="header-title">
-          {`${t('chat.currentAgentLabel')}${activeAgentName}${loading ? ` · ${t('chat.thinking')}` : ''}`}
-        </div>
-        <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
-          {systemStats && <div className="system-stats">CPU: {systemStats.cpuUsage}% | MEM: {systemStats.memoryUsage}%</div>}
-          <button onClick={handleClear} className="icon-btn" title={t('common.delete')}>
-            <IconTrash size={18} />
-          </button>
+        <div className="chat-header-copy">
+          <span className="chat-header-kicker">{t('chat.currentAgentLabel')}</span>
+          <div className="chat-header-main">
+            <div className="header-title">{activeAgentName}</div>
+            <span className={`chat-header-status ${loading ? 'is-busy' : ''}`}>
+              {loading ? t('chat.thinking') : t('chat.currentRun')}
+            </span>
+          </div>
         </div>
       </div>
 
       <ChatMessagesPanel
+        activeAgentName={activeAgentName}
+        containerRef={messagesContainerRef}
         groupedMessages={groupedMessages}
         loading={loading}
         markdownComponents={markdownComponents}
@@ -508,6 +567,7 @@ export function ChatInterface({
       <div className="input-container">
         <div className="input-box">
           <textarea
+            ref={textareaRef}
             className="input-textarea"
             value={input}
             onChange={(e) => setInput(e.target.value)}
@@ -520,7 +580,6 @@ export function ChatInterface({
             placeholder={t('chat.placeholder')}
             disabled={loading}
             rows={1}
-            style={{ height: 'auto', minHeight: '24px' }}
             onInput={(e) => {
               const target = e.target as HTMLTextAreaElement;
               target.style.height = 'auto';
@@ -528,139 +587,92 @@ export function ChatInterface({
             }}
           />
           <div className="input-actions">
-            <div className="input-tools" style={{ display: 'flex', alignItems: 'center' }}>
-              <div ref={modelDropdownRef} style={{ position: 'relative' }}>
-                <button
-                  ref={modelTriggerRef}
-                  type="button"
-                  disabled={loading}
-                  onClick={() => setIsModelDropdownOpen((prev) => !prev)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'ArrowDown') {
-                      e.preventDefault();
-                      if (!isModelDropdownOpen) {
-                        setIsModelDropdownOpen(true);
-                        return;
-                      }
-                      if (flatModelOptions.length > 0) {
-                        setActiveModelIndex((prev) => (prev + 1 + flatModelOptions.length) % flatModelOptions.length);
-                      }
+            <div ref={modelDropdownRef} className="model-switcher">
+              <button
+                ref={modelTriggerRef}
+                type="button"
+                disabled={loading}
+                onClick={() => setIsModelDropdownOpen((prev) => !prev)}
+                onKeyDown={(e) => {
+                  if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    if (!isModelDropdownOpen) {
+                      setIsModelDropdownOpen(true);
                       return;
                     }
-                    if (e.key === 'ArrowUp') {
-                      e.preventDefault();
-                      if (!isModelDropdownOpen) {
-                        setIsModelDropdownOpen(true);
-                        return;
-                      }
-                      if (flatModelOptions.length > 0) {
-                        setActiveModelIndex((prev) => (prev - 1 + flatModelOptions.length) % flatModelOptions.length);
-                      }
+                    if (flatModelOptions.length > 0) {
+                      setActiveModelIndex((prev) => (prev + 1 + flatModelOptions.length) % flatModelOptions.length);
+                    }
+                    return;
+                  }
+                  if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    if (!isModelDropdownOpen) {
+                      setIsModelDropdownOpen(true);
                       return;
                     }
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault();
-                      if (!isModelDropdownOpen) {
-                        setIsModelDropdownOpen(true);
-                        return;
-                      }
-                      if (activeModelIndex >= 0 && flatModelOptions[activeModelIndex]) {
-                        onModelChange(flatModelOptions[activeModelIndex].value);
-                        setIsModelDropdownOpen(false);
-                      }
+                    if (flatModelOptions.length > 0) {
+                      setActiveModelIndex((prev) => (prev - 1 + flatModelOptions.length) % flatModelOptions.length);
+                    }
+                    return;
+                  }
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    if (!isModelDropdownOpen) {
+                      setIsModelDropdownOpen(true);
                       return;
                     }
-                    if (e.key === 'Escape' && isModelDropdownOpen) {
-                      e.preventDefault();
+                    if (activeModelIndex >= 0 && flatModelOptions[activeModelIndex]) {
+                      onModelChange(flatModelOptions[activeModelIndex].value);
                       setIsModelDropdownOpen(false);
                     }
-                  }}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    background: 'var(--input-bg)',
-                    border: isModelDropdownOpen ? '1px solid var(--primary)' : '1px solid var(--input-border)',
-                    borderRadius: 'var(--radius-md)',
-                    padding: '4px 10px',
-                    fontSize: '0.8rem',
-                    color: 'var(--foreground)',
-                    cursor: loading ? 'not-allowed' : 'pointer',
-                    minHeight: '28px',
-                    maxWidth: '320px',
-                    boxShadow: isModelDropdownOpen ? '0 0 0 2px var(--ring)' : 'none'
-                  }}
-                >
-                  <IconCpu size={14} style={{ color: 'var(--muted-fg)' }} />
-                  <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{activeModelDisplay}</span>
-                  <IconChevronDown size={14} style={{ color: 'var(--muted-fg)' }} />
-                </button>
-                {isModelDropdownOpen && (
-                  <div
-                    style={{
-                      position: 'absolute',
-                      left: 0,
-                      ...(modelDropdownPlacement === 'top' ? { bottom: '100%', marginBottom: '8px' } : { top: '100%', marginTop: '8px' }),
-                      width: '320px',
-                      maxHeight: '300px',
-                      overflowY: 'auto',
-                      background: 'var(--background)',
-                      border: '1px solid var(--border)',
-                      borderRadius: 'var(--radius-md)',
-                      boxShadow: 'var(--shadow-lg)',
-                      zIndex: 60,
-                      padding: '6px'
-                    }}
-                  >
-                    {modelGroups.map((group) => (
-                      <div key={group.providerId} style={{ marginBottom: '6px' }}>
-                        <div
-                          style={{
-                            padding: '6px 8px',
-                            fontSize: '0.75rem',
-                            fontWeight: 600,
-                            color: 'var(--muted-fg)'
-                          }}
-                        >
-                          {group.providerName}
-                        </div>
-                        {group.models.map((model) => {
-                          const value = `${group.providerId}/${model.id}`;
-                          const selected = value === activeModelId;
-                          const itemIndex = modelIndexMap.get(value) ?? -1;
-                          const highlighted = itemIndex === activeModelIndex;
-                          return (
-                            <div
-                              key={value}
-                              onMouseEnter={() => setActiveModelIndex(itemIndex)}
-                              onClick={() => {
-                                onModelChange(value);
-                                setIsModelDropdownOpen(false);
-                              }}
-                              style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '8px',
-                                padding: '8px',
-                                borderRadius: 'var(--radius-sm)',
-                                cursor: 'pointer',
-                                background: selected || highlighted ? 'var(--sidebar-accent)' : 'transparent'
-                              }}
-                            >
-                              <div style={{ width: '16px', display: 'flex', justifyContent: 'center' }}>
-                                {selected && <IconCheck size={14} style={{ color: 'var(--primary)' }} />}
-                              </div>
-                              <span style={{ fontSize: '0.85rem' }}>{model.id}</span>
+                    return;
+                  }
+                  if (e.key === 'Escape' && isModelDropdownOpen) {
+                    e.preventDefault();
+                    setIsModelDropdownOpen(false);
+                  }
+                }}
+                className={`model-switcher-trigger ${isModelDropdownOpen ? 'is-open' : ''}`}
+                title={t('chat.selectModelTitle')}
+              >
+                <IconCpu size={14} />
+                <span className="model-switcher-trigger-label">{activeModelDisplay}</span>
+                <IconChevronDown size={14} />
+              </button>
+              {isModelDropdownOpen && (
+                <div className={`model-switcher-menu ${modelDropdownPlacement === 'top' ? 'is-top' : 'is-bottom'}`}>
+                  {modelGroups.map((group) => (
+                    <div key={group.providerId} className="model-switcher-group">
+                      <div className="model-switcher-group-label">{group.providerName}</div>
+                      {group.models.map((model) => {
+                        const value = `${group.providerId}/${model.id}`;
+                        const selected = value === activeModelId;
+                        const itemIndex = modelIndexMap.get(value) ?? -1;
+                        const highlighted = itemIndex === activeModelIndex;
+                        return (
+                          <div
+                            key={value}
+                            onMouseEnter={() => setActiveModelIndex(itemIndex)}
+                            onClick={() => {
+                              onModelChange(value);
+                              setIsModelDropdownOpen(false);
+                            }}
+                            className={`model-switcher-item ${selected ? 'is-selected' : ''} ${highlighted ? 'is-highlighted' : ''}`}
+                          >
+                            <div className="model-switcher-item-check">
+                              {selected && <IconCheck size={14} />}
                             </div>
-                          );
-                        })}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
+                            <span className="model-switcher-item-label">{model.id}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
-            <button className="send-btn" onClick={handleSend} disabled={loading || !input.trim()} title={t('chat.send')}>
+            <button type="button" className="send-btn" onClick={handleSend} disabled={loading || !input.trim()} title={`${t('chat.send')} · Enter`}>
               <IconSend size={16} />
             </button>
           </div>
@@ -693,4 +705,4 @@ export function ChatInterface({
       )}
     </div>
   );
-}
+});

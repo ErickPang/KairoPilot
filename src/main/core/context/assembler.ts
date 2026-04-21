@@ -45,6 +45,8 @@ interface ContextAssemblyInput {
     skillName: string;
     allowedTools: string[];
     loadedAt: number;
+    resourcePaths?: string[];
+    scriptPaths?: string[];
   }>;
   activeSkillsSummary?: string;
   availableSkillsSummary?: string;
@@ -195,12 +197,31 @@ function allocateSupportSectionBudgets(
 }
 
 function buildLoadedSkillsSummary(
-  loadedSkills: Array<{ skillName: string; allowedTools: string[]; loadedAt: number }> | undefined,
+  loadedSkills: Array<{
+    skillName: string;
+    allowedTools: string[];
+    loadedAt: number;
+    resourcePaths?: string[];
+    scriptPaths?: string[];
+  }> | undefined,
   maxChars: number
 ) {
   if (!Array.isArray(loadedSkills) || loadedSkills.length === 0 || maxChars <= 0) {
     return '';
   }
+
+  const summarizePaths = (paths: string[] | undefined, maxItems: number) => {
+    const normalizedPaths = Array.from(new Set((paths ?? []).map((entry) => entry.trim()).filter(Boolean)));
+    if (normalizedPaths.length === 0) {
+      return 'none';
+    }
+
+    const displayedPaths = normalizedPaths.slice(0, maxItems);
+    const remainder = normalizedPaths.length - displayedPaths.length;
+    return remainder > 0
+      ? `${displayedPaths.join(', ')} (+${remainder} more)`
+      : displayedPaths.join(', ');
+  };
 
   const rendered = loadedSkills
     .slice()
@@ -210,9 +231,13 @@ function buildLoadedSkillsSummary(
       const allowedTools = skill.allowedTools.length > 0
         ? skill.allowedTools.join(', ')
         : 'none';
+      const resourceSummary = summarizePaths(skill.resourcePaths, 3);
+      const scriptSummary = summarizePaths(skill.scriptPaths, 2);
       return [
         `- skill ${index + 1}: ${skill.skillName}`,
-        `  allowed_tools: ${trimText(allowedTools, 220)}`
+        `  allowed_tools: ${trimText(allowedTools, 220)}`,
+        `  resources: ${trimText(resourceSummary, 240)}`,
+        `  scripts: ${trimText(scriptSummary, 180)}`
       ].join('\n');
     })
     .join('\n');

@@ -13,6 +13,8 @@ import {
   getKairoPilotConfig,
   getModels,
   saveModel,
+  getWebSearchConfig,
+  saveWebSearchConfig,
   deleteModel,
   getAgents,
   saveAgent,
@@ -81,9 +83,18 @@ function registerConfigHandlers() {
     return getModels();
   });
 
+  ipcMain.handle(KAIRO_INVOKE.configGetWebSearch, async () => {
+    return getWebSearchConfig();
+  });
+
   ipcMain.handle(KAIRO_INVOKE.configSaveModel, async (_, model) => {
     saveModel(model);
     removeRuntimesForAgents(findAgentIdsByProvider(model.id));
+    return { success: true };
+  });
+
+  ipcMain.handle(KAIRO_INVOKE.configSaveWebSearch, async (_, webSearch) => {
+    saveWebSearchConfig(typeof webSearch === 'object' && webSearch ? webSearch : getWebSearchConfig());
     return { success: true };
   });
 
