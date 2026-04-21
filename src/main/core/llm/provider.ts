@@ -42,6 +42,12 @@ const NATIVE_PLACEHOLDER_DESCRIPTOR: LLMProviderAdapterDescriptor = {
   protocol: 'native'
 };
 
+export function shouldAllowBrowserLikeLlmRuntime() {
+  return typeof window !== 'undefined'
+    && typeof document !== 'undefined'
+    && process.env.KAIROPILOT_ALLOW_BROWSER_LLM === 'true';
+}
+
 function createOpenAICompatibleCapabilities(): LLMProviderCapabilities {
   return {
     chat: true,
@@ -228,7 +234,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
     this.client = new OpenAI({
       apiKey: resolvedApiKey,
       baseURL: normalizedBaseUrl,
-      dangerouslyAllowBrowser: true
+      dangerouslyAllowBrowser: shouldAllowBrowserLikeLlmRuntime()
     });
   }
 

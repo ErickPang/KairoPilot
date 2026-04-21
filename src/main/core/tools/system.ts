@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { ToolDefinition } from '../llm/types';
 import os from 'os';
+import { toolError, toolOk } from './result';
 
 export const SystemInfoTool: ToolDefinition = {
   name: 'system_info',
@@ -15,7 +16,7 @@ export const SystemInfoTool: ToolDefinition = {
       const release = os.release();
       const uptime = os.uptime();
       
-      return {
+      return toolOk({
         platform,
         release,
         arch: os.arch(),
@@ -24,9 +25,9 @@ export const SystemInfoTool: ToolDefinition = {
         totalMemory: `${(totalMem / (1024 * 1024 * 1024)).toFixed(2)} GB`,
         freeMemory: `${(freeMem / (1024 * 1024 * 1024)).toFixed(2)} GB`,
         uptime: `${(uptime / 3600).toFixed(2)} hours`
-      };
+      });
     } catch (error) {
-      throw new Error(`Failed to get system info: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      return toolError(`Failed to get system info: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   },
 };

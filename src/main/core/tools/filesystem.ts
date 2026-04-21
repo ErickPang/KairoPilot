@@ -1,14 +1,8 @@
 import fs from 'fs-extra';
 import { z } from 'zod';
 import { ToolDefinition } from '../llm/types';
-
-const PROTECTED_PROMPT_FILES = new Set([
-  'KAIROPILOT.md',
-  'IDENTITY.md',
-  'USER.md',
-  'SOUL.md',
-  'MEMORY.md'
-]);
+import { PROTECTED_PROMPT_FILES } from '../security/policyConstants';
+import { toolError, toolOk } from './result';
 
 export const ReadFileTool: ToolDefinition = {
   name: 'read_file',
@@ -18,11 +12,11 @@ export const ReadFileTool: ToolDefinition = {
   }),
   execute: async (args: Record<string, unknown>) => {
     try {
-      const path = args.path as string;
-      const content = await fs.readFile(path, 'utf-8');
-      return { content };
+      const targetPath = args.path as string;
+      const content = await fs.readFile(targetPath, 'utf-8');
+      return toolOk({ content });
     } catch (error) {
-      throw new Error(`Failed to read file: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      return toolError(`Failed to read file: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   },
 };
@@ -36,12 +30,12 @@ export const WriteFileTool: ToolDefinition = {
   }),
   execute: async (args: Record<string, unknown>) => {
     try {
-      const path = args.path as string;
+      const targetPath = args.path as string;
       const content = args.content as string;
-      await fs.outputFile(path, content, 'utf-8');
-      return { success: true };
+      await fs.outputFile(targetPath, content, 'utf-8');
+      return toolOk({ success: true });
     } catch (error) {
-      throw new Error(`Failed to write file: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      return toolError(`Failed to write file: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   },
 };
@@ -54,13 +48,13 @@ export const ListDirectoryTool: ToolDefinition = {
   }),
   execute: async (args: Record<string, unknown>) => {
     try {
-      const path = args.path as string;
-      const files = await fs.readdir(path);
-      return {
+      const targetPath = args.path as string;
+      const files = await fs.readdir(targetPath);
+      return toolOk({
         files: files.filter(name => !PROTECTED_PROMPT_FILES.has(name))
-      };
+      });
     } catch (error) {
-      return `Failed to list directory: ${error instanceof Error ? error.message : 'Unknown error'}`;
+      return toolError(`Failed to list directory: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   },
 };
@@ -73,11 +67,11 @@ export const DeleteFileTool: ToolDefinition = {
   }),
   execute: async (args: Record<string, unknown>) => {
     try {
-      const path = args.path as string;
-      await fs.remove(path); // fs-extra remove handles both files and directories
-      return { success: true };
+      const targetPath = args.path as string;
+      await fs.remove(targetPath);
+      return toolOk({ success: true });
     } catch (error) {
-      throw new Error(`Failed to delete path: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      return toolError(`Failed to delete path: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   },
 };

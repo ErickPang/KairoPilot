@@ -9,6 +9,7 @@ import {
   updateRunStep,
   updateToolCallRecord
 } from '../../store/chat';
+import type { RuntimeUpdateEvent } from '../../../shared/contracts';
 import type { ContextAssemblyMetadata } from '../context/assembler';
 import type { ChatMessage } from '../llm/types';
 import type { LoadedSkillCapability } from './capabilityOrchestrator';
@@ -60,7 +61,7 @@ interface CreateApprovalRequestParams {
   lastUserInput: string;
   contextSummary?: ContextAssemblyMetadata;
   persistSnapshot: (patch: RuntimeSnapshotPatch) => void;
-  emitUpdate: (update: Record<string, unknown>) => void;
+  emitUpdate: (update: RuntimeUpdateEvent) => void;
 }
 
 type ApprovalRecord = NonNullable<ReturnType<typeof getApprovalRecord>>;

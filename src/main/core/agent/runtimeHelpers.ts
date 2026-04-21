@@ -317,6 +317,19 @@ export function createActiveSkillsSnapshot(
   loadedSkills: LoadedSkillCapability[],
   maxChars: number = 2200
 ): ActiveSkillSnapshot | undefined {
+  const summarizeSkillPaths = (paths: string[] | undefined, maxItems: number = 3) => {
+    const normalizedPaths = Array.from(new Set((paths ?? []).map((entry) => entry.trim()).filter(Boolean)));
+    if (normalizedPaths.length === 0) {
+      return 'none';
+    }
+
+    const displayedPaths = normalizedPaths.slice(0, maxItems);
+    const remainder = normalizedPaths.length - displayedPaths.length;
+    return remainder > 0
+      ? `${displayedPaths.join(', ')} (+${remainder} more)`
+      : displayedPaths.join(', ');
+  };
+
   const normalizedSkills = loadedSkills
     .slice()
     .sort((left, right) => right.loadedAt - left.loadedAt)
@@ -326,9 +339,11 @@ export function createActiveSkillsSnapshot(
       const allowedToolsSummary = allowedTools.length > 0
         ? allowedTools.join(', ')
         : 'none';
+      const resourceSummary = summarizeSkillPaths(skill.resourcePaths);
+      const scriptSummary = summarizeSkillPaths(skill.scriptPaths, 2);
       return {
         skillName: normalizedSkillName,
-        summary: `- ${normalizedSkillName} | allowed_tools: ${allowedToolsSummary}`
+        summary: `- ${normalizedSkillName} | allowed_tools: ${allowedToolsSummary} | resources: ${resourceSummary} | scripts: ${scriptSummary}`
       };
     })
     .filter((skill) => skill.skillName);

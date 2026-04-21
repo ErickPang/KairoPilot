@@ -1,15 +1,18 @@
 import { useState, useEffect } from 'react';
-import { FetchModelsResult, ModelConfig } from '../../types';
+import { AppNotice, FetchModelsResult, ModelConfig } from '../../types';
 import { IconCpu } from '../Icons';
 import { useTranslation } from '../../hooks/useTranslation';
 import { KAIRO_EVENT, KAIRO_INVOKE } from '../../../shared/ipc';
+import { createErrorNotice } from '../../hooks/errorUtils';
 
 interface OllamaManagerProps {
   editingModel: ModelConfig;
+  onClearNotice: () => void;
   onFetchModels: (model: ModelConfig) => Promise<FetchModelsResult>;
+  onReportNotice: (notice: AppNotice) => void;
 }
 
-export function OllamaManager({ editingModel, onFetchModels }: OllamaManagerProps) {
+export function OllamaManager({ editingModel, onClearNotice, onFetchModels, onReportNotice }: OllamaManagerProps) {
   const [ollamaStatus, setOllamaStatus] = useState<{running: boolean; message?: string, error?: string} | null>(null);
   const [modelToPull, setModelToPull] = useState('');
   const [pullProgress, setPullProgress] = useState<{status: string, completed?: number, total?: number} | null>(null);
@@ -71,6 +74,7 @@ export function OllamaManager({ editingModel, onFetchModels }: OllamaManagerProp
 
   const handleStartOllama = async () => {
     setIsStartingOllama(true);
+    onClearNotice();
     try {
       const res = await window.kairo.invoke(KAIRO_INVOKE.ollamaStart);
       if (res.success) {
@@ -79,42 +83,31 @@ export function OllamaManager({ editingModel, onFetchModels }: OllamaManagerProp
           setIsStartingOllama(false);
         }, 2000);
       } else {
-        alert(t('config.startOllamaFailed', { error: res.error || 'Unknown' }));
+        onReportNotice(createErrorNotice(t('config.startOllamaFailed', { error: res.error || 'Unknown' }), 'start_ollama'));
         setIsStartingOllama(false);
       }
     } catch (e) {
-      alert(t('config.startOllamaError', { error: e instanceof Error ? e.message : 'Unknown' }));
+      onReportNotice(createErrorNotice(t('config.startOllamaError', { error: e instanceof Error ? e.message : 'Unknown' }), 'start_ollama'));
       setIsStartingOllama(false);
     }
   };
 
   return (
-    <div className="form-group" style={{ 
-      marginTop: '1rem', 
-      padding: '1.25rem', 
-      background: 'var(--sidebar-bg)', 
-      border: '1px solid var(--border)',
-      borderRadius: 'var(--radius-md)' 
-    }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
-        <h4 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+    <div className="form-group ollama-manager">
+      <div className="ollama-manager-header">
+        <h4 className="ollama-manager-title">
           <IconCpu size={18} /> Ollama Manager
         </h4>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem' }}>
-          <span style={{ 
-            display: 'inline-block', 
-            width: '8px', height: '8px', 
-            borderRadius: '50%', 
-            background: ollamaStatus?.running ? 'var(--success)' : 'var(--danger)' 
-          }}></span>
+        <div className="ollama-manager-status-row">
+          <span className={`ollama-status-dot ${ollamaStatus?.running ? 'is-running' : 'is-stopped'}`}></span>
           {ollamaStatus?.running ? t('config.ollamaRunning') : t('config.ollamaNotRunning')}
           
           {!ollamaStatus?.running && (
             <button 
+              type="button"
               onClick={handleStartOllama} 
               disabled={isStartingOllama} 
-              className="btn btn-secondary" 
-              style={{ padding: '0.15rem 0.5rem', fontSize: '0.75rem', marginLeft: '0.5rem' }}
+              className="btn btn-secondary ollama-start-btn"
             >
               {isStartingOllama ? t('config.ollamaStarting') : t('config.ollamaStart')}
             </button>
@@ -123,7 +116,7 @@ export function OllamaManager({ editingModel, onFetchModels }: OllamaManagerProp
       </div>
       
       <label>{t('config.ollamaPull')}</label>
-      <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.25rem' }}>
+      <div className="ollama-manager-actions">
          <input 
             className="form-control"
             value={modelToPull} 
@@ -132,6 +125,7 @@ export function OllamaManager({ editingModel, onFetchModels }: OllamaManagerProp
             disabled={isPulling || !ollamaStatus?.running}
          />
          <button 
+            type="button"
             onClick={handlePullModel} 
             className="btn btn-primary" 
             disabled={isPulling || !modelToPull || !ollamaStatus?.running}
@@ -141,16 +135,14 @@ export function OllamaManager({ editingModel, onFetchModels }: OllamaManagerProp
       </div>
       <div className="form-help">{t('config.ollamaPullHelp')}</div>
       {pullProgress && (
-        <div style={{ marginTop: '0.75rem', fontSize: '0.85rem', color: 'var(--muted-fg)' }}>
+        <div className="ollama-progress">
           <div>Status: {pullProgress.status}</div>
           {pullProgress.total && pullProgress.completed && (
-            <div style={{ marginTop: '0.25rem', height: '4px', background: 'var(--border)', borderRadius: '2px', overflow: 'hidden' }}>
-              <div style={{ 
-                height: '100%', 
-                background: 'var(--primary)', 
-                width: `${Math.min(100, Math.round((pullProgress.completed / pullProgress.total) * 100))}%`,
-                transition: 'width 0.2s'
-              }}></div>
+            <div className="ollama-progress-track">
+              <div
+                className="ollama-progress-fill"
+                style={{ width: `${Math.min(100, Math.round((pullProgress.completed / pullProgress.total) * 100))}%` }}
+              ></div>
             </div>
           )}
         </div>

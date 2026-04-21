@@ -3,6 +3,7 @@ import { promisify } from 'util';
 import { z } from 'zod';
 import { ToolDefinition } from '../llm/types';
 import { ShellExecutionPolicy } from '../security/permissions';
+import { toolError, toolOk } from './result';
 
 const execFileAsync = promisify(execFile);
 const EXECUTION_MAX_BUFFER_BYTES = 1024 * 1024;
@@ -162,26 +163,24 @@ export const createExecuteCommandTool = (options: string | ExecuteCommandToolOpt
       if (!shellPolicy.allowInteractive && isInteractiveShellCommand(normalized.command, normalized.args)) {
         throw new Error('Interactive shell commands are not allowed.');
       }
-      console.log(`Executing command: ${normalized.command} ${normalized.args.join(' ')} in ${resolvedOptions.cwd}`);
       const { stdout, stderr } = await execFileAsync(normalized.command, normalized.args, {
         cwd: resolvedOptions.cwd,
         maxBuffer: shellPolicy.maxBufferBytes,
         windowsHide: true,
         timeout: shellPolicy.timeoutMs
       });
-      return {
+      return toolOk({
         stdout: stdout.trim(),
         stderr: stderr.trim(),
         exitCode: 0
-      };
+      });
     } catch (error) {
       const err = error as { stdout?: string | Buffer; stderr?: string | Buffer; code?: number; message: string };
-      return {
+      return toolError(err.message, {
         stdout: String(err.stdout || '').trim(),
         stderr: String(err.stderr || '').trim() || err.message,
-        exitCode: err.code || 1,
-        error: err.message
-      };
+        exitCode: err.code || 1
+      });
     }
   },
 });

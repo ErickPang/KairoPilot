@@ -20,6 +20,7 @@ export function SettingsSidebar({ activeSection, onSelectSection }: SettingsSide
     <div className="settings-sidebar">
       <div className="settings-sidebar-header">
         <h2>{t('settings.title')}</h2>
+        <p>{t('settings.subtitle')}</p>
       </div>
       
       <div className="settings-sidebar-menu">
@@ -30,8 +31,10 @@ export function SettingsSidebar({ activeSection, onSelectSection }: SettingsSide
           return (
             <button
               key={section.id}
+              type="button"
               className={`settings-menu-item ${isActive ? 'active' : ''}`}
               onClick={() => onSelectSection(section.id)}
+              title={section.label}
             >
               <Icon size={20} />
               <span>{section.label}</span>

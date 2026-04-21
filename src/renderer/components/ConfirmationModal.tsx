@@ -31,41 +31,28 @@ export function ConfirmationModal({ request, onConfirm, onDeny }: ConfirmationMo
 
   return (
     <div className="modal-overlay">
-      <div className="modal-content" style={{ 
-        maxWidth: '500px', 
-        borderTop: isDestructive ? '4px solid var(--danger)' : '4px solid var(--primary)'
-      }}>
+      <div className={`modal-content confirmation-modal ${isDestructive ? 'is-destructive' : ''}`}>
         <div className="modal-header">
-          <h3 style={{ color: isDestructive ? 'var(--danger)' : 'inherit', display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <h3 className={`confirmation-modal-title ${isDestructive ? 'is-destructive' : ''}`}>
             <IconShield size={20} /> 
             {isDestructive ? t('modal.highRisk') : t('modal.permissionRequest')}
           </h3>
-          <button className="close-btn" onClick={onDeny}>×</button>
+          <button type="button" className="close-btn" onClick={onDeny}>×</button>
         </div>
         
         <div className="modal-body">
-          <p style={{ marginTop: 0, fontWeight: 'bold', color: isDestructive ? 'var(--danger)' : 'inherit' }}>
+          <p className={`confirmation-modal-lead ${isDestructive ? 'is-destructive' : ''}`}>
             {isDestructive ? t('modal.requestDescHighRisk') : t('modal.requestDesc')}
           </p>
-          <div className="tool-details" style={{ backgroundColor: 'var(--bg-color)', padding: '1rem', borderRadius: '6px', border: '1px solid var(--border)' }}>
-            <div style={{ marginBottom: '0.5rem' }}>
-              <strong>{t('modal.tool')}:</strong> <code style={{ backgroundColor: 'var(--input-bg)', padding: '2px 6px', borderRadius: '4px', color: isDestructive ? 'var(--danger)' : 'inherit' }}>{request.tool}</code>
+          <div className="tool-details confirmation-modal-details">
+            <div className="confirmation-modal-row">
+              <strong>{t('modal.tool')}:</strong> <code className={`confirmation-modal-code ${isDestructive ? 'is-destructive' : ''}`}>{request.tool}</code>
             </div>
-            <div style={{ marginBottom: '0.25rem' }}><strong>{t('modal.arguments')}:</strong></div>
-            <pre style={{ 
-              margin: 0, 
-              backgroundColor: 'var(--input-bg)', 
-              padding: '0.5rem', 
-              borderRadius: '4px', 
-              border: '1px solid var(--border)', 
-              maxHeight: '200px', 
-              overflow: 'auto', 
-              fontSize: '0.9rem',
-              color: 'var(--foreground)'
-            }}>
+            <div className="confirmation-modal-row-label"><strong>{t('modal.arguments')}:</strong></div>
+            <pre className="confirmation-modal-pre">
               {JSON.stringify(request.args, null, 2)}
             </pre>
-            <div style={{ marginTop: '0.75rem', display: 'grid', gap: '0.5rem' }}>
+            <div className="confirmation-modal-meta">
               <div>
                 <strong>{t('modal.riskLevel')}:</strong> {riskLevelLabel}
               </div>
@@ -80,29 +67,25 @@ export function ConfirmationModal({ request, onConfirm, onDeny }: ConfirmationMo
                 </div>
               )}
               {request.redacted && (
-                <div style={{ color: 'var(--muted-fg)', fontSize: '0.85rem' }}>
+                <div className="confirmation-modal-muted">
                   {t('modal.redactedNotice')}
                 </div>
               )}
             </div>
           </div>
           {isDestructive && (
-            <p style={{ color: 'var(--danger)', fontSize: '0.85rem', marginTop: '1rem', backgroundColor: 'rgba(239, 68, 68, 0.1)', padding: '8px', borderRadius: '4px' }}>
+            <p className="confirmation-modal-warning">
               {t('modal.warning')}
             </p>
           )}
         </div>
         
-        <div className="modal-actions" style={{ marginTop: '1.5rem' }}>
-          <button onClick={onDeny} className="secondary" style={{ flex: 1 }}>{t('modal.deny')}</button>
+        <div className="modal-actions confirmation-modal-actions">
+          <button type="button" onClick={onDeny} className="btn btn-secondary confirmation-modal-action">{t('modal.deny')}</button>
           <button 
+            type="button"
             onClick={onConfirm} 
-            className="primary" 
-            style={{ 
-              flex: 1, 
-              backgroundColor: isDestructive ? 'var(--danger)' : 'var(--primary)',
-              borderColor: isDestructive ? 'var(--danger)' : 'var(--primary)'
-            }}
+            className={`btn ${isDestructive ? 'btn-danger' : 'btn-primary'} confirmation-modal-action`}
           >
             {t('modal.allow')}
           </button>

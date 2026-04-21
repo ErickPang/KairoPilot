@@ -10,6 +10,10 @@ import {
   ExecutionProfile,
   RiskLevel
 } from '../../../shared/contracts';
+import {
+  PROTECTED_PROMPT_FILES,
+  SENSITIVE_DIRS_BLACKLIST
+} from './policyConstants';
 
 const DEFAULT_SHELL_TIMEOUT_MS = 60_000;
 const DEFAULT_SHELL_MAX_BUFFER_BYTES = 256 * 1024;
@@ -76,27 +80,6 @@ export const PermissionSchema = z.object({
 
 export type PermissionConfig = z.infer<typeof PermissionSchema>;
 
-// Hardcoded blacklist of sensitive directories that AI should never access
-const SENSITIVE_DIRS_BLACKLIST = new Set([
-  '.ssh',
-  '.gnupg',
-  '.aws',
-  '.kube',
-  'System32',
-  'AppData',
-  'Library/Application Support', // macOS app data
-  'node_modules', // Often too large, can cause issues, though arguably not a security risk like .ssh
-  '.git'
-]);
-
-const PROTECTED_PROMPT_FILES = new Set([
-  'KAIROPILOT.md',
-  'IDENTITY.md',
-  'USER.md',
-  'SOUL.md',
-  'MEMORY.md'
-]);
-
 export class PermissionGuard {
   private config: PermissionConfig;
 
@@ -149,6 +132,10 @@ export class PermissionGuard {
       return false;
     }
     return this.config.network.enabled;
+  }
+
+  getAllowedNetworkTargets(): string[] {
+    return [...(this.config.network.allowedDomains ?? [])];
   }
 
   isShellEnabled(): boolean {
@@ -215,7 +202,7 @@ export class PermissionGuard {
       return 'high';
     }
 
-    if (toolName === 'web_search' || toolName === 'fetch_webpage') {
+    if (toolName === 'web_search' || toolName === 'fetch_webpage' || toolName === 'http_request') {
       return 'medium';
     }
 
@@ -239,6 +226,7 @@ export class PermissionGuard {
     const isWriteTool = toolName === 'write_file' || toolName === 'delete_file';
     const isExternalTool = toolName === 'web_search'
       || toolName === 'fetch_webpage'
+      || toolName === 'http_request'
       || toolName === 'execute_command'
       || toolName === 'run_skill_script';
 

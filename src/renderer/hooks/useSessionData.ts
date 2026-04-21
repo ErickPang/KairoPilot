@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { ApprovalRecord, ConfirmationRequest, Message, SessionContextState, SessionSummary } from '../types';
+import { useCallback, useRef, useState } from 'react';
+import { ApprovalRecord, ConfirmationRequest, Message, SessionContextState, SessionContextUpdate, SessionSummary } from '../types';
 import { KAIRO_INVOKE } from '../../shared/ipc';
+import type { I18nContextValue } from '../components/layout/I18nContext';
+import { getErrorMessage, logRendererError } from './errorUtils';
 
 function getDisplayArgs(approval: ApprovalRecord): Record<string, unknown> {
   if (!approval.metadata?.redacted) {
@@ -13,6 +15,22 @@ function getDisplayArgs(approval: ApprovalRecord): Record<string, unknown> {
   }
 
   return approval.args;
+}
+
+interface UseSessionDataOptions {
+  onLoadActiveSessionError?: (message: string) => void;
+  onLoadRunStateError?: (message: string) => void;
+  onLoadSessionsError?: (message: string) => void;
+  t: I18nContextValue['t'];
+}
+
+interface RunStatePatchInput {
+  activeSessionId: string | null;
+  targetSessionId: string;
+  latestRun: SessionContextState['latestRun'];
+  latestContextSummary: SessionContextState['latestContextSummary'];
+  activeRunSteps: SessionContextState['activeRunSteps'];
+  confirmationRequest: SessionContextState['confirmationRequest'];
 }
 
 export function mapApprovalToConfirmationRequest(approval: ApprovalRecord): ConfirmationRequest {
@@ -31,7 +49,38 @@ export function mapApprovalToConfirmationRequest(approval: ApprovalRecord): Conf
   };
 }
 
-export function useSessionData(updateSessionContext: (patch: Partial<SessionContextState>) => void) {
+export function createRunStatePatchForSession(input: RunStatePatchInput): Partial<SessionContextState> | null {
+  if (input.activeSessionId && input.activeSessionId !== input.targetSessionId) {
+    return null;
+  }
+
+  return {
+    latestContextSummary: input.latestContextSummary,
+    latestRun: input.latestRun,
+    activeRunSteps: input.activeRunSteps,
+    confirmationRequest: input.confirmationRequest
+  };
+}
+
+export function sortSessionsByActivity(items: SessionSummary[]): SessionSummary[] {
+  return [...items].sort((left, right) => {
+    if (right.updatedAt !== left.updatedAt) {
+      return right.updatedAt - left.updatedAt;
+    }
+
+    if (right.createdAt !== left.createdAt) {
+      return right.createdAt - left.createdAt;
+    }
+
+    return left.id.localeCompare(right.id);
+  });
+}
+
+export function useSessionData(
+  updateSessionContext: (patch: SessionContextUpdate) => void,
+  options: UseSessionDataOptions
+) {
+  const { onLoadActiveSessionError, onLoadRunStateError, onLoadSessionsError, t } = options;
   const [messages, setMessages] = useState<Message[]>([]);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -39,11 +88,12 @@ export function useSessionData(updateSessionContext: (patch: Partial<SessionCont
   const loadSessions = useCallback(async () => {
     try {
       const allSessions = await window.kairo.invoke(KAIRO_INVOKE.chatListSessions);
-      setSessions(allSessions);
+      setSessions(sortSessionsByActivity(allSessions));
     } catch (error) {
-      console.error('Failed to load sessions:', error);
+      logRendererError('Failed to load sessions', error);
+      onLoadSessionsError?.(t('app.error.loadSessions', { error: getErrorMessage(error) }));
     }
-  }, []);
+  }, [onLoadSessionsError, t]);
 
   const loadActiveSession = useCallback(async () => {
     try {
@@ -74,9 +124,10 @@ export function useSessionData(updateSessionContext: (patch: Partial<SessionCont
         });
       }
     } catch (error) {
-      console.error('Failed to load active session:', error);
+      logRendererError('Failed to load active session', error);
+      onLoadActiveSessionError?.(t('app.error.loadActiveSession', { error: getErrorMessage(error) }));
     }
-  }, [updateSessionContext]);
+  }, [onLoadActiveSessionError, t, updateSessionContext]);
 
   const loadRunState = useCallback(async (sessionId?: string | null) => {
     if (!sessionId) {
@@ -96,20 +147,19 @@ export function useSessionData(updateSessionContext: (patch: Partial<SessionCont
         window.kairo.invoke(KAIRO_INVOKE.chatGetSessionRuns, sessionId),
         window.kairo.invoke(KAIRO_INVOKE.chatGetPendingApproval, sessionId)
       ]);
-      updateSessionContext({
+      updateSessionContext((current) => createRunStatePatchForSession({
+        activeSessionId: current.activeSessionId,
+        targetSessionId: sessionId,
         latestContextSummary,
         latestRun,
         activeRunSteps,
         confirmationRequest: confirmationRequest ? mapApprovalToConfirmationRequest(confirmationRequest) : null
-      });
+      }) ?? {});
     } catch (error) {
-      console.error('Failed to load run state:', error);
+      logRendererError('Failed to load run state', error);
+      onLoadRunStateError?.(t('app.error.loadRunState', { error: getErrorMessage(error) }));
     }
-  }, [updateSessionContext]);
-
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  }, [onLoadRunStateError, t, updateSessionContext]);
 
   return {
     loadActiveSession,

@@ -3,14 +3,30 @@ import ReactDOM from 'react-dom/client'
 import App from './App.tsx'
 import './index.css'
 import { I18nProvider } from './components/layout/I18nProvider'
-import { KAIRO_EVENT, KAIRO_INVOKE } from '../shared/ipc'
+import { KAIRO_INVOKE } from '../shared/ipc'
 
 // Mock bridge for browser preview
 if (!window.kairo) {
+  const mockWebSearch = {
+    timeoutMs: 10000,
+    preferredProviders: ['searxng', 'tavily', 'bing', 'duckduckgo', 'baidu'],
+    providers: {
+      searxng: { enabled: false, baseUrl: '' },
+      tavily: { enabled: false, baseUrl: 'https://api.tavily.com', apiKey: '' },
+      bing: { enabled: true },
+      duckduckgo: { enabled: true },
+      baidu: { enabled: true }
+    }
+  }
   window.kairo = {
-    invoke: (async (channel: string, ...args: unknown[]) => {
-      console.log(`[Mock] invoke ${channel}`, args);
-      if (channel === KAIRO_INVOKE.configGetAll) return { models: { providers: {} }, agents: { activeAgentId: 'mainAgent', list: [] }, plugins: { registry: [] }, skills: { registry: [] } };
+    invoke: (async (channel: string, ..._args: unknown[]) => {
+      if (channel === KAIRO_INVOKE.configGetAll) return { models: { providers: {} }, agents: { activeAgentId: 'mainAgent', list: [] }, plugins: { registry: [] }, skills: { registry: [] }, webSearch: mockWebSearch };
+      if (channel === KAIRO_INVOKE.configGetWebSearch) return mockWebSearch;
+      if (channel === KAIRO_INVOKE.configSaveWebSearch) return { success: true };
+      if (channel === KAIRO_INVOKE.agentChat) return { success: true, status: 'completed', content: 'Mock response' };
+      if (channel === KAIRO_INVOKE.agentConfirmResponse) return { success: true, status: 'completed' };
+      if (channel === KAIRO_INVOKE.agentResumeRun) return { success: true, status: 'completed' };
+      if (channel === KAIRO_INVOKE.agentRetryStep) return { success: true, status: 'completed' };
       if (channel === KAIRO_INVOKE.configGetAgents) return [];
       if (channel === KAIRO_INVOKE.chatListSessions) return [];
       if (channel === KAIRO_INVOKE.chatGetActiveSession) return null;
@@ -66,11 +82,8 @@ if (!window.kairo) {
       };
       return null;
     }) as KairoBridge['invoke'],
-    on: (channel: string) => {
-      console.log(`[Mock] on ${channel}`);
-      return () => {};
-    },
-  };
+    on: () => () => {}
+  }
 }
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
@@ -80,8 +93,3 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     </I18nProvider>
   </React.StrictMode>,
 )
-
-// Use contextBridge
-window.kairo.on(KAIRO_EVENT.mainProcessMessage, (message) => {
-  console.log(message)
-})

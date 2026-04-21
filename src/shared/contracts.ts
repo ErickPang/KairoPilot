@@ -245,6 +245,75 @@ export type MonitoringTokenQueryResult = PagedQueryResult<MonitoringTokenUsageIt
 
 export type RunStatus = 'running' | 'waiting_approval' | 'paused' | 'completed' | 'failed' | 'cancelled'
 
+export interface AgentRuntimeInvokeResult {
+  success: boolean
+  content?: string
+  error?: string
+  status?: RunStatus
+  runId?: string
+  approvalId?: string
+}
+
+export type RuntimeUpdateEvent =
+  | {
+      type: 'thinking'
+      content: string
+      runId: string
+      stepId?: string
+      status?: 'running'
+    }
+  | {
+      type: 'tool-call'
+      tool: string
+      args: Record<string, unknown>
+      runId: string
+      stepId?: string
+      status?: 'running'
+    }
+  | {
+      type: 'tool-result'
+      tool: string
+      result: unknown
+      runId: string
+      stepId?: string
+      status?: 'completed'
+    }
+  | {
+      type: 'tool-error'
+      tool: string
+      error: string
+      runId: string
+      stepId?: string
+      status?: 'failed'
+    }
+  | {
+      type: 'assistant-response'
+      content: string
+      runId: string
+      status: 'completed'
+    }
+  | {
+      type: 'approval-required'
+      tool: string
+      args: Record<string, unknown>
+      runId: string
+      sessionId?: string
+      stepId?: string
+      approvalId: string
+      riskLevel?: string
+      approvalMode?: string
+      policyTags?: string[]
+      redacted?: boolean
+      status: 'waiting_approval'
+    }
+  | {
+      type: 'run-paused' | 'run-cancelled'
+      runId: string
+      stepId?: string
+      status: 'paused' | 'cancelled'
+      error?: string
+    }
+
 export type RunStepType =
   | 'plan'
   | 'model_call'
@@ -611,6 +680,33 @@ export interface PluginRegistryEntry {
   scope: string
 }
 
+export type WebSearchProviderId = 'searxng' | 'tavily' | 'bing' | 'duckduckgo' | 'baidu'
+
+export interface WebSearchProviderToggleConfig {
+  enabled: boolean
+}
+
+export interface WebSearchSearxngConfig extends WebSearchProviderToggleConfig {
+  baseUrl: string
+}
+
+export interface WebSearchTavilyConfig extends WebSearchProviderToggleConfig {
+  baseUrl: string
+  apiKey: string
+}
+
+export interface WebSearchConfig {
+  timeoutMs: number
+  preferredProviders: WebSearchProviderId[]
+  providers: {
+    searxng: WebSearchSearxngConfig
+    tavily: WebSearchTavilyConfig
+    bing: WebSearchProviderToggleConfig
+    duckduckgo: WebSearchProviderToggleConfig
+    baidu: WebSearchProviderToggleConfig
+  }
+}
+
 export interface KairoPilotConfig {
   version: string
   models: {
@@ -626,6 +722,7 @@ export interface KairoPilotConfig {
   skills: {
     registry: SkillsRegistryEntry[]
   }
+  webSearch: WebSearchConfig
 }
 
 export interface LegacyAgentConfig {
