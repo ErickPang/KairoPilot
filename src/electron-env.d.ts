@@ -85,10 +85,12 @@ interface KairoBridge {
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.configGetActiveAgentId): Promise<string | null>;
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.configGetAgents): Promise<import('./shared/contracts').AgentConfig[]>;
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.configGetAll): Promise<import('./shared/contracts').KairoPilotConfig>;
+  invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.configGetAppearance): Promise<import('./shared/contracts').AppearanceConfig>;
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.configGetModels): Promise<import('./shared/contracts').ProviderConfig[]>;
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.configGetWebSearch): Promise<import('./shared/contracts').WebSearchConfig>;
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.configSave, config: import('./shared/contracts').LegacyAgentConfig): Promise<InvokeSuccess>;
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.configSaveAgent, agent: import('./shared/contracts').AgentConfig): Promise<InvokeSuccess>;
+  invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.configSaveAppearance, config: import('./shared/contracts').AppearanceConfig): Promise<InvokeSuccess>;
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.configSaveModel, model: import('./shared/contracts').ModelConfig): Promise<InvokeSuccess>;
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.configSaveWebSearch, config: import('./shared/contracts').WebSearchConfig): Promise<InvokeSuccess>;
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.configSetActiveAgent, id: string): Promise<InvokeSuccess>;

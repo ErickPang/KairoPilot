@@ -11,8 +11,10 @@ import {
   getAgent,
   saveAgentConfig,
   getKairoPilotConfig,
+  getAppearanceConfig,
   getModels,
   saveModel,
+  saveAppearanceConfig,
   getWebSearchConfig,
   saveWebSearchConfig,
   deleteModel,
@@ -79,6 +81,10 @@ function registerConfigHandlers() {
     };
   });
 
+  ipcMain.handle(KAIRO_INVOKE.configGetAppearance, async () => {
+    return getAppearanceConfig();
+  });
+
   ipcMain.handle(KAIRO_INVOKE.configGetModels, async () => {
     return getModels();
   });
@@ -90,6 +96,11 @@ function registerConfigHandlers() {
   ipcMain.handle(KAIRO_INVOKE.configSaveModel, async (_, model) => {
     saveModel(model);
     removeRuntimesForAgents(findAgentIdsByProvider(model.id));
+    return { success: true };
+  });
+
+  ipcMain.handle(KAIRO_INVOKE.configSaveAppearance, async (_, appearance) => {
+    saveAppearanceConfig(typeof appearance === 'object' && appearance ? appearance : getAppearanceConfig());
     return { success: true };
   });
 

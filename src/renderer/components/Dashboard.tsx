@@ -168,7 +168,10 @@ export const Dashboard = memo(function Dashboard({ agents, isActive, onReportErr
       meta: undefined,
       accent: 'accent',
       icon: <IconCpu size={22} />,
-      iconStyle: { background: 'linear-gradient(135deg, #dbeafe 0%, #93c5fd 100%)', color: '#1d4ed8' }
+      iconStyle: {
+        background: 'linear-gradient(135deg, rgba(var(--info-rgb), 0.16) 0%, rgba(var(--info-rgb), 0.32) 100%)',
+        color: 'var(--info)'
+      }
     },
     {
       label: t('dashboard.totalMessages'),
@@ -176,7 +179,10 @@ export const Dashboard = memo(function Dashboard({ agents, isActive, onReportErr
       meta: undefined,
       accent: '',
       icon: <IconChat size={22} />,
-      iconStyle: { background: 'linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%)', color: '#047857' }
+      iconStyle: {
+        background: 'linear-gradient(135deg, rgba(var(--success-rgb), 0.16) 0%, rgba(var(--success-rgb), 0.32) 100%)',
+        color: 'var(--success)'
+      }
     },
     {
       label: t('dashboard.totalSessions'),
@@ -184,7 +190,10 @@ export const Dashboard = memo(function Dashboard({ agents, isActive, onReportErr
       meta: undefined,
       accent: '',
       icon: <IconBot size={22} />,
-      iconStyle: { background: 'linear-gradient(135deg, #fef3c7 0%, #fde68a 100%)', color: '#b45309' }
+      iconStyle: {
+        background: 'linear-gradient(135deg, rgba(var(--warning-rgb), 0.16) 0%, rgba(var(--warning-rgb), 0.32) 100%)',
+        color: 'var(--warning)'
+      }
     },
     {
       label: t('dashboard.totalRuns'),
@@ -192,7 +201,10 @@ export const Dashboard = memo(function Dashboard({ agents, isActive, onReportErr
       meta: undefined,
       accent: 'accent',
       icon: <IconRefresh size={22} />,
-      iconStyle: { background: 'linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%)', color: '#1d4ed8' }
+      iconStyle: {
+        background: 'linear-gradient(135deg, rgba(var(--primary-soft-rgb), 0.18) 0%, rgba(var(--primary-rgb), 0.26) 100%)',
+        color: 'var(--primary)'
+      }
     },
     {
       label: t('dashboard.runCompletionRate'),
@@ -237,12 +249,12 @@ export const Dashboard = memo(function Dashboard({ agents, isActive, onReportErr
           gap: 1.25rem;
           margin-bottom: 1.5rem;
           padding: 1.4rem 1.45rem;
-          border: 1px solid rgba(148, 163, 184, 0.16);
+          border: 1px solid rgba(var(--border-rgb), 0.58);
           border-radius: 1.6rem;
           background:
-            radial-gradient(circle at top right, rgba(37, 99, 235, 0.1), transparent 28%),
-            linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(246, 249, 253, 0.9));
-          box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.96);
+            radial-gradient(circle at top right, rgba(var(--primary-rgb), 0.1), transparent 28%),
+            var(--card);
+          box-shadow: var(--shine-strong);
         }
         .dashboard-hero-copy {
           min-width: 0;
@@ -253,7 +265,7 @@ export const Dashboard = memo(function Dashboard({ agents, isActive, onReportErr
           align-items: center;
           padding: 0.34rem 0.72rem;
           border-radius: 999px;
-          background: rgba(37, 99, 235, 0.08);
+          background: var(--primary-muted);
           color: var(--primary);
           font-size: 0.78rem;
           font-weight: 700;
@@ -290,9 +302,9 @@ export const Dashboard = memo(function Dashboard({ agents, isActive, onReportErr
           flex-direction: column;
           gap: 0.22rem;
           padding: 0.9rem 1rem;
-          border: 1px solid rgba(148, 163, 184, 0.14);
+          border: 1px solid rgba(var(--border-rgb), 0.56);
           border-radius: 1.1rem;
-          background: rgba(255, 255, 255, 0.72);
+          background: rgba(var(--surface-rgb), 0.72);
         }
         .dashboard-hero-chip-label,
         .dashboard-stat-label {
@@ -332,10 +344,10 @@ export const Dashboard = memo(function Dashboard({ agents, isActive, onReportErr
           letter-spacing: -0.02em;
         }
         .stat-card {
-          background: linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(246, 249, 253, 0.9));
+          background: linear-gradient(180deg, rgba(var(--surface-rgb), 0.88), rgba(var(--surface-alt-rgb), 0.86));
           padding: 1.15rem 1.2rem;
           border-radius: 1.35rem;
-          border: 1px solid rgba(148, 163, 184, 0.14);
+          border: 1px solid rgba(var(--border-rgb), 0.56);
           box-shadow: none;
           transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
           display: flex;
@@ -348,7 +360,7 @@ export const Dashboard = memo(function Dashboard({ agents, isActive, onReportErr
           content: "";
           position: absolute;
           inset: 0;
-          background: linear-gradient(135deg, rgba(255,255,255,0.42) 0%, rgba(255,255,255,0) 100%);
+          background: linear-gradient(135deg, rgba(255,255,255,0.24) 0%, rgba(255,255,255,0) 100%);
           pointer-events: none;
         }
         .stat-card > * {
@@ -357,8 +369,8 @@ export const Dashboard = memo(function Dashboard({ agents, isActive, onReportErr
         }
         .stat-card:hover {
           transform: translateY(-1px);
-          box-shadow: 0 14px 28px rgba(15, 23, 42, 0.06);
-          border-color: rgba(37, 99, 235, 0.14);
+          box-shadow: var(--shadow-soft);
+          border-color: rgba(var(--primary-rgb), 0.14);
         }
         .dashboard-stat-header {
           display: flex;
@@ -373,7 +385,7 @@ export const Dashboard = memo(function Dashboard({ agents, isActive, onReportErr
           width: 44px;
           height: 44px;
           border-radius: 12px;
-          box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85);
+          box-shadow: var(--shine-soft);
         }
         .dashboard-stat-value {
           font-size: 2.3rem;
@@ -392,12 +404,12 @@ export const Dashboard = memo(function Dashboard({ agents, isActive, onReportErr
         }
         .progress-bar-bg {
           height: 8px;
-          background: rgba(226, 232, 240, 0.72);
+          background: rgba(var(--surface-alt-rgb), 0.88);
           border-radius: 4px;
           overflow: hidden;
           margin-top: 0.5rem;
           width: 100%;
-          box-shadow: inset 0 1px 2px rgba(0,0,0,0.05);
+          box-shadow: inset 0 1px 2px rgba(var(--shadow-rgb), 0.1);
         }
         .progress-bar-fill {
           height: 100%;
@@ -407,9 +419,9 @@ export const Dashboard = memo(function Dashboard({ agents, isActive, onReportErr
           background-size: 1rem 1rem;
         }
         @keyframes pulse-dot {
-          0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.35); }
-          70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(37, 99, 235, 0); }
-          100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(37, 99, 235, 0); }
+          0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(var(--primary-rgb), 0.35); }
+          70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(var(--primary-rgb), 0); }
+          100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(var(--primary-rgb), 0); }
         }
         .live-dot {
           width: 8px;
@@ -468,7 +480,7 @@ export const Dashboard = memo(function Dashboard({ agents, isActive, onReportErr
           align-items: center;
           padding: 0.25rem 0.55rem;
           border-radius: 999px;
-          background: rgba(37, 99, 235, 0.1);
+          background: var(--primary-muted);
           color: var(--primary);
           font-size: 0.75rem;
           font-weight: 700;
@@ -480,7 +492,7 @@ export const Dashboard = memo(function Dashboard({ agents, isActive, onReportErr
           max-width: 220px;
           padding: 0.35rem 0.6rem;
           border-radius: 999px;
-          background: rgba(15, 23, 42, 0.06);
+          background: rgba(var(--shadow-rgb), 0.06);
           color: var(--foreground);
           font-size: 0.8rem;
           font-weight: 600;
@@ -518,8 +530,8 @@ export const Dashboard = memo(function Dashboard({ agents, isActive, onReportErr
           margin-bottom: 1rem;
         }
         .token-aggregation-card {
-          background: rgba(255, 255, 255, 0.8);
-          border: 1px solid rgba(148, 163, 184, 0.14);
+          background: rgba(var(--surface-rgb), 0.82);
+          border: 1px solid rgba(var(--border-rgb), 0.56);
           border-radius: 1.2rem;
           padding: 1rem 1.1rem;
         }
@@ -586,7 +598,7 @@ export const Dashboard = memo(function Dashboard({ agents, isActive, onReportErr
           height: 5rem;
           margin-bottom: 1rem;
           border-radius: 1.5rem;
-          background: rgba(37, 99, 235, 0.08);
+          background: var(--primary-muted);
           color: var(--primary);
         }
         .dashboard-agent-cell {
@@ -595,11 +607,11 @@ export const Dashboard = memo(function Dashboard({ agents, isActive, onReportErr
           gap: 0.75rem;
         }
         .dashboard-agent-icon {
-          background: linear-gradient(180deg, rgba(241, 245, 255, 0.96), rgba(248, 250, 252, 0.96));
+          background: linear-gradient(180deg, rgba(var(--primary-rgb), 0.12), rgba(var(--surface-rgb), 0.96));
           padding: 0.5rem;
           border-radius: 0.8rem;
           display: flex;
-          box-shadow: inset 0 1px 0 #fff;
+          box-shadow: var(--shine-soft);
         }
         .dashboard-uptime-value {
           display: flex;
@@ -990,7 +1002,10 @@ export const Dashboard = memo(function Dashboard({ agents, isActive, onReportErr
                     <div className="dashboard-resource-value">{systemStats.cpuUsage}%</div>
                   </div>
                   <div className="progress-bar-bg">
-                    <div className="progress-bar-fill" style={{ width: `${Math.min(systemStats.cpuUsage, 100)}%`, backgroundColor: systemStats.cpuUsage > 80 ? '#ef4444' : '#3b82f6' }} />
+                    <div
+                      className="progress-bar-fill"
+                      style={{ width: `${Math.min(systemStats.cpuUsage, 100)}%`, backgroundColor: systemStats.cpuUsage > 80 ? 'var(--danger)' : 'var(--primary)' }}
+                    />
                   </div>
                 </div>
 
@@ -1000,7 +1015,10 @@ export const Dashboard = memo(function Dashboard({ agents, isActive, onReportErr
                     <div className="dashboard-resource-value">{systemStats.memoryUsage}%</div>
                   </div>
                   <div className="progress-bar-bg">
-                    <div className="progress-bar-fill" style={{ width: `${Math.min(systemStats.memoryUsage, 100)}%`, backgroundColor: systemStats.memoryUsage > 80 ? '#ef4444' : '#10b981' }} />
+                    <div
+                      className="progress-bar-fill"
+                      style={{ width: `${Math.min(systemStats.memoryUsage, 100)}%`, backgroundColor: systemStats.memoryUsage > 80 ? 'var(--danger)' : 'var(--success)' }}
+                    />
                   </div>
                   <div className="dashboard-resource-meta">
                     {t('dashboard.totalGb', { total: systemStats.totalMemory })}

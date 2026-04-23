@@ -14,6 +14,9 @@ import { Dashboard } from './components/Dashboard';
 import { IconChat, IconShield, IconSettings, IconPlugin, IconDashboard, IconSkill } from './components/Icons';
 import { useAppController } from './hooks/useAppController';
 import { useTranslation } from './hooks/useTranslation';
+import { KAIRO_INVOKE } from '../shared/ipc';
+import type { AppearanceTheme } from './types';
+import { applyAppearanceTheme, subscribeAppearanceThemeChanged, subscribeSystemThemeChanged } from './theme';
 
 function App() {
   const { t } = useTranslation();
@@ -77,6 +80,7 @@ function App() {
   ] as const;
   const primaryNavigationItems = navigationItems.slice(0, 4);
   const secondaryNavigationItems = navigationItems.slice(4);
+  const [appearanceTheme, setAppearanceTheme] = useState<AppearanceTheme>('system');
   const [mountedTabs, setMountedTabs] = useState<Record<typeof navigationItems[number]['id'], boolean>>({
     chat: true,
     dashboard: false,
@@ -96,6 +100,46 @@ function App() {
       setActiveTab(tab);
     });
   }, [setActiveTab]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadAppearance = async () => {
+      try {
+        const appearance = await window.kairo.invoke(KAIRO_INVOKE.configGetAppearance);
+        if (!cancelled && appearance?.theme) {
+          setAppearanceTheme(appearance.theme);
+          applyAppearanceTheme(appearance.theme);
+        }
+      } catch (error) {
+        console.error('Failed to load appearance settings:', error);
+      }
+    };
+
+    void loadAppearance();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    return subscribeAppearanceThemeChanged((theme) => {
+      setAppearanceTheme(theme);
+      applyAppearanceTheme(theme);
+    });
+  }, []);
+
+  useEffect(() => {
+    if (appearanceTheme !== 'system') {
+      return;
+    }
+
+    applyAppearanceTheme('system');
+    return subscribeSystemThemeChanged(() => {
+      applyAppearanceTheme('system');
+    });
+  }, [appearanceTheme]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {

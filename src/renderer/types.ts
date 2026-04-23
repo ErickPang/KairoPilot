@@ -2,6 +2,8 @@ export type {
   AgentConfig,
   AgentStats,
   AgentPermissionConfig,
+  AppearanceConfig,
+  AppearanceTheme,
   ApprovalRecord,
   AuditLogEntry,
   AuditLogQuery,

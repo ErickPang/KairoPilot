@@ -3,6 +3,7 @@ import os from 'os';
 import path from 'path';
 import {
   type AgentConfig,
+  type AppearanceConfig,
   type KairoPilotConfig,
   type LegacyAgentConfig,
   type ModelConfig,
@@ -21,6 +22,7 @@ import { normalizeWebSearchConfig } from './configWebSearchUtils';
 export type {
   AgentConfig,
   AgentPermissionConfig,
+  AppearanceConfig,
   KairoPilotConfig,
   LegacyAgentConfig,
   ModelConfig,
@@ -87,6 +89,13 @@ function normalizeConfig(rawConfig: unknown): KairoPilotConfig {
     delete providers.openai;
   }
 
+  const appearanceTheme = config?.appearance?.theme;
+  const normalizedAppearance: AppearanceConfig = {
+    theme: appearanceTheme === 'system' || appearanceTheme === 'light' || appearanceTheme === 'dark' || appearanceTheme === 'slate' || appearanceTheme === 'warm'
+      ? appearanceTheme
+      : DEFAULT_CONFIG.appearance.theme
+  };
+
   const normalized: KairoPilotConfig = {
     version: typeof config?.version === 'string' ? config.version : DEFAULT_CONFIG.version,
     models: {
@@ -102,6 +111,7 @@ function normalizeConfig(rawConfig: unknown): KairoPilotConfig {
     skills: {
       registry: Array.isArray(config?.skills?.registry) ? config.skills.registry : []
     },
+    appearance: normalizedAppearance,
     webSearch: normalizeWebSearchConfig(config?.webSearch)
   };
 
@@ -282,6 +292,21 @@ export function saveKairoPilotConfig(config: KairoPilotConfig) {
 
 export function getWebSearchConfig(): WebSearchConfig {
   return getKairoPilotConfig().webSearch;
+}
+
+export function getAppearanceConfig(): AppearanceConfig {
+  return getKairoPilotConfig().appearance;
+}
+
+export function saveAppearanceConfig(appearance: AppearanceConfig) {
+  const config = getKairoPilotConfig();
+  const nextTheme = appearance?.theme;
+  config.appearance = {
+    theme: nextTheme === 'system' || nextTheme === 'light' || nextTheme === 'dark' || nextTheme === 'slate' || nextTheme === 'warm'
+      ? nextTheme
+      : DEFAULT_CONFIG.appearance.theme
+  };
+  saveKairoPilotConfig(config);
 }
 
 export function saveWebSearchConfig(webSearch: WebSearchConfig) {

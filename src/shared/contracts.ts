@@ -707,6 +707,12 @@ export interface WebSearchConfig {
   }
 }
 
+export type AppearanceTheme = 'system' | 'light' | 'dark' | 'slate' | 'warm'
+
+export interface AppearanceConfig {
+  theme: AppearanceTheme
+}
+
 export interface KairoPilotConfig {
   version: string
   models: {
@@ -722,6 +728,7 @@ export interface KairoPilotConfig {
   skills: {
     registry: SkillsRegistryEntry[]
   }
+  appearance: AppearanceConfig
   webSearch: WebSearchConfig
 }
 
