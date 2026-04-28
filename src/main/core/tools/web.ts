@@ -10,10 +10,80 @@ import { runSearchRouter } from './web/router';
 const FETCH_WEBPAGE_TIMEOUT_MS = 15_000;
 const HTTP_REQUEST_TIMEOUT_MS = 20_000;
 const HTTP_REQUEST_MAX_LENGTH = 12_000;
+const FETCH_WEBPAGE_FALLBACK_TIMEOUT_MS = 25_000;
 
 export const __webToolTestUtils = {
   ...webProviderTestUtils
 };
+
+function decodeHtmlEntities(value: string) {
+  return value
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#x27;/g, "'")
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>');
+}
+
+function looksLikeBlockedWebpage(html: string) {
+  const normalizedHtml = html.toLowerCase();
+  return (
+    normalizedHtml.includes('百度安全验证')
+    || normalizedHtml.includes('安全验证')
+    || normalizedHtml.includes('captcha')
+    || normalizedHtml.includes('verify you are human')
+    || normalizedHtml.includes('access denied')
+    || normalizedHtml.includes('robot check')
+    || normalizedHtml.includes('unusual traffic')
+  );
+}
+
+function extractPrimaryHtmlSegment(html: string) {
+  const candidates = [
+    html.match(/<main\b[^>]*>([\s\S]*?)<\/main>/i)?.[1],
+    html.match(/<article\b[^>]*>([\s\S]*?)<\/article>/i)?.[1],
+    html.match(/<body\b[^>]*>([\s\S]*?)<\/body>/i)?.[1]
+  ].filter((value): value is string => typeof value === 'string' && value.trim().length > 0);
+
+  return candidates[0] || html;
+}
+
+function htmlToPlainText(html: string) {
+  return decodeHtmlEntities(html)
+    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, ' ')
+    .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, ' ')
+    .replace(/<noscript\b[^<]*(?:(?!<\/noscript>)<[^<]*)*<\/noscript>/gi, ' ')
+    .replace(/<svg\b[^<]*(?:(?!<\/svg>)<[^<]*)*<\/svg>/gi, ' ')
+    .replace(/<nav\b[^<]*(?:(?!<\/nav>)<[^<]*)*<\/nav>/gi, ' ')
+    .replace(/<footer\b[^<]*(?:(?!<\/footer>)<[^<]*)*<\/footer>/gi, ' ')
+    .replace(/<header\b[^<]*(?:(?!<\/header>)<[^<]*)*<\/header>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function extractWebpageText(html: string) {
+  const title = decodeHtmlEntities(html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || '').trim();
+  const description = decodeHtmlEntities(
+    html.match(/<meta[^>]+name=["']description["'][^>]+content=["']([^"']+)["']/i)?.[1]
+      || html.match(/<meta[^>]+property=["']og:description["'][^>]+content=["']([^"']+)["']/i)?.[1]
+      || ''
+  ).trim();
+  const primaryText = htmlToPlainText(extractPrimaryHtmlSegment(html));
+  const fullText = htmlToPlainText(html);
+  let content = primaryText.length >= 160 ? primaryText : fullText;
+  if (title && content.startsWith(`${title} `)) {
+    content = content.slice(title.length).trim();
+  }
+
+  return [title, description, content]
+    .filter((segment, index, values) => Boolean(segment) && values.indexOf(segment) === index)
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
 
 function getEffectiveWebSearchConfig() {
   try {
@@ -67,7 +137,6 @@ export const WebSearchTool: ToolDefinition = {
 
       if (result.ok) {
         return toolOk({
-          message: result.results.length === 0 ? 'No results found.' : undefined,
           results: result.results,
           source: result.source,
           provider: result.provider,
@@ -111,18 +180,21 @@ export const FetchWebpageTool: ToolDefinition = {
       }
 
       const maxLength = args.maxLength as number | undefined;
-      const html = await fetchHtml(url, FETCH_WEBPAGE_TIMEOUT_MS);
+      let html: string;
+      try {
+        html = await fetchHtml(url, FETCH_WEBPAGE_TIMEOUT_MS);
+      } catch {
+        html = await fetchHtml(url, FETCH_WEBPAGE_FALLBACK_TIMEOUT_MS);
+      }
 
-      let text = html
-        .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, ' ')
-        .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, ' ')
-        .replace(/<[^>]+>/g, ' ')
-        .replace(/&nbsp;/g, ' ')
-        .replace(/&amp;/g, '&')
-        .replace(/&quot;/g, '"')
-        .replace(/&#x27;/g, "'")
-        .replace(/\s+/g, ' ')
-        .trim();
+      if (looksLikeBlockedWebpage(html)) {
+        return toolError(`Request to ${url} returned a verification or blocked page instead of readable content.`);
+      }
+
+      let text = extractWebpageText(html);
+      if (!text) {
+        return toolError(`Request to ${url} succeeded but no readable page text could be extracted.`);
+      }
 
       const limit = maxLength || 8000;
       if (text.length > limit) {

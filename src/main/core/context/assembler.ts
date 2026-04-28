@@ -45,6 +45,13 @@ interface ContextAssemblyInput {
     skillName: string;
     allowedTools: string[];
     loadedAt: number;
+    description?: string;
+    whenToUse?: string;
+    instructions?: string;
+    userInvocable?: boolean;
+    modelInvocable?: boolean;
+    executionMode?: 'inline' | 'fork';
+    activationSource?: 'manual' | 'automatic';
     resourcePaths?: string[];
     scriptPaths?: string[];
   }>;
@@ -201,6 +208,13 @@ function buildLoadedSkillsSummary(
     skillName: string;
     allowedTools: string[];
     loadedAt: number;
+    description?: string;
+    whenToUse?: string;
+    instructions?: string;
+    userInvocable?: boolean;
+    modelInvocable?: boolean;
+    executionMode?: 'inline' | 'fork';
+    activationSource?: 'manual' | 'automatic';
     resourcePaths?: string[];
     scriptPaths?: string[];
   }> | undefined,
@@ -231,14 +245,21 @@ function buildLoadedSkillsSummary(
       const allowedTools = skill.allowedTools.length > 0
         ? skill.allowedTools.join(', ')
         : 'none';
+      const invocation = skill.modelInvocable === false
+        ? (skill.userInvocable === false ? 'hidden' : 'manual_only')
+        : 'auto';
       const resourceSummary = summarizePaths(skill.resourcePaths, 3);
       const scriptSummary = summarizePaths(skill.scriptPaths, 2);
       return [
         `- skill ${index + 1}: ${skill.skillName}`,
+        skill.description ? `  description: ${trimText(skill.description, 220)}` : '',
+        skill.whenToUse ? `  when_to_use: ${trimText(skill.whenToUse, 260)}` : '',
+        `  invocation: ${invocation} | execution: ${skill.executionMode || 'inline'} | source: ${skill.activationSource || 'manual'}`,
         `  allowed_tools: ${trimText(allowedTools, 220)}`,
+        skill.instructions ? `  instructions: ${trimText(skill.instructions, 420)}` : '',
         `  resources: ${trimText(resourceSummary, 240)}`,
         `  scripts: ${trimText(scriptSummary, 180)}`
-      ].join('\n');
+      ].filter(Boolean).join('\n');
     })
     .join('\n');
 

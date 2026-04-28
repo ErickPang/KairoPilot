@@ -75,6 +75,10 @@ KairoPilot 当前聚焦以下四个方向：
 
 - 支持公共技能与 Agent 专属技能
 - 支持从工作区 `skills/` 目录扫描技能定义
+- Agent Skills 支持 `SKILL.md` frontmatter 中的 `version`、`allowed-tools`、`when_to_use`、`arguments`、`user-invocable`、`disable-model-invocation`、`context`
+- 运行时会基于用户请求与 `when_to_use` 自动召回并预激活相关技能，必要时仍可显式调用 `load_skill`
+- `load_skill` 支持参数化技能正文渲染，`read_skill_resource` 会复用当前技能参数上下文
+- `run_skill_script` 仅允许访问已加载技能的 `scripts/` 目录，并复用 Shell 白名单、超时与缓冲区策略
 - 插件加载前执行 manifest 校验
 - 插件工具执行具备超时控制与基础边界保护
 - 当前已具备插件管理与技能展示能力，插件商店接口仍在持续建设中
@@ -238,7 +242,7 @@ KairoPilot 目前已经具备一个可用的桌面 Agent MVP，并持续向“�
 - 安全权限拦截与确认流
 - 审计日志与系统监控
 - Agent 级 Tokens 消耗明细
-- 插件 / 技能的基础加载框架
+- 插件 / 技能的完整加载、召回与执行框架
 
 后续将继续完善：
 

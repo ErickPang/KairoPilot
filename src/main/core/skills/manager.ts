@@ -1,4 +1,5 @@
 import { app } from 'electron'
+import { realpathSync, watch, type FSWatcher } from 'fs'
 import fs from 'fs/promises'
 import path from 'path'
 import { randomUUID } from 'crypto'
@@ -13,6 +14,8 @@ import {
   SkillInstallReview,
   SkillInstallReviewArgs,
   SkillMarketplaceQuery,
+  SkillUninstallArgs,
+  SkillSummary,
   SkillRecord,
   SkillReviewFinding,
   SkillsRegistryEntry,
@@ -61,6 +64,20 @@ interface PreparedSkillInstall {
   targetSkillDir: string
   review: SkillInstallReview
 }
+
+export interface SkillCatalogEntrySnapshot {
+  id: string
+  summary: string
+}
+
+export interface SkillCatalogSnapshot {
+  fingerprint: string
+  fullSummary: string
+  entries: SkillCatalogEntrySnapshot[]
+}
+
+const AVAILABLE_SKILLS_MAX_CHARS = 3600
+const AVAILABLE_SKILL_ENTRY_MAX_CHARS = 180
 
 const DEFAULT_SKILL_MARKETPLACE_SOURCES: NormalizedSkillsRegistrySource[] = DEFAULT_SKILL_MARKETPLACE_PRESETS.map((preset) => ({
   type: preset.type,
@@ -164,12 +181,44 @@ metadata:
   }
 ]
 
+function trimSkillCatalogText(value: string, maxChars: number) {
+  const normalized = value.replace(/\s+/g, ' ').trim()
+  if (normalized.length <= maxChars) {
+    return normalized
+  }
+  return `${normalized.slice(0, Math.max(0, maxChars - 1)).trimEnd()}…`
+}
+
+function deriveSkillInvocationMode(skill: Pick<SkillSummary, 'userInvocable' | 'modelInvocable'>) {
+  if (skill.modelInvocable === false) {
+    return skill.userInvocable === false ? 'hidden' : 'manual_only'
+  }
+  return skill.userInvocable === false ? 'hidden_auto' : 'auto'
+}
+
+function cloneSkillCatalogSnapshot(snapshot: SkillCatalogSnapshot): SkillCatalogSnapshot {
+  return {
+    fingerprint: snapshot.fingerprint,
+    fullSummary: snapshot.fullSummary,
+    entries: snapshot.entries.map((entry) => ({ ...entry }))
+  }
+}
+
 export class SkillsManager {
   private publicSkillsDir: string
   private publicSkillIndex = new Map<string, SkillRecord>()
   private agentSkillIndex = new Map<string, Map<string, SkillRecord>>()
   private pendingInstalls = new Map<string, PreparedSkillInstall>()
   private pendingInstallsDir: string
+  private publicSkillsLoaded = false
+  private publicSkillsLoadPromise: Promise<void> | null = null
+  private publicSkillsRevision = 0
+  private agentSkillLoaded = new Map<string, boolean>()
+  private agentSkillLoadPromises = new Map<string, Promise<void>>()
+  private agentSkillRevisions = new Map<string, number>()
+  private skillCatalogCache = new Map<string, SkillCatalogSnapshot>()
+  private skillFileIndex = new Map<string, string[]>()
+  private directoryWatchers = new Map<string, FSWatcher>()
 
   constructor() {
     this.publicSkillsDir = path.join(app.getPath('home'), '.kairopilot', 'skills')
@@ -178,51 +227,104 @@ export class SkillsManager {
 
   async initialize() {
     await this.ensureSkillsDirectories()
+    this.ensurePublicSkillWatchers()
     await this.loadAllSkills()
   }
 
-  async loadAllSkills() {
-    await this.ensureSkillsDirectories()
-    const mergedPublicSkills = new Map<string, SkillRecord>()
-    const builtinSkillsDir = getBuiltinSkillsSourcePath()
-    const publicSkillDirectories = [
-      this.publicSkillsDir,
-      builtinSkillsDir
-    ]
-      .filter((dirPath): dirPath is string => typeof dirPath === 'string' && dirPath.trim().length > 0)
-      .map((dirPath) => path.resolve(dirPath))
-      .filter((dirPath, index, directories) => directories.indexOf(dirPath) === index)
+  dispose() {
+    for (const watcher of this.directoryWatchers.values()) {
+      watcher.close()
+    }
+    this.directoryWatchers.clear()
+  }
 
-    for (const skillsDir of publicSkillDirectories) {
-      const publicSkills = await scanSkillsDirectory(skillsDir, 'public')
-      for (const skill of publicSkills) {
-        mergedPublicSkills.set(skill.id, skill)
-      }
+  async loadAllSkills(options?: { force?: boolean }) {
+    this.ensurePublicSkillWatchers()
+    if (!options?.force && this.publicSkillsLoaded) {
+      return
+    }
+    if (!options?.force && this.publicSkillsLoadPromise) {
+      await this.publicSkillsLoadPromise
+      return
     }
 
-    this.publicSkillIndex = mergedPublicSkills
+    const loadPromise = (async () => {
+      await this.ensureSkillsDirectories()
+      const mergedPublicSkills = new Map<string, SkillRecord>()
+      const builtinSkillsDir = getBuiltinSkillsSourcePath()
+      const publicSkillDirectories = [
+        this.publicSkillsDir,
+        builtinSkillsDir
+      ]
+        .filter((dirPath): dirPath is string => typeof dirPath === 'string' && dirPath.trim().length > 0)
+        .map((dirPath) => path.resolve(dirPath))
+        .filter((dirPath, index, directories) => directories.indexOf(dirPath) === index)
+
+      for (const skillsDir of publicSkillDirectories) {
+        const publicSkills = await scanSkillsDirectory(skillsDir, 'public')
+        for (const skill of publicSkills) {
+          mergedPublicSkills.set(skill.id, skill)
+        }
+      }
+
+      this.publicSkillIndex = mergedPublicSkills
+      this.publicSkillsLoaded = true
+    })()
+
+    this.publicSkillsLoadPromise = loadPromise
+    try {
+      await loadPromise
+    } finally {
+      if (this.publicSkillsLoadPromise === loadPromise) {
+        this.publicSkillsLoadPromise = null
+      }
+    }
   }
 
-  async loadAgentSkills(agentId: string) {
-    await this.ensureSkillsDirectories()
-    const agentSkillsDir = this.getAgentSkillsDirectoryPath(agentId)
-    const agentSkills = await scanSkillsDirectory(agentSkillsDir, 'agent', { agentId })
-    this.agentSkillIndex.set(agentId, new Map(agentSkills.map((skill) => [skill.id, skill])))
+  async loadAgentSkills(agentId: string, options?: { force?: boolean }) {
+    if (!options?.force && this.agentSkillLoaded.get(agentId)) {
+      return
+    }
+
+    const existingPromise = this.agentSkillLoadPromises.get(agentId)
+    if (!options?.force && existingPromise) {
+      await existingPromise
+      return
+    }
+
+    const loadPromise = (async () => {
+      await this.ensureSkillsDirectories()
+      const agentSkillsDir = this.getAgentSkillsDirectoryPath(agentId)
+      await fs.mkdir(agentSkillsDir, { recursive: true })
+      this.ensureAgentSkillWatcher(agentId)
+      const agentSkills = await scanSkillsDirectory(agentSkillsDir, 'agent', { agentId })
+      this.agentSkillIndex.set(agentId, new Map(agentSkills.map((skill) => [skill.id, skill])))
+      this.agentSkillLoaded.set(agentId, true)
+    })()
+
+    this.agentSkillLoadPromises.set(agentId, loadPromise)
+    try {
+      await loadPromise
+    } finally {
+      if (this.agentSkillLoadPromises.get(agentId) === loadPromise) {
+        this.agentSkillLoadPromises.delete(agentId)
+      }
+    }
   }
 
-  async listPublicSkills() {
-    await this.loadAllSkills()
-    return Array.from(this.publicSkillIndex.values()).map((skill) => toSkillSummary(skill))
+  async listPublicSkills(options?: { force?: boolean }) {
+    await this.loadAllSkills(options)
+    return Array.from(this.publicSkillIndex.values()).map((skill) => this.toManagedSkillSummary(skill))
   }
 
-  async listAgentSkills(agentId: string) {
-    await this.loadAgentSkills(agentId)
-    return Array.from(this.getAgentIndex(agentId).values()).map((skill) => toSkillSummary(skill))
+  async listAgentSkills(agentId: string, options?: { force?: boolean }) {
+    await this.loadAgentSkills(agentId, options)
+    return Array.from(this.getAgentIndex(agentId).values()).map((skill) => this.toManagedSkillSummary(skill))
   }
 
-  async listMergedSkills(agentId: string) {
-    await this.loadAllSkills()
-    await this.loadAgentSkills(agentId)
+  async listMergedSkills(agentId: string, options?: { force?: boolean }) {
+    await this.loadAllSkills(options)
+    await this.loadAgentSkills(agentId, options)
 
     const merged = new Map<string, SkillRecord>()
     for (const skill of this.publicSkillIndex.values()) {
@@ -232,7 +334,25 @@ export class SkillsManager {
       merged.set(skill.id, skill)
     }
 
-    return Array.from(merged.values()).map((skill) => toSkillSummary(skill))
+    return Array.from(merged.values()).map((skill) => this.toManagedSkillSummary(skill))
+  }
+
+  async getSkillCatalogSnapshot(agentId: string, options?: { force?: boolean }) {
+    if (!options?.force) {
+      const cachedSnapshot = this.skillCatalogCache.get(agentId)
+      if (cachedSnapshot) {
+        return cloneSkillCatalogSnapshot(cachedSnapshot)
+      }
+    }
+
+    const skills = await this.listMergedSkills(agentId, options)
+    const snapshot = this.buildSkillCatalogSnapshot(skills)
+    this.skillCatalogCache.set(agentId, snapshot)
+    return cloneSkillCatalogSnapshot(snapshot)
+  }
+
+  getSkillScopeRevision(agentId: string) {
+    return `${this.publicSkillsRevision}:${this.agentSkillRevisions.get(agentId) ?? 0}`
   }
 
   async getStoreSkills(query?: SkillMarketplaceQuery) {
@@ -328,12 +448,15 @@ export class SkillsManager {
     this.pendingInstalls.delete(requestId)
 
     if (preparedInstall.scope === 'public') {
-      await this.loadAllSkills()
+      this.invalidatePublicSkills()
+      await this.loadAllSkills({ force: true })
       return
     }
 
     if (preparedInstall.scope.startsWith('agent:')) {
-      await this.loadAgentSkills(preparedInstall.scope.slice('agent:'.length))
+      const agentId = preparedInstall.scope.slice('agent:'.length)
+      this.invalidateAgentSkills(agentId)
+      await this.loadAgentSkills(agentId, { force: true })
     }
   }
 
@@ -400,11 +523,61 @@ export class SkillsManager {
     }
 
     if (target.type === 'public') {
-      await this.loadAllSkills()
+      this.invalidatePublicSkills()
+      await this.loadAllSkills({ force: true })
       return
     }
 
-    await this.loadAgentSkills(target.agentId)
+    this.invalidateAgentSkills(target.agentId)
+    await this.loadAgentSkills(target.agentId, { force: true })
+  }
+
+  async uninstallSkill(args: SkillUninstallArgs) {
+    const skillId = normalizeSkillFolderId(args.id)
+    if (!skillId) {
+      throw new Error('Invalid skill id.')
+    }
+
+    const scope = typeof args.scope === 'string' && args.scope.trim() ? args.scope.trim() : 'public'
+    if (scope === 'public') {
+      await this.loadAllSkills()
+      const skill = this.publicSkillIndex.get(skillId)
+      if (!skill) {
+        throw new Error(`Skill ${skillId} not found in public scope.`)
+      }
+      if (!this.isSkillRecordRemovable(skill)) {
+        throw new Error('Built-in skills cannot be removed.')
+      }
+      await fs.rm(skill.skillDir, { recursive: true, force: true })
+      this.invalidatePublicSkills()
+      await this.loadAllSkills({ force: true })
+      return
+    }
+
+    if (scope.startsWith('agent:')) {
+      const agentId = scope.slice('agent:'.length).trim()
+      if (!agentId) {
+        throw new Error(`Unsupported uninstall scope: ${scope}`)
+      }
+      await this.loadAgentSkills(agentId)
+      const skill = this.getAgentIndex(agentId).get(skillId)
+      if (!skill) {
+        throw new Error(`Skill ${skillId} not found in scope ${scope}.`)
+      }
+      if (!this.isSkillRecordRemovable(skill)) {
+        throw new Error('Built-in skills cannot be removed.')
+      }
+      await fs.rm(skill.skillDir, { recursive: true, force: true })
+      this.invalidateAgentSkills(agentId)
+      await this.loadAgentSkills(agentId, { force: true })
+      return
+    }
+
+    throw new Error(`Unsupported uninstall scope: ${scope}`)
+  }
+
+  async getSkillRecord(skillName: string, agentId?: string) {
+    return this.findSkill(skillName, agentId)
   }
 
   async getMetadata(skillName: string, agentId?: string) {
@@ -441,6 +614,18 @@ export class SkillsManager {
     return filePaths.sort((left, right) => left.localeCompare(right))
   }
 
+  async listSkillFilesForRecord(skill: SkillRecord) {
+    const cacheKey = skill.skillDir
+    const cachedFilePaths = this.skillFileIndex.get(cacheKey)
+    if (cachedFilePaths) {
+      return [...cachedFilePaths]
+    }
+
+    const filePaths = await this.collectSkillFiles(skill.skillDir)
+    this.skillFileIndex.set(cacheKey, [...filePaths])
+    return filePaths.sort((left, right) => left.localeCompare(right))
+  }
+
   async resolveReferencePath(skillName: string, resourceName: string, agentId?: string) {
     return this.resolveResourcePath(skillName, path.posix.join('references', resourceName), agentId)
   }
@@ -472,7 +657,7 @@ export class SkillsManager {
       return false
     }
 
-    return metadata.metadata.allowedTools.some((allowedToolName) => matchesAllowedToolName(allowedToolName, toolName))
+    return metadata.allowedTools.some((allowedToolName) => matchesAllowedToolName(allowedToolName, toolName))
   }
 
   getPublicSkillsDirectoryPath() {
@@ -534,6 +719,167 @@ export class SkillsManager {
       getPublicSkillIndex: () => this.publicSkillIndex,
       getAgentIndex: (resolvedAgentId) => this.getAgentIndex(resolvedAgentId)
     })
+  }
+
+  private invalidatePublicSkills() {
+    this.publicSkillsLoaded = false
+    this.publicSkillsLoadPromise = null
+    this.publicSkillsRevision += 1
+    this.publicSkillIndex.clear()
+    this.skillFileIndex.clear()
+    this.skillCatalogCache.clear()
+  }
+
+  private invalidateAgentSkills(agentId: string) {
+    this.agentSkillLoaded.delete(agentId)
+    this.agentSkillLoadPromises.delete(agentId)
+    this.agentSkillRevisions.set(agentId, (this.agentSkillRevisions.get(agentId) ?? 0) + 1)
+    this.agentSkillIndex.delete(agentId)
+    this.skillFileIndex.clear()
+    this.skillCatalogCache.delete(agentId)
+  }
+
+  private toManagedSkillSummary(skill: SkillRecord): SkillSummary {
+    return {
+      ...toSkillSummary(skill),
+      removable: this.isSkillRecordRemovable(skill)
+    }
+  }
+
+  private isSkillRecordRemovable(skill: SkillRecord) {
+    const normalizeManagedPath = (targetPath: string) => {
+      try {
+        return realpathSync(targetPath)
+      } catch {
+        return path.resolve(targetPath)
+      }
+    }
+
+    const skillDir = normalizeManagedPath(skill.skillDir)
+    if (skill.scope === 'agent') {
+      const agentSkillsDir = skill.agentId
+        ? normalizeManagedPath(this.getAgentSkillsDirectoryPath(skill.agentId))
+        : ''
+      return Boolean(agentSkillsDir) && (skillDir === agentSkillsDir || skillDir.startsWith(`${agentSkillsDir}${path.sep}`))
+    }
+
+    const publicSkillsDir = normalizeManagedPath(this.publicSkillsDir)
+    return skillDir === publicSkillsDir || skillDir.startsWith(`${publicSkillsDir}${path.sep}`)
+  }
+
+  private ensurePublicSkillWatchers() {
+    const builtinSkillsDir = getBuiltinSkillsSourcePath()
+    const publicSkillDirectories = [
+      this.publicSkillsDir,
+      builtinSkillsDir
+    ]
+      .filter((dirPath): dirPath is string => typeof dirPath === 'string' && dirPath.trim().length > 0)
+      .map((dirPath) => path.resolve(dirPath))
+      .filter((dirPath, index, directories) => directories.indexOf(dirPath) === index)
+
+    for (const skillsDir of publicSkillDirectories) {
+      this.ensureDirectoryWatcher(skillsDir, () => this.invalidatePublicSkills())
+    }
+  }
+
+  private ensureAgentSkillWatcher(agentId: string) {
+    const skillsDir = path.resolve(this.getAgentSkillsDirectoryPath(agentId))
+    this.ensureDirectoryWatcher(skillsDir, () => this.invalidateAgentSkills(agentId))
+  }
+
+  private ensureDirectoryWatcher(targetPath: string, onInvalidate: () => void) {
+    if (!targetPath || this.directoryWatchers.has(targetPath)) {
+      return
+    }
+
+    try {
+      const watcher = watch(targetPath, { recursive: true }, () => {
+        onInvalidate()
+      })
+      watcher.on('error', () => {
+        watcher.close()
+        this.directoryWatchers.delete(targetPath)
+      })
+      this.directoryWatchers.set(targetPath, watcher)
+    } catch (error) {
+      const code = error instanceof Error && 'code' in error ? String((error as NodeJS.ErrnoException).code ?? '') : ''
+      if (code === 'ERR_FEATURE_UNAVAILABLE_ON_PLATFORM' || code === 'ERR_INVALID_ARG_VALUE') {
+        try {
+          const watcher = watch(targetPath, () => {
+            onInvalidate()
+          })
+          watcher.on('error', () => {
+            watcher.close()
+            this.directoryWatchers.delete(targetPath)
+          })
+          this.directoryWatchers.set(targetPath, watcher)
+        } catch {
+          return
+        }
+      }
+    }
+  }
+
+  private buildSkillCatalogSnapshot(skills: SkillSummary[]): SkillCatalogSnapshot {
+    if (skills.length === 0) {
+      return {
+        fingerprint: 'empty',
+        fullSummary: 'No skills available.',
+        entries: []
+      }
+    }
+
+    const prioritizedSkills = skills
+      .slice()
+      .sort((left, right) => {
+        if (left.source !== right.source) {
+          return left.source === 'agent' ? -1 : 1
+        }
+        return left.id.localeCompare(right.id)
+      })
+
+    const entryRecords = prioritizedSkills.map((skill) => {
+      const summaryText = `${skill.description} ${skill.whenToUse}`.replace(/\s+/g, ' ').trim()
+      const trimmedDescription = summaryText.length > AVAILABLE_SKILL_ENTRY_MAX_CHARS
+        ? `${summaryText.slice(0, AVAILABLE_SKILL_ENTRY_MAX_CHARS - 1).trimEnd()}…`
+        : summaryText
+      const versionText = skill.version ? ` | version: ${skill.version}` : ''
+      const sourceText = ` | scope: ${skill.source}`
+      const invocationText = ` | invocation: ${deriveSkillInvocationMode(skill)}`
+      return {
+        id: skill.id,
+        summary: `- ${skill.id}: ${trimmedDescription}${versionText}${sourceText}${invocationText}`
+      }
+    })
+
+    const entries: string[] = []
+    for (const record of entryRecords) {
+      const entry = record.summary
+      const nextEntries = [...entries, entry]
+      const remainingCount = entryRecords.length - nextEntries.length
+      const suffix = remainingCount > 0 ? `\n- ${remainingCount} more skills omitted from this summary.` : ''
+      const candidate = `${nextEntries.join('\n')}${suffix}`
+      if (candidate.length > AVAILABLE_SKILLS_MAX_CHARS) {
+        if (entries.length === 0) {
+          return {
+            fingerprint: JSON.stringify(entryRecords.map((entryRecord) => entryRecord.summary)),
+            fullSummary: trimSkillCatalogText(entry, AVAILABLE_SKILLS_MAX_CHARS),
+            entries: entryRecords
+          }
+        }
+        break
+      }
+      entries.push(entry)
+    }
+
+    const omittedCount = entryRecords.length - entries.length
+    return {
+      fingerprint: JSON.stringify(entryRecords.map((entryRecord) => entryRecord.summary)),
+      fullSummary: omittedCount > 0
+        ? `${entries.join('\n')}\n- ${omittedCount} more skills omitted from this summary.`
+        : entries.join('\n'),
+      entries: entryRecords
+    }
   }
 
   private async collectSkillFiles(skillDir: string, relativeSegments: string[] = []): Promise<string[]> {

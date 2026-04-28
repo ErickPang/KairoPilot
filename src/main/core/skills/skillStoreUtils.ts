@@ -1,5 +1,6 @@
 import path from 'path'
 import {
+  SkillArgumentDefinition,
   SkillMarketplaceQuery,
   SkillMetadata,
   SkillsRegistryEntry,
@@ -64,6 +65,189 @@ function parseInlineArray(value: string) {
     .map((item) => stripQuotes(item))
     .map((item) => item.trim())
     .filter(Boolean)
+}
+
+function normalizeFrontmatterKey(value: string) {
+  return value.trim().toLowerCase().replace(/_/g, '-')
+}
+
+function parseBooleanValue(value: string, fallback: boolean) {
+  const normalized = stripQuotes(value).trim().toLowerCase()
+  if (normalized === 'true' || normalized === 'yes' || normalized === 'on') {
+    return true
+  }
+  if (normalized === 'false' || normalized === 'no' || normalized === 'off') {
+    return false
+  }
+  return fallback
+}
+
+function parseInlineKeyValue(line: string) {
+  const separatorIndex = line.indexOf(':')
+  if (separatorIndex < 0) {
+    return null
+  }
+
+  const key = normalizeFrontmatterKey(line.slice(0, separatorIndex))
+  const value = line.slice(separatorIndex + 1).trim()
+  if (!key) {
+    return null
+  }
+
+  return {
+    key,
+    value
+  }
+}
+
+function applySkillArgumentField(
+  argument: Partial<SkillArgumentDefinition>,
+  key: string,
+  value: string
+) {
+  if (key === 'name') {
+    argument.name = stripQuotes(value)
+    return
+  }
+
+  if (key === 'description') {
+    argument.description = stripQuotes(value)
+    return
+  }
+
+  if (key === 'required') {
+    argument.required = parseBooleanValue(value, false)
+    return
+  }
+
+  if (key === 'default' || key === 'default-value') {
+    const normalized = stripQuotes(value)
+    argument.defaultValue = normalized || undefined
+  }
+}
+
+function finalizeSkillArgument(argument: Partial<SkillArgumentDefinition>) {
+  const name = typeof argument.name === 'string' ? argument.name.trim() : ''
+  if (!name) {
+    return null
+  }
+
+  return {
+    name,
+    description: typeof argument.description === 'string' && argument.description.trim()
+      ? argument.description.trim()
+      : `Argument: ${name}`,
+    required: argument.required === true,
+    defaultValue: typeof argument.defaultValue === 'string' && argument.defaultValue.trim()
+      ? argument.defaultValue.trim()
+      : undefined
+  } satisfies SkillArgumentDefinition
+}
+
+function parseStringListBlock(lines: string[], startIndex: number, parentIndent: number) {
+  const values: string[] = []
+  let index = startIndex
+
+  while (index < lines.length) {
+    const currentLine = lines[index]
+    const trimmed = currentLine.trim()
+    const currentIndent = countIndent(currentLine)
+
+    if (!trimmed) {
+      index += 1
+      continue
+    }
+
+    if (currentIndent <= parentIndent) {
+      break
+    }
+
+    if (trimmed.startsWith('- ')) {
+      const itemValue = stripQuotes(trimmed.slice(2))
+      if (itemValue) {
+        values.push(itemValue)
+      }
+    }
+
+    index += 1
+  }
+
+  return {
+    values,
+    nextIndex: index
+  }
+}
+
+function parseArgumentsBlock(lines: string[], startIndex: number, parentIndent: number) {
+  const argumentsList: SkillArgumentDefinition[] = []
+  let index = startIndex
+  let currentArgument: Partial<SkillArgumentDefinition> | null = null
+
+  const pushCurrentArgument = () => {
+    if (!currentArgument) {
+      return
+    }
+    const finalized = finalizeSkillArgument(currentArgument)
+    if (finalized) {
+      argumentsList.push(finalized)
+    }
+    currentArgument = null
+  }
+
+  while (index < lines.length) {
+    const currentLine = lines[index]
+    const trimmed = currentLine.trim()
+    const currentIndent = countIndent(currentLine)
+
+    if (!trimmed) {
+      index += 1
+      continue
+    }
+
+    if (currentIndent <= parentIndent) {
+      break
+    }
+
+    if (trimmed.startsWith('- ')) {
+      pushCurrentArgument()
+      currentArgument = {}
+      const inlineItem = trimmed.slice(2).trim()
+      const inlinePair = parseInlineKeyValue(inlineItem)
+      if (inlinePair) {
+        applySkillArgumentField(currentArgument, inlinePair.key, inlinePair.value)
+      }
+      index += 1
+      continue
+    }
+
+    if (!currentArgument) {
+      index += 1
+      continue
+    }
+
+    const pair = parseInlineKeyValue(trimmed)
+    if (!pair) {
+      index += 1
+      continue
+    }
+
+    if ((pair.key === 'description') && (pair.value === '|' || pair.value === '>')) {
+      const block = collectBlockValue(lines, index + 1, currentIndent, pair.value)
+      applySkillArgumentField(currentArgument, pair.key, block.value)
+      index = block.nextIndex
+      continue
+    }
+
+    applySkillArgumentField(currentArgument, pair.key, pair.value)
+    index += 1
+  }
+
+  pushCurrentArgument()
+
+  return {
+    argumentsList,
+    nextIndex: index
+  }
 }
 
 const TOOL_NAME_ALIAS_MAP: Record<string, string[]> = {
@@ -182,9 +366,12 @@ export function parseSkillFrontmatter(content: string, folderName: string): Fron
   const metadata: SkillMetadata = {
     name: folderName,
     description: `Skill: ${folderName}`,
-    metadata: {
-      allowedTools: []
-    }
+    allowedTools: [],
+    whenToUse: '',
+    arguments: [],
+    userInvocable: true,
+    modelInvocable: true,
+    executionMode: 'inline'
   }
 
   if (!rawFrontmatter) {
@@ -207,14 +394,20 @@ export function parseSkillFrontmatter(content: string, folderName: string): Fron
       continue
     }
 
-    if (trimmed.startsWith('name:')) {
-      metadata.name = stripQuotes(trimmed.slice('name:'.length)) || folderName
+    const parsedLine = parseInlineKeyValue(trimmed)
+    if (!parsedLine) {
       index += 1
       continue
     }
 
-    if (trimmed.startsWith('description:')) {
-      const rawValue = trimmed.slice('description:'.length).trim()
+    if (parsedLine.key === 'name') {
+      metadata.name = stripQuotes(parsedLine.value) || folderName
+      index += 1
+      continue
+    }
+
+    if (parsedLine.key === 'description') {
+      const rawValue = parsedLine.value
       if (rawValue === '|' || rawValue === '>') {
         const block = collectBlockValue(lines, index + 1, indent, rawValue)
         metadata.description = block.value || metadata.description
@@ -226,7 +419,92 @@ export function parseSkillFrontmatter(content: string, folderName: string): Fron
       continue
     }
 
-    if (trimmed === 'metadata:') {
+    if (parsedLine.key === 'version') {
+      metadata.version = stripQuotes(parsedLine.value) || undefined
+      index += 1
+      continue
+    }
+
+    if (parsedLine.key === 'allowed-tools') {
+      if (parsedLine.value) {
+        metadata.allowedTools = parseInlineArray(parsedLine.value)
+        index += 1
+        continue
+      }
+
+      const list = parseStringListBlock(lines, index + 1, indent)
+      metadata.allowedTools = list.values
+      index = list.nextIndex
+      continue
+    }
+
+    if (parsedLine.key === 'when-to-use') {
+      const rawValue = parsedLine.value
+      if (rawValue === '|' || rawValue === '>') {
+        const block = collectBlockValue(lines, index + 1, indent, rawValue)
+        metadata.whenToUse = block.value
+        index = block.nextIndex
+        continue
+      }
+      metadata.whenToUse = stripQuotes(rawValue)
+      index += 1
+      continue
+    }
+
+    if (parsedLine.key === 'user-invocable') {
+      metadata.userInvocable = parseBooleanValue(parsedLine.value, true)
+      index += 1
+      continue
+    }
+
+    if (parsedLine.key === 'disable-model-invocation') {
+      metadata.modelInvocable = !parseBooleanValue(parsedLine.value, false)
+      index += 1
+      continue
+    }
+
+    if (parsedLine.key === 'context') {
+      if (!parsedLine.value) {
+        let nestedIndex = index + 1
+        while (nestedIndex < lines.length) {
+          const childLine = lines[nestedIndex]
+          const childTrimmed = childLine.trim()
+          const childIndent = countIndent(childLine)
+
+          if (!childTrimmed) {
+            nestedIndex += 1
+            continue
+          }
+
+          if (childIndent <= indent) {
+            break
+          }
+
+          const childPair = parseInlineKeyValue(childTrimmed)
+          if (childPair?.key === 'type') {
+            const mode = stripQuotes(childPair.value).toLowerCase()
+            metadata.executionMode = mode === 'fork' ? 'fork' : 'inline'
+          }
+          nestedIndex += 1
+        }
+        index = nestedIndex
+        continue
+      }
+
+      const executionMode = stripQuotes(parsedLine.value).toLowerCase()
+      metadata.executionMode = executionMode === 'fork' ? 'fork' : 'inline'
+      index += 1
+      continue
+    }
+
+    if (parsedLine.key === 'arguments') {
+      const parsedArguments = parseArgumentsBlock(lines, index + 1, indent)
+      metadata.arguments = parsedArguments.argumentsList
+      index = parsedArguments.nextIndex
+      continue
+    }
+
+    if (parsedLine.key === 'metadata' && !parsedLine.value) {
       index += 1
       while (index < lines.length) {
         const childLine = lines[index]
@@ -242,48 +520,60 @@ export function parseSkillFrontmatter(content: string, folderName: string): Fron
           break
         }
 
-        if (childTrimmed.startsWith('version:')) {
-          const version = stripQuotes(childTrimmed.slice('version:'.length))
-          metadata.metadata.version = version || undefined
+        const childPair = parseInlineKeyValue(childTrimmed)
+        if (!childPair) {
           index += 1
           continue
         }
 
-        if (childTrimmed.startsWith('allowed-tools:')) {
-          const inlineValue = childTrimmed.slice('allowed-tools:'.length).trim()
-          if (inlineValue) {
-            metadata.metadata.allowedTools = parseInlineArray(inlineValue)
+        if (childPair.key === 'version') {
+          const version = stripQuotes(childPair.value)
+          metadata.version = version || undefined
+          index += 1
+          continue
+        }
+
+        if (childPair.key === 'allowed-tools') {
+          if (childPair.value) {
+            metadata.allowedTools = parseInlineArray(childPair.value)
             index += 1
             continue
           }
 
-          const tools: string[] = []
-          index += 1
-          while (index < lines.length) {
-            const listLine = lines[index]
-            const listTrimmed = listLine.trim()
-            const listIndent = countIndent(listLine)
+          const list = parseStringListBlock(lines, index + 1, childIndent)
+          metadata.allowedTools = list.values
+          index = list.nextIndex
+          continue
+        }
 
-            if (!listTrimmed) {
-              index += 1
-              continue
-            }
-
-            if (listIndent <= childIndent) {
-              break
-            }
-
-            if (listTrimmed.startsWith('- ')) {
-              const toolName = stripQuotes(listTrimmed.slice(2))
-              if (toolName) {
-                tools.push(toolName)
-              }
-            }
-
-            index += 1
+        if (childPair.key === 'when-to-use') {
+          if (childPair.value === '|' || childPair.value === '>') {
+            const block = collectBlockValue(lines, index + 1, childIndent, childPair.value)
+            metadata.whenToUse = block.value
+            index = block.nextIndex
+            continue
           }
+          metadata.whenToUse = stripQuotes(childPair.value)
+          index += 1
+          continue
+        }
 
-          metadata.metadata.allowedTools = tools
+        if (childPair.key === 'user-invocable') {
+          metadata.userInvocable = parseBooleanValue(childPair.value, metadata.userInvocable)
+          index += 1
+          continue
+        }
+
+        if (childPair.key === 'disable-model-invocation') {
+          metadata.modelInvocable = !parseBooleanValue(childPair.value, !metadata.modelInvocable)
+          index += 1
+          continue
+        }
+
+        if (childPair.key === 'arguments' && !childPair.value) {
+          const parsedArguments = parseArgumentsBlock(lines, index + 1, childIndent)
+          metadata.arguments = parsedArguments.argumentsList
+          index = parsedArguments.nextIndex
           continue
         }
 
@@ -293,6 +583,10 @@ export function parseSkillFrontmatter(content: string, folderName: string): Fron
     }
 
     index += 1
+  }
+
+  if (!metadata.whenToUse.trim()) {
+    metadata.whenToUse = metadata.description
   }
 
   return {

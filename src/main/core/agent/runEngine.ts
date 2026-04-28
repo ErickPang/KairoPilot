@@ -96,7 +96,7 @@ export async function executeRunEngine(params: ExecuteRunEngineParams): Promise<
   let finalResponse = '';
   let iterations = options?.iterations ?? 0;
   const maxIterations = options?.maxIterations ?? 8;
-  let latestContext = buildModelContext(runId, options?.sessionId);
+  let latestContext: RuntimeModelContext | undefined;
 
   while (iterations < maxIterations) {
     const preIterationInterrupt = shouldInterrupt?.();
@@ -109,7 +109,7 @@ export async function executeRunEngine(params: ExecuteRunEngineParams): Promise<
         onUpdate,
         emitUpdate,
         persistSnapshot,
-        contextSummary: latestContext.metadata
+        contextSummary: latestContext?.metadata
       });
     }
 
@@ -214,10 +214,10 @@ export async function executeRunEngine(params: ExecuteRunEngineParams): Promise<
   }
 
   if (!finalResponse.trim()) {
-    finalResponse = await finalizeWithoutTools({
+      finalResponse = await finalizeWithoutTools({
       llm,
       runId,
-      context: latestContext.messages,
+      context: latestContext?.messages ?? [],
       userInput,
       onUpdate,
       emitUpdate,
@@ -236,7 +236,7 @@ export async function executeRunEngine(params: ExecuteRunEngineParams): Promise<
       onUpdate,
       emitUpdate,
       persistSnapshot,
-      contextSummary: latestContext.metadata
+      contextSummary: latestContext?.metadata
     });
   }
 
@@ -262,7 +262,7 @@ export async function executeRunEngine(params: ExecuteRunEngineParams): Promise<
   persistSnapshot(runId, {
     iterations,
     lastUserInput: userInput,
-    contextSummary: latestContext.metadata,
+    contextSummary: latestContext?.metadata,
     stepId: completeStep.id
   });
 

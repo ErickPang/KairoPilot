@@ -57,6 +57,7 @@ export const KAIRO_INVOKE = {
   skillsInstall: 'skills:install',
   skillsDiscardInstall: 'skills:discardInstall',
   skillsImport: 'skills:import',
+  skillsUninstall: 'skills:uninstall',
   systemSelectFile: 'system:selectFile',
   systemSelectDirectory: 'system:selectDirectory',
   systemStats: 'system:stats'

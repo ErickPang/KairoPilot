@@ -1,0 +1,488 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Cursor / Linear Route Preview</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f4f5f8;
+        --surface: rgba(252, 253, 255, 0.92);
+        --surface-2: #edf1f5;
+        --surface-3: #ffffff;
+        --border: #d9dfe8;
+        --border-strong: #cbd4e0;
+        --text: #222326;
+        --muted: #697384;
+        --primary: #6b7891;
+        --primary-hover: #59667f;
+        --primary-soft: rgba(107, 120, 145, 0.12);
+        --primary-strong: #4d5a72;
+        --success: #4c7b69;
+        --warning: #b88839;
+        --danger: #c45d58;
+        --shadow: 0 24px 64px rgba(34, 35, 38, 0.08);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+        color: var(--text);
+        background:
+          radial-gradient(circle at top left, rgba(127, 145, 173, 0.16), transparent 28rem),
+          radial-gradient(circle at bottom right, rgba(182, 191, 206, 0.18), transparent 26rem),
+          linear-gradient(180deg, #f8f9fb 0%, var(--bg) 100%);
+      }
+
+      .shell {
+        display: grid;
+        grid-template-columns: 92px 292px 1fr;
+        gap: 18px;
+        height: 100vh;
+        padding: 20px;
+      }
+
+      .panel {
+        border: 1px solid rgba(255, 255, 255, 0.72);
+        border-radius: 28px;
+        background: var(--surface);
+        box-shadow: var(--shadow);
+        backdrop-filter: blur(18px);
+      }
+
+      .rail {
+        padding: 18px 12px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .brand {
+        width: 54px;
+        height: 54px;
+        border-radius: 17px;
+        display: grid;
+        place-items: center;
+        background: linear-gradient(180deg, rgba(107, 120, 145, 0.18), rgba(107, 120, 145, 0.08));
+        color: var(--primary-strong);
+        font-weight: 900;
+        margin-bottom: 10px;
+      }
+
+      .rail-btn {
+        width: 100%;
+        padding: 12px 8px;
+        border: 1px solid transparent;
+        border-radius: 16px;
+        background: transparent;
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .rail-btn.active {
+        background: linear-gradient(180deg, #7e8ba2 0%, var(--primary) 100%);
+        color: #f9fbff;
+        box-shadow: 0 16px 24px rgba(107, 120, 145, 0.2);
+      }
+
+      .sidebar {
+        padding: 22px;
+        display: grid;
+        grid-template-rows: auto auto auto 1fr auto;
+        gap: 16px;
+      }
+
+      .eyebrow {
+        display: inline-flex;
+        padding: 6px 12px;
+        border-radius: 999px;
+        background: var(--primary-soft);
+        color: var(--primary);
+        font-size: 11px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        font-weight: 800;
+      }
+
+      h1 {
+        margin: 10px 0 8px;
+        font-size: 30px;
+        line-height: 0.96;
+        letter-spacing: -0.05em;
+      }
+
+      p {
+        margin: 0;
+        color: var(--muted);
+        line-height: 1.7;
+      }
+
+      .search {
+        padding: 14px 16px;
+        border-radius: 18px;
+        border: 1px solid var(--border);
+        background: rgba(255, 255, 255, 0.7);
+        color: var(--muted);
+      }
+
+      .subtle-card {
+        padding: 15px 16px;
+        border-radius: 20px;
+        border: 1px solid var(--border);
+        background: rgba(255, 255, 255, 0.62);
+      }
+
+      .sessions {
+        display: grid;
+        gap: 10px;
+        align-content: start;
+      }
+
+      .session {
+        padding: 14px;
+        border-radius: 18px;
+        background: rgba(255, 255, 255, 0.56);
+        border: 1px solid transparent;
+      }
+
+      .session.active {
+        background: linear-gradient(180deg, rgba(107, 120, 145, 0.12), rgba(255, 255, 255, 0.96));
+        border-color: rgba(107, 120, 145, 0.18);
+      }
+
+      .session-title {
+        display: block;
+        font-weight: 700;
+      }
+
+      .session-meta {
+        display: block;
+        margin-top: 4px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .sidebar-note {
+        padding: 14px 16px;
+        border-radius: 18px;
+        background: var(--surface-2);
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.6;
+      }
+
+      .main {
+        display: grid;
+        grid-template-rows: auto auto 1fr auto;
+        overflow: hidden;
+      }
+
+      .topbar {
+        padding: 20px 26px 0;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .topbar-group {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 12px;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        background: rgba(255, 255, 255, 0.74);
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .chip.primary {
+        background: var(--primary-soft);
+        border-color: rgba(107, 120, 145, 0.14);
+        color: var(--primary);
+      }
+
+      .hero {
+        margin: 18px 26px 0;
+        padding: 22px;
+        border-radius: 26px;
+        border: 1px solid var(--border);
+        background:
+          radial-gradient(circle at top right, rgba(107, 120, 145, 0.12), transparent 22rem),
+          linear-gradient(180deg, rgba(255, 255, 255, 0.82), rgba(243, 246, 250, 0.9));
+      }
+
+      .hero-title {
+        margin: 8px 0;
+        font-size: 36px;
+        letter-spacing: -0.05em;
+      }
+
+      .hero-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 12px;
+        margin-top: 18px;
+      }
+
+      .metric {
+        padding: 14px 16px;
+        border-radius: 18px;
+        border: 1px solid var(--border);
+        background: rgba(255, 255, 255, 0.68);
+      }
+
+      .metric-label {
+        color: var(--muted);
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+      }
+
+      .metric-value {
+        margin-top: 10px;
+        font-size: 28px;
+        font-weight: 800;
+        letter-spacing: -0.04em;
+      }
+
+      .content {
+        overflow: auto;
+        padding: 18px 26px 24px;
+        display: grid;
+        gap: 16px;
+      }
+
+      .workspace {
+        display: grid;
+        grid-template-columns: 1.2fr 0.8fr;
+        gap: 16px;
+      }
+
+      .module {
+        padding: 18px;
+        border-radius: 22px;
+        border: 1px solid var(--border);
+        background: rgba(255, 255, 255, 0.72);
+      }
+
+      .module h3 {
+        margin: 0 0 12px;
+        font-size: 17px;
+        letter-spacing: -0.03em;
+      }
+
+      .conversation {
+        display: grid;
+        gap: 12px;
+      }
+
+      .bubble {
+        padding: 16px 18px;
+        border-radius: 20px;
+        border: 1px solid var(--border);
+        background: var(--surface-3);
+        line-height: 1.72;
+      }
+
+      .bubble.user {
+        justify-self: end;
+        max-width: 76%;
+        border: 0;
+        background: linear-gradient(180deg, #7c89a0 0%, var(--primary) 100%);
+        color: #f8fbff;
+        box-shadow: 0 18px 28px rgba(107, 120, 145, 0.18);
+      }
+
+      .list {
+        display: grid;
+        gap: 10px;
+      }
+
+      .row {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 12px 14px;
+        border-radius: 16px;
+        background: var(--surface-2);
+      }
+
+      .status {
+        padding: 4px 10px;
+        border-radius: 999px;
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .ok { color: var(--success); background: rgba(76, 123, 105, 0.14); }
+      .warn { color: var(--warning); background: rgba(184, 136, 57, 0.14); }
+      .bad { color: var(--danger); background: rgba(196, 93, 88, 0.12); }
+
+      .composer {
+        padding: 0 26px 24px;
+      }
+
+      .composer-box {
+        display: grid;
+        gap: 14px;
+        padding: 18px;
+        border-radius: 22px;
+        border: 1px solid var(--border-strong);
+        background: rgba(255, 255, 255, 0.82);
+      }
+
+      .composer-actions {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+
+      .ghost {
+        padding: 10px 12px;
+        border-radius: 14px;
+        border: 1px solid var(--border);
+        background: #fff;
+        color: var(--muted);
+      }
+
+      .send {
+        width: 50px;
+        height: 50px;
+        border: 0;
+        border-radius: 16px;
+        background: linear-gradient(180deg, #7c89a0, var(--primary));
+        color: #f8fbff;
+        box-shadow: 0 16px 24px rgba(107, 120, 145, 0.2);
+      }
+
+      @media (max-width: 1180px) {
+        .hero-grid,
+        .workspace {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      @media (max-width: 920px) {
+        .shell {
+          grid-template-columns: 1fr;
+          height: auto;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <aside class="rail panel">
+        <div class="brand">K</div>
+        <button class="rail-btn active">Chat</button>
+        <button class="rail-btn">Dash</button>
+        <button class="rail-btn">Skills</button>
+        <button class="rail-btn">Audit</button>
+        <button class="rail-btn">Config</button>
+      </aside>
+
+      <aside class="sidebar panel">
+        <span class="eyebrow">Cursor / Linear Route</span>
+        <div>
+          <h1>Neutral First</h1>
+          <p>底色保持灰白中性，强调色退居二线，界面整体更像现代效率工具而不是品牌海报。</p>
+        </div>
+        <div class="search">Search sessions, agents, settings…</div>
+        <div class="subtle-card">
+          <p>核心特点是：你先看到信息层级，再看到品牌色。</p>
+        </div>
+        <div class="sessions">
+          <div class="session active">
+            <span class="session-title">Theme Audit</span>
+            <span class="session-meta">Selected · Live comparison</span>
+          </div>
+          <div class="session">
+            <span class="session-title">Model Switcher Review</span>
+            <span class="session-meta">Pending · 08:42</span>
+          </div>
+          <div class="session">
+            <span class="session-title">Permission Card Cleanup</span>
+            <span class="session-meta">Queued · Today</span>
+          </div>
+        </div>
+        <div class="sidebar-note">这一路线最适合希望产品看起来更专业、更稳、更像生产工具。</div>
+      </aside>
+
+      <section class="main panel">
+        <div class="topbar">
+          <div class="topbar-group">
+            <span class="chip primary">Reference Route</span>
+            <span class="chip">GPT-5.4</span>
+            <span class="chip">Balanced</span>
+          </div>
+          <div class="topbar-group">
+            <span class="chip">Ctrl+1 Chat</span>
+            <span class="chip">Ctrl+2 Dashboard</span>
+          </div>
+        </div>
+
+        <section class="hero">
+          <span class="eyebrow">Product Direction</span>
+          <h2 class="hero-title">A Calm Operational Workspace</h2>
+          <p>这种方案强调秩序、对比和留白，品牌色只负责 CTA、选中态和关键状态，不承担大面积铺色。</p>
+          <div class="hero-grid">
+            <div class="metric"><div class="metric-label">Active Agents</div><div class="metric-value">08</div></div>
+            <div class="metric"><div class="metric-label">Run Success</div><div class="metric-value">99.1%</div></div>
+            <div class="metric"><div class="metric-label">Avg Run</div><div class="metric-value">43s</div></div>
+            <div class="metric"><div class="metric-label">Approvals</div><div class="metric-value">12</div></div>
+          </div>
+        </section>
+
+        <div class="content">
+          <div class="workspace">
+            <section class="module">
+              <h3>Conversation</h3>
+              <div class="conversation">
+                <div class="bubble">Cursor / Linear 这一类工具给人的感受不是“有强烈颜色”，而是“每一层都很清楚”。</div>
+                <div class="bubble user">也就是说主色不是主角，信息架构才是主角。</div>
+                <div class="bubble">对。去饱和蓝灰只是点睛，真正的高级感来自中性色比例和层级控制。</div>
+              </div>
+            </section>
+
+            <section class="module">
+              <h3>Signal Quality</h3>
+              <div class="list">
+                <div class="row"><span>Tool-like clarity</span><span class="status ok">High</span></div>
+                <div class="row"><span>Visual noise</span><span class="status ok">Low</span></div>
+                <div class="row"><span>Brand warmth</span><span class="status warn">Moderate</span></div>
+                <div class="row"><span>Distinctiveness</span><span class="status warn">Careful</span></div>
+              </div>
+            </section>
+          </div>
+        </div>
+
+        <footer class="composer">
+          <div class="composer-box">
+            <div style="color:var(--muted);">Compare this route with a warmer Claude-style paper interface and explain which feels more premium.</div>
+            <div class="composer-actions">
+              <button class="ghost">Attach context</button>
+              <button class="send">↑</button>
+            </div>
+          </div>
+        </footer>
+      </section>
+    </main>
+  </body>
+</html>

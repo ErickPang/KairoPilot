@@ -485,13 +485,25 @@ export interface RunTrace {
 
 export type SkillScope = 'public' | 'agent'
 
+export interface SkillArgumentDefinition {
+  name: string
+  description: string
+  required: boolean
+  defaultValue?: string
+}
+
+export type SkillExecutionMode = 'inline' | 'fork'
+
 export interface SkillMetadata {
   name: string
   description: string
-  metadata: {
-    version?: string
-    allowedTools: string[]
-  }
+  version?: string
+  allowedTools: string[]
+  whenToUse: string
+  arguments: SkillArgumentDefinition[]
+  userInvocable: boolean
+  modelInvocable: boolean
+  executionMode: SkillExecutionMode
 }
 
 export interface SkillRecord {
@@ -511,10 +523,16 @@ export interface SkillSummary {
   description: string
   version?: string
   allowedTools: string[]
+  whenToUse: string
+  arguments: SkillArgumentDefinition[]
+  userInvocable: boolean
+  modelInvocable: boolean
+  executionMode: SkillExecutionMode
   content: string
   source: SkillScope
   skillDir: string
   skillFilePath: string
+  removable?: boolean
 }
 
 export interface SkillStoreResource {
@@ -570,6 +588,11 @@ export interface SkillInstallArgs {
 
 export interface SkillImportArgs {
   sourceFile: string
+  scope: string
+}
+
+export interface SkillUninstallArgs {
+  id: string
   scope: string
 }
 

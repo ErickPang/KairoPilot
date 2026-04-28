@@ -77,6 +77,7 @@ if (!window.kairo) {
         { id: 'issue-triage', name: 'Issue Triage', description: 'Mock issue triage workflow', version: '1.0.0', author: 'KairoPilot', icon: '🛠️', tags: ['debug'], marketplace: 'KairoPilot Curated', installedScopes: [], source: { type: 'inline', content: 'mock' } }
       ];
       if (channel === KAIRO_INVOKE.skillsInstall) return { success: true };
+      if (channel === KAIRO_INVOKE.skillsUninstall) return { success: true };
       if (channel === KAIRO_INVOKE.pluginsGetStore) return [
         { id: 'kairo-weather-plugin', name: 'Weather Forecaster', description: 'Mock Weather', version: '1.0', author: 'Kairo', icon: '🌤️' },
         { id: 'kairo-crypto-plugin', name: 'Crypto Tracker', description: 'Mock Crypto', version: '1.0', author: 'Kairo', icon: '₿' }

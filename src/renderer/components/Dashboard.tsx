@@ -236,7 +236,7 @@ export const Dashboard = memo(function Dashboard({ agents, isActive, onReportErr
     <div className="dashboard-container">
       <style>{`
         .dashboard-container {
-          padding: 1.7rem 2rem 1.8rem;
+          padding: 1.3rem 1.6rem 1.45rem;
           height: 100%;
           overflow-y: auto;
           background: transparent;
@@ -246,9 +246,9 @@ export const Dashboard = memo(function Dashboard({ agents, isActive, onReportErr
           display: flex;
           align-items: flex-start;
           justify-content: space-between;
-          gap: 1.25rem;
-          margin-bottom: 1.5rem;
-          padding: 1.4rem 1.45rem;
+          gap: 1rem;
+          margin-bottom: 1.15rem;
+          padding: 1.1rem 1.15rem;
           border: 1px solid rgba(var(--border-rgb), 0.58);
           border-radius: 1.6rem;
           background:
@@ -263,7 +263,7 @@ export const Dashboard = memo(function Dashboard({ agents, isActive, onReportErr
         .dashboard-eyebrow {
           display: inline-flex;
           align-items: center;
-          padding: 0.34rem 0.72rem;
+          padding: 0.28rem 0.62rem;
           border-radius: 999px;
           background: var(--primary-muted);
           color: var(--primary);
@@ -275,12 +275,12 @@ export const Dashboard = memo(function Dashboard({ agents, isActive, onReportErr
         .dashboard-title-row {
           display: flex;
           align-items: center;
-          gap: 0.75rem;
-          margin: 0.95rem 0 0.5rem;
+          gap: 0.62rem;
+          margin: 0.72rem 0 0.35rem;
         }
         .dashboard-title {
           margin: 0;
-          font-size: 2rem;
+          font-size: 1.7rem;
           font-weight: 700;
           letter-spacing: -0.03em;
         }
@@ -288,8 +288,8 @@ export const Dashboard = memo(function Dashboard({ agents, isActive, onReportErr
           margin: 0;
           max-width: 42rem;
           color: var(--muted-fg);
-          font-size: 0.96rem;
-          line-height: 1.65;
+          font-size: 0.9rem;
+          line-height: 1.55;
         }
         .dashboard-hero-meta {
           display: grid;
@@ -301,7 +301,7 @@ export const Dashboard = memo(function Dashboard({ agents, isActive, onReportErr
           display: flex;
           flex-direction: column;
           gap: 0.22rem;
-          padding: 0.9rem 1rem;
+          padding: 0.72rem 0.82rem;
           border: 1px solid rgba(var(--border-rgb), 0.56);
           border-radius: 1.1rem;
           background: rgba(var(--surface-rgb), 0.72);
@@ -326,33 +326,33 @@ export const Dashboard = memo(function Dashboard({ agents, isActive, onReportErr
           gap: 1rem;
         }
         .dashboard-summary-grid {
-          margin-bottom: 1.7rem;
+          margin-bottom: 1.25rem;
         }
         .dashboard-resource-grid {
-          margin-top: 1rem;
+          margin-top: 0.8rem;
         }
         .dashboard-section {
-          margin-bottom: 1.7rem;
+          margin-bottom: 1.3rem;
         }
         .dashboard-section:last-child {
           margin-bottom: 0;
         }
         .dashboard-section-title {
-          margin: 0 0 0.95rem;
+          margin: 0 0 0.75rem;
           font-size: 1.1rem;
           font-weight: 700;
           letter-spacing: -0.02em;
         }
         .stat-card {
           background: linear-gradient(180deg, rgba(var(--surface-rgb), 0.88), rgba(var(--surface-alt-rgb), 0.86));
-          padding: 1.15rem 1.2rem;
+          padding: 0.95rem 1rem;
           border-radius: 1.35rem;
           border: 1px solid rgba(var(--border-rgb), 0.56);
           box-shadow: none;
           transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
           display: flex;
           flex-direction: column;
-          gap: 0.55rem;
+          gap: 0.45rem;
           position: relative;
           overflow: hidden;
         }
@@ -382,13 +382,13 @@ export const Dashboard = memo(function Dashboard({ agents, isActive, onReportErr
           display: inline-flex;
           align-items: center;
           justify-content: center;
-          width: 44px;
-          height: 44px;
+          width: 38px;
+          height: 38px;
           border-radius: 12px;
           box-shadow: var(--shine-soft);
         }
         .dashboard-stat-value {
-          font-size: 2.3rem;
+          font-size: 2rem;
           font-weight: 800;
           letter-spacing: -0.04em;
           color: var(--foreground);
@@ -399,8 +399,8 @@ export const Dashboard = memo(function Dashboard({ agents, isActive, onReportErr
         }
         .dashboard-stat-meta {
           color: var(--muted-fg);
-          font-size: 0.84rem;
-          line-height: 1.5;
+          font-size: 0.8rem;
+          line-height: 1.4;
         }
         .progress-bar-bg {
           height: 8px;
@@ -577,7 +577,7 @@ export const Dashboard = memo(function Dashboard({ agents, isActive, onReportErr
           white-space: nowrap;
         }
         .dashboard-empty-state {
-          padding: 3.5rem 1.25rem;
+          padding: 2.6rem 1rem;
           text-align: center;
           color: var(--muted-fg);
         }
@@ -594,8 +594,8 @@ export const Dashboard = memo(function Dashboard({ agents, isActive, onReportErr
           display: inline-flex;
           align-items: center;
           justify-content: center;
-          width: 5rem;
-          height: 5rem;
+          width: 4.2rem;
+          height: 4.2rem;
           margin-bottom: 1rem;
           border-radius: 1.5rem;
           background: var(--primary-muted);
@@ -604,11 +604,11 @@ export const Dashboard = memo(function Dashboard({ agents, isActive, onReportErr
         .dashboard-agent-cell {
           display: flex;
           align-items: center;
-          gap: 0.75rem;
+          gap: 0.6rem;
         }
         .dashboard-agent-icon {
           background: linear-gradient(180deg, rgba(var(--primary-rgb), 0.12), rgba(var(--surface-rgb), 0.96));
-          padding: 0.5rem;
+          padding: 0.42rem;
           border-radius: 0.8rem;
           display: flex;
           box-shadow: var(--shine-soft);
@@ -663,7 +663,7 @@ export const Dashboard = memo(function Dashboard({ agents, isActive, onReportErr
         }
         @media (max-width: 960px) {
           .dashboard-container {
-            padding: 1.2rem 1rem 1.3rem;
+            padding: 1rem 0.9rem 1.1rem;
           }
           .dashboard-hero {
             flex-direction: column;

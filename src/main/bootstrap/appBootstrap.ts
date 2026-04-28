@@ -27,6 +27,10 @@ export function bindAppLifecycle(context: BootstrapContext) {
     app.quit();
   });
 
+  app.on('before-quit', () => {
+    skillsManager.dispose();
+  });
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createWindowFromContext(context);

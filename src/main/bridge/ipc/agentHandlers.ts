@@ -158,8 +158,12 @@ function registerAgentHandlers() {
     const agents = getAgents();
     const result: Record<string, SkillSummary[]> = {};
     result.public = await skillsManager.listPublicSkills();
-    for (const agent of agents) {
-      result[agent.id] = await skillsManager.listAgentSkills(agent.id);
+    const agentSkillEntries = await Promise.all(agents.map(async (agent) => ([
+      agent.id,
+      await skillsManager.listAgentSkills(agent.id)
+    ] as const)));
+    for (const [agentId, agentSkills] of agentSkillEntries) {
+      result[agentId] = agentSkills;
     }
     return result;
   });
@@ -235,6 +239,19 @@ function registerAgentHandlers() {
       const payload = typeof args === 'object' && args ? args : { sourceFile: '', scope: 'public' };
       await skillsManager.importSkill({
         sourceFile: typeof payload.sourceFile === 'string' ? payload.sourceFile : '',
+        scope: typeof payload.scope === 'string' ? payload.scope : 'public'
+      });
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  });
+
+  ipcMain.handle(KAIRO_INVOKE.skillsUninstall, async (_, args) => {
+    try {
+      const payload = typeof args === 'object' && args ? args : { id: '', scope: 'public' };
+      await skillsManager.uninstallSkill({
+        id: typeof payload.id === 'string' ? payload.id : '',
         scope: typeof payload.scope === 'string' ? payload.scope : 'public'
       });
       return { success: true };

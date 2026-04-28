@@ -5,7 +5,7 @@ type PartialWebSearchConfig = Omit<Partial<WebSearchConfig>, 'providers'> & {
 };
 
 const DEFAULT_WEB_SEARCH_TIMEOUT_MS = 10_000;
-const DEFAULT_PREFERRED_PROVIDERS: WebSearchProviderId[] = ['searxng', 'tavily', 'bing', 'duckduckgo', 'baidu'];
+const DEFAULT_PREFERRED_PROVIDERS: WebSearchProviderId[] = ['searxng', 'tavily', 'bing', 'baidu', 'duckduckgo'];
 
 function normalizePreferredProviders(value: unknown): WebSearchProviderId[] {
   const supportedProviders: WebSearchProviderId[] = ['searxng', 'tavily', 'bing', 'duckduckgo', 'baidu'];

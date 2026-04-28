@@ -41,9 +41,55 @@ import {
 import { CapabilityOrchestrator, type LoadedSkillCapability } from './capabilityOrchestrator';
 import { RuntimeRunControl } from './runtimeRunControl';
 import { RuntimeSupportState } from './runtimeSupportState';
+import { skillsManager } from '../skills/manager';
 
 interface RuntimeSupportContext {
   availableSkillsCatalog?: SkillCatalogSnapshot;
+}
+
+export function isSkillInventoryQuery(userInput: string) {
+  const normalized = userInput.trim().toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+
+  return (
+    /((哪些|有什么|查看|列出|看看|显示).*(技能|skill))|((技能|skill).*(哪些|有什么|列表|可用|已安装))/.test(normalized)
+    || /what skills|which skills|available skills|installed skills|list skills|show skills/.test(normalized)
+  );
+}
+
+export async function buildSkillInventoryResponse(agentId: string) {
+  const [publicSkills, agentSkills, mergedSkills] = await Promise.all([
+    skillsManager.listPublicSkills(),
+    skillsManager.listAgentSkills(agentId),
+    skillsManager.listMergedSkills(agentId)
+  ]);
+  const visiblePublicSkills = publicSkills.filter((skill) => skill.userInvocable !== false);
+  const visibleAgentSkills = agentSkills.filter((skill) => skill.userInvocable !== false);
+  const visibleMergedSkills = mergedSkills.filter((skill) => skill.userInvocable !== false);
+  const hiddenSkillsCount = mergedSkills.length - visibleMergedSkills.length;
+
+  if (visibleMergedSkills.length === 0) {
+    return '当前没有可用技能。公共区技能 0 个，当前 Agent 专属技能 0 个。';
+  }
+
+  const publicLines = visiblePublicSkills.length > 0
+    ? visiblePublicSkills.map((skill) => `- ${skill.name} (${skill.id})`)
+    : ['- 无'];
+  const agentLines = visibleAgentSkills.length > 0
+    ? visibleAgentSkills.map((skill) => `- ${skill.name} (${skill.id})`)
+    : ['- 无'];
+
+  return [
+    `当前可用技能共 ${visibleMergedSkills.length} 个。公共区技能 ${visiblePublicSkills.length} 个，当前 Agent 专属技能 ${visibleAgentSkills.length} 个。${hiddenSkillsCount > 0 ? `另有 ${hiddenSkillsCount} 个仅供自动调用的隐藏技能。` : ''}`,
+    '',
+    '公共区技能：',
+    ...publicLines,
+    '',
+    '当前 Agent 专属技能：',
+    ...agentLines
+  ].join('\n');
 }
 
 function isVisibleSessionMessage(message: ChatMessage) {
@@ -85,6 +131,8 @@ export class AgentRuntime {
   }) => void;
   private refreshSystemPrompt?: () => string | Promise<string>;
   private getRuntimeSupportContext?: () => RuntimeSupportContext;
+  private resolveInitialSkills?: (userInput: string, agentId: string) => Promise<LoadedSkillCapability[]>;
+  private reloadRetainedSkills?: (skills: LoadedSkillCapability[], agentId: string) => Promise<LoadedSkillCapability[]>;
 
   private restoreSnapshotState(snapshot: RuntimeSnapshot) {
     this.systemPrompt = snapshot.systemPrompt || this.systemPrompt;
@@ -119,7 +167,9 @@ export class AgentRuntime {
       stepId?: string;
     }) => void,
     refreshSystemPrompt?: () => string | Promise<string>,
-    getRuntimeSupportContext?: () => RuntimeSupportContext
+    getRuntimeSupportContext?: () => RuntimeSupportContext,
+    resolveInitialSkills?: (userInput: string, agentId: string) => Promise<LoadedSkillCapability[]>,
+    reloadRetainedSkills?: (skills: LoadedSkillCapability[], agentId: string) => Promise<LoadedSkillCapability[]>
   ) {
     this.llm = llm;
     this.systemPrompt = systemPrompt;
@@ -128,6 +178,8 @@ export class AgentRuntime {
     this.auditLog = auditLog;
     this.refreshSystemPrompt = refreshSystemPrompt;
     this.getRuntimeSupportContext = getRuntimeSupportContext;
+    this.resolveInitialSkills = resolveInitialSkills;
+    this.reloadRetainedSkills = reloadRetainedSkills;
     this.tools = new Map();
     this.capabilityOrchestrator = new CapabilityOrchestrator(permissionGuard);
   }
@@ -167,6 +219,10 @@ export class AgentRuntime {
     return this.capabilityOrchestrator.canRunLoadedSkillScript(skillReference, scriptPath);
   }
 
+  getLoadedSkillCapability(skillReference: string) {
+    return this.capabilityOrchestrator.getLoadedSkillCapability(skillReference);
+  }
+
   async chat(
     userInput: string,
     onUpdate?: (update: RuntimeUpdate) => void,
@@ -177,7 +233,24 @@ export class AgentRuntime {
     }
 
     await this.refreshPromptIfNeeded();
-    this.clearLoadedSkills();
+    if (this.reloadRetainedSkills) {
+      const retainedSkills = this.capabilityOrchestrator.getLoadedSkills()
+        .filter((skill) => skill.activationSource !== 'automatic');
+      if (retainedSkills.length > 0) {
+        const refreshedSkills = await this.reloadRetainedSkills(retainedSkills, options.agentId || 'mainAgent');
+        this.capabilityOrchestrator.clearLoadedSkills({ activationSource: 'manual' });
+        for (const skill of refreshedSkills) {
+          this.capabilityOrchestrator.activateSkill(skill);
+        }
+      }
+    }
+    this.capabilityOrchestrator.clearLoadedSkills({ activationSource: 'automatic' });
+    if (this.resolveInitialSkills) {
+      const initialSkills = await this.resolveInitialSkills(userInput, options.agentId || 'mainAgent');
+      for (const skill of initialSkills) {
+        this.capabilityOrchestrator.activateSkill(skill);
+      }
+    }
     const userMessage: ChatMessage = {
       role: 'user',
       content: userInput,
@@ -204,6 +277,53 @@ export class AgentRuntime {
       }).metadata,
       stepId: planStep.id
     });
+
+    if (isSkillInventoryQuery(userInput)) {
+      const content = await buildSkillInventoryResponse(options.agentId || 'mainAgent');
+      const assistantMessage: ChatMessage = {
+        role: 'assistant',
+        content,
+        timestamp: Date.now()
+      };
+      this.history.push(assistantMessage);
+
+      const completeStep = createRunStep(run.id, 'complete', '直接返回技能清单', {
+        status: 'completed',
+        output: {
+          content
+        }
+      });
+
+      updateRun(run.id, {
+        status: 'completed',
+        finalResponse: content,
+        error: null,
+        waitingApprovalId: null,
+        completedAt: Date.now()
+      });
+
+      this.persistSnapshot(run.id, {
+        iterations: 0,
+        lastUserInput: userInput,
+        contextSummary: this.buildModelContext(run.id, options.sessionId, {
+          consumeRuntimeSupportSummary: false
+        }).metadata,
+        stepId: completeStep.id
+      });
+
+      this.emitUpdate(onUpdate, {
+        type: 'assistant-response',
+        content,
+        runId: run.id,
+        status: 'completed'
+      });
+
+      return {
+        status: 'completed',
+        runId: run.id,
+        content
+      };
+    }
 
     try {
       return await this.executeRun({

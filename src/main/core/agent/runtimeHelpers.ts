@@ -332,7 +332,7 @@ export function createActiveSkillsSnapshot(
 
   const normalizedSkills = loadedSkills
     .slice()
-    .sort((left, right) => right.loadedAt - left.loadedAt)
+    .sort((left, right) => left.skillName.localeCompare(right.skillName))
     .map((skill) => {
       const normalizedSkillName = skill.skillName.trim();
       const allowedTools = Array.from(new Set(skill.allowedTools.map((toolName) => toolName.trim()).filter(Boolean)));
@@ -341,9 +341,15 @@ export function createActiveSkillsSnapshot(
         : 'none';
       const resourceSummary = summarizeSkillPaths(skill.resourcePaths);
       const scriptSummary = summarizeSkillPaths(skill.scriptPaths, 2);
+      const invocation = skill.modelInvocable === false
+        ? (skill.userInvocable === false ? 'hidden' : 'manual_only')
+        : 'auto';
+      const instructionsSummary = typeof skill.instructions === 'string' && skill.instructions.trim()
+        ? ` | instructions: ${trimToMaxChars(skill.instructions.trim().replace(/\s+/g, ' '), 280)}`
+        : '';
       return {
         skillName: normalizedSkillName,
-        summary: `- ${normalizedSkillName} | allowed_tools: ${allowedToolsSummary} | resources: ${resourceSummary} | scripts: ${scriptSummary}`
+        summary: `- ${normalizedSkillName} | invocation: ${invocation} | execution: ${skill.executionMode || 'inline'} | allowed_tools: ${allowedToolsSummary} | resources: ${resourceSummary} | scripts: ${scriptSummary}${instructionsSummary}`
       };
     })
     .filter((skill) => skill.skillName);

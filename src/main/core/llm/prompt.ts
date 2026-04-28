@@ -67,14 +67,21 @@ When instructions conflict, follow this order:
 <skills_instructions>
 You are equipped with a standard skill loading workflow.
 Treat a skill as relevant when the user goal, requested output, or required workflow directly matches a skill name or description from the available skills catalog.
-If multiple skills are relevant, load the most specific skill first, then load additional skills only when needed.
+Treat the runtime available skills catalog as the authoritative source for which public and agent-specific skills are currently installed.
+If the user asks which skills are available, installed, or usable right now, call list_available_skills and answer from that tool result.
+Do NOT infer that there are no skills merely because the workspace \`skills/\` directory is empty or missing.
+Only say that no skills are available when list_available_skills returns zero total available skills or the runtime available skills catalog is empty.
+Treat \`when_to_use\`, invocation policy, and execution mode from the skills catalog as authoritative.
+The runtime may pre-activate a relevant skill automatically before your first model step. Always check the active skills summary before deciding whether you still need to call load_skill manually.
+If multiple skills are relevant, use the most specific active skill first, then load additional skills only when needed.
 When a user asks you to perform a task and a relevant skill exists:
-1. You MUST call load_skill IMMEDIATELY as your first action with the matching skill name.
-2. Read the returned instructions carefully.
-3. Use read_skill_resource only when the skill refers to additional files that must be loaded on demand.
-4. Use run_skill_script only when the loaded skill explicitly requires a bundled script and the task genuinely needs execution.
-5. Do NOT use general filesystem tools like read_file or list_directory to inspect skill packages. Skill resources must be accessed through the dedicated skill tools after load_skill succeeds.
-Do NOT attempt to guess or perform a skill-guided workflow without loading the corresponding skill first.
+1. If the skill is already active, follow its loaded instructions directly.
+2. If the skill is not active and the skill is user-invocable, call load_skill with the matching skill name before doing the skill-guided workflow.
+3. If the skill defines arguments, pass them through load_skill.arguments when the user has supplied the needed values.
+4. Use read_skill_resource only when the skill refers to additional files that must be loaded on demand.
+5. Use run_skill_script only when the loaded skill explicitly requires a bundled script and the task genuinely needs execution.
+6. Do NOT use general filesystem tools like read_file or list_directory to inspect skill packages. Skill resources must be accessed through the dedicated skill tools after load_skill succeeds.
+Do NOT attempt to guess or perform a skill-guided workflow without an active skill context, whether that context was auto-activated or loaded manually.
 </skills_instructions>`;
 
   static buildSystemPrompt(context: PromptContext, options?: PromptBuildOptions): string {
@@ -127,7 +134,7 @@ Do NOT attempt to guess or perform a skill-guided workflow without loading the c
     }
 
     if (includeEnvironment) {
-      parts.push(`<environment>\nCurrent Date: ${runtimeDateContext.currentDate}\nCurrent Time: ${runtimeDateContext.currentTime}\nCurrent DateTime: ${runtimeDateContext.currentDateTime}\nCurrent Year: ${runtimeDateContext.currentYear}\nCurrent Time Zone: ${runtimeDateContext.timeZone}\nCurrent Workspace: ${layout.workspaceRoot}\nPrompt Files Directory: ${layout.promptsDir}\nMemory Directory: ${layout.memoryDir}\nSkills Directory: ${layout.skillsDir}\nTasks Directory: ${layout.tasksDir}\nArtifacts Directory: ${layout.artifactsDir}\nImages Directory: ${layout.imagesDir}\nMedia Directory: ${layout.mediaDir}\n</environment>`);
+      parts.push(`<environment>\nCurrent Date: ${runtimeDateContext.currentDate}\nCurrent Time: ${runtimeDateContext.currentTime}\nCurrent DateTime: ${runtimeDateContext.currentDateTime}\nCurrent Year: ${runtimeDateContext.currentYear}\nCurrent Time Zone: ${runtimeDateContext.timeZone}\nCurrent Workspace: ${layout.workspaceRoot}\nPrompt Files Directory: ${layout.promptsDir}\nMemory Directory: ${layout.memoryDir}\nAgent Skills Directory: ${layout.skillsDir}\nTasks Directory: ${layout.tasksDir}\nArtifacts Directory: ${layout.artifactsDir}\nImages Directory: ${layout.imagesDir}\nMedia Directory: ${layout.mediaDir}\n</environment>`);
     }
 
     return parts.join('\n\n');
