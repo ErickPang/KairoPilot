@@ -20,6 +20,7 @@ import {
   getTokenUsageDetails
 } from '../../store/chat';
 import { getActiveAgentId } from '../../store/config';
+import { getAgentRuntime } from '../../assistant/agentRuntime';
 import { KAIRO_INVOKE } from '../../../shared/ipc';
 
 function registerChatHandlers() {
@@ -144,6 +145,14 @@ function registerChatHandlers() {
       return { success: false, error: 'Session does not belong to the active agent.' };
     }
     setActiveSessionId(sessionId, agentId || undefined);
+    // Progressive Disclosure: Clear loaded skills on session switch.
+    // Skills persist within a session but reset when user switches to a different session.
+    if (agentId) {
+      const runtime = getAgentRuntime(agentId);
+      if (runtime) {
+        runtime.clearLoadedSkills();
+      }
+    }
     return { success: true };
   });
 

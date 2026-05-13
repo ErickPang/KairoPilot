@@ -177,7 +177,10 @@ export class AgentRuntime {
     }
 
     await this.refreshPromptIfNeeded();
-    this.clearLoadedSkills();
+    // Progressive Disclosure: Skills persist across turns within a session.
+    // Only clear when session changes (handled externally), not on every chat() call.
+    // This matches Claude Code behavior where a loaded skill stays active
+    // for the entire session lifetime.
     const userMessage: ChatMessage = {
       role: 'user',
       content: userInput,

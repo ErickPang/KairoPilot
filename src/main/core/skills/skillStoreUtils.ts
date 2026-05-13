@@ -301,6 +301,99 @@ export function parseSkillFrontmatter(content: string, folderName: string): Fron
   }
 }
 
+// ===== Progressive Disclosure: Skill Metadata Validation =====
+
+/**
+ * Validation result for a skill's frontmatter metadata.
+ * Follows Claude Code's schema constraints:
+ * - name: required, max 64 characters
+ * - description: required, max 1024 characters, no XML tags
+ */
+export interface SkillMetadataValidation {
+  valid: boolean
+  warnings: string[]
+  errors: string[]
+}
+
+const SKILL_NAME_MAX_LENGTH = 64
+const SKILL_DESCRIPTION_MAX_LENGTH = 1024
+const XML_TAG_PATTERN = /<\/?[a-zA-Z][^>]*>/
+
+/**
+ * Validates skill frontmatter metadata against Claude Code-compatible schema constraints.
+ * Returns errors for hard violations (skill should not load) and warnings for soft issues.
+ */
+export function validateSkillMetadata(metadata: SkillMetadata): SkillMetadataValidation {
+  const errors: string[] = []
+  const warnings: string[] = []
+
+  // Name validation
+  const name = metadata.name.trim()
+  if (!name) {
+    errors.push('Skill name is required.')
+  } else if (name.length > SKILL_NAME_MAX_LENGTH) {
+    errors.push(`Skill name exceeds ${SKILL_NAME_MAX_LENGTH} characters (current: ${name.length}). Use a concise gerund form (e.g., "code-reviewing", "pdf-processing").`)
+  }
+
+  // Description validation
+  const description = metadata.description.trim()
+  if (!description || description === `Skill: ${name}`) {
+    errors.push('Skill description is required. Write a clear description that tells the agent when to use this skill.')
+  } else {
+    if (description.length > SKILL_DESCRIPTION_MAX_LENGTH) {
+      errors.push(`Skill description exceeds ${SKILL_DESCRIPTION_MAX_LENGTH} characters (current: ${description.length}). Keep it concise — the description is loaded into every system prompt.`)
+    }
+    if (XML_TAG_PATTERN.test(description)) {
+      errors.push('Skill description must not contain XML tags. Use plain text only.')
+    }
+    // Soft checks
+    const hasUsageHint = /use when|when the user|when you|适合|当用户|使用场景/i.test(description)
+    if (!hasUsageHint) {
+      warnings.push('Description lacks trigger hints. Add "Use when..." or specific scenarios to help the agent know when to activate this skill.')
+    }
+  }
+
+  return {
+    valid: errors.length === 0,
+    warnings,
+    errors
+  }
+}
+
+// ===== Progressive Disclosure: Token Estimation =====
+
+/**
+ * Estimates the token count of a text string.
+ * Uses a heuristic approximation: ~4 English chars or ~1.5 CJK chars per token.
+ * This is sufficient for budget management without requiring a full tokenizer dependency.
+ */
+export function estimateTokenCount(text: string): number {
+  if (!text) return 0
+  // Count CJK characters (Chinese, Japanese, Korean)
+  const cjkChars = (text.match(/[\u4e00-\u9fa5\u3040-\u30ff\uac00-\ud7af]/g) || []).length
+  const nonCjkChars = text.length - cjkChars
+  return Math.ceil(nonCjkChars / 4 + cjkChars / 1.5)
+}
+
+/**
+ * Checks if a SKILL.md body exceeds the recommended token limit.
+ * Claude Code enforces < 5000 tokens for the SKILL.md body.
+ * Larger skills should split knowledge into references/ files.
+ */
+export const SKILL_BODY_TOKEN_LIMIT = 5000
+
+export function checkSkillBodySize(body: string): { withinLimit: boolean; estimatedTokens: number; warning?: string } {
+  const estimatedTokens = estimateTokenCount(body)
+  if (estimatedTokens <= SKILL_BODY_TOKEN_LIMIT) {
+    return { withinLimit: true, estimatedTokens }
+  }
+  return {
+    withinLimit: false,
+    estimatedTokens,
+    warning: `SKILL.md body is ~${estimatedTokens} tokens (limit: ${SKILL_BODY_TOKEN_LIMIT}). Consider moving reference material to the references/ directory and keeping only process steps in SKILL.md.`
+  }
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
 }

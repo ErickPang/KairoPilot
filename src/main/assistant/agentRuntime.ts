@@ -20,6 +20,7 @@ import { addAuditLog } from '../store/audit';
 import { AgentConfig, ModelConfig, getAgent, getModelForAgent } from '../store/config';
 import { pluginManager } from '../core/plugins/manager';
 import { skillsManager } from '../core/skills/manager';
+import { checkSkillBodySize, estimateTokenCount, validateSkillMetadata } from '../core/skills/skillStoreUtils';
 import { DEFAULT_SHELL_COMMANDS } from '../../shared/contracts';
 
 type RuntimeRegistryEntry = {
@@ -34,8 +35,12 @@ type PendingRuntimeInitialization = {
 
 const runtimeRegistry = new Map<string, RuntimeRegistryEntry>();
 const pendingRuntimeInitializations = new Map<string, PendingRuntimeInitialization>();
-const AVAILABLE_SKILLS_MAX_CHARS = 3600;
-const AVAILABLE_SKILL_ENTRY_MAX_CHARS = 180;
+
+// Progressive Disclosure Level 1: Token-based budget for metadata injection.
+// Claude Code standard: ~100 tokens per skill metadata, ~2000 tokens total for the catalog.
+// We use token estimation instead of raw character count for cross-language accuracy.
+const METADATA_BUDGET_TOKENS_PER_SKILL = 100;
+const METADATA_BUDGET_TOKENS_TOTAL = 2000;
 
 function createRuntimeSignature(config: ResolvedAgentConfig) {
   const { agent, model } = config;
@@ -165,46 +170,61 @@ async function buildSkillCatalogSnapshot(agentId: string): Promise<SkillCatalogS
       return left.id.localeCompare(right.id);
     });
 
+  // Progressive Disclosure Level 1: Token-aware metadata budgeting.
+  // Each skill entry is capped at ~100 tokens. Total catalog capped at ~2000 tokens.
+  // Unlike character-based truncation, this ensures consistent behavior across
+  // English and CJK text, matching Claude Code's ~100 tokens/skill standard.
   const entryRecords = prioritizedSkills.map((skill) => {
     const description = skill.description.replace(/\s+/g, ' ').trim();
-    const trimmedDescription = description.length > AVAILABLE_SKILL_ENTRY_MAX_CHARS
-      ? `${description.slice(0, AVAILABLE_SKILL_ENTRY_MAX_CHARS - 1).trimEnd()}…`
-      : description;
     const versionText = skill.version ? ` | version: ${skill.version}` : '';
     const sourceText = ` | scope: ${skill.source}`;
+    const prefix = `- ${skill.id}: `;
+    const suffix = `${versionText}${sourceText}`;
+
+    // Budget: ~100 tokens per entry. Reserve tokens for prefix + suffix.
+    const prefixSuffixTokens = estimateTokenCount(prefix + suffix);
+    const descriptionBudgetTokens = Math.max(20, METADATA_BUDGET_TOKENS_PER_SKILL - prefixSuffixTokens);
+    const descriptionTokens = estimateTokenCount(description);
+
+    // Trim description if it exceeds per-skill token budget
+    let trimmedDescription = description;
+    if (descriptionTokens > descriptionBudgetTokens) {
+      // Estimate character count for the target token budget
+      const targetChars = Math.floor(descriptionBudgetTokens * 3.5); // conservative estimate
+      trimmedDescription = `${description.slice(0, targetChars).trimEnd()}…`;
+    }
+
     return {
       id: skill.id,
-      summary: `- ${skill.id}: ${trimmedDescription}${versionText}${sourceText}`
+      summary: `${prefix}${trimmedDescription}${suffix}`,
+      tokens: estimateTokenCount(`${prefix}${trimmedDescription}${suffix}`)
     };
   });
+
+  // Assemble catalog within total token budget
   const entries: string[] = [];
+  let totalTokens = 0;
 
   for (const record of entryRecords) {
-    const entry = record.summary;
-    const nextEntries = [...entries, entry];
-    const remainingCount = entryRecords.length - nextEntries.length;
-    const suffix = remainingCount > 0 ? `\n- ${remainingCount} more skills omitted from this summary.` : '';
-    const candidate = `${nextEntries.join('\n')}${suffix}`;
-    if (candidate.length > AVAILABLE_SKILLS_MAX_CHARS) {
-      if (entries.length === 0) {
-        return {
-          fingerprint: JSON.stringify(entryRecords.map((record) => record.summary)),
-          fullSummary: entry.slice(0, AVAILABLE_SKILLS_MAX_CHARS).trimEnd(),
-          entries: entryRecords
-        };
-      }
+    if (totalTokens + record.tokens > METADATA_BUDGET_TOKENS_TOTAL) {
+      // Budget exhausted — stop including more skills
       break;
     }
-    entries.push(entry);
+    entries.push(record.summary);
+    totalTokens += record.tokens;
   }
 
   const omittedCount = entryRecords.length - entries.length;
+  const omittedSuffix = omittedCount > 0
+    ? `\n- ${omittedCount} more skills available (use load_skill by name).`
+    : '';
+
   return {
     fingerprint: JSON.stringify(entryRecords.map((record) => record.summary)),
-    fullSummary: omittedCount > 0
-      ? `${entries.join('\n')}\n- ${omittedCount} more skills omitted from this summary.`
-      : entries.join('\n'),
-    entries: entryRecords
+    fullSummary: entries.length > 0
+      ? `${entries.join('\n')}${omittedSuffix}`
+      : 'No skills available.',
+    entries: entryRecords.map((record) => ({ id: record.id, summary: record.summary }))
   };
 }
 
@@ -243,6 +263,21 @@ async function createLoadSkillTool(
         return toolError(`Skill not found: ${name}`);
       }
 
+      // Progressive Disclosure: Validate metadata quality (Claude Code schema compliance)
+      const validation = validateSkillMetadata(metadata);
+      if (!validation.valid) {
+        console.warn(`[SkillLoader] Skill "${name}" has metadata issues: ${validation.errors.join('; ')}`);
+      }
+      if (validation.warnings.length > 0) {
+        console.warn(`[SkillLoader] Skill "${name}" metadata warnings: ${validation.warnings.join('; ')}`);
+      }
+
+      // Progressive Disclosure: Check SKILL.md body size (< 5000 tokens recommended)
+      const bodyCheck = checkSkillBodySize(content);
+      if (!bodyCheck.withinLimit) {
+        console.warn(`[SkillLoader] ${bodyCheck.warning}`);
+      }
+
       const loadedAt = Date.now();
       const skillId = path.basename(skillPath);
       const aliases = [name, metadata.name, skillId]
@@ -270,7 +305,12 @@ async function createLoadSkillTool(
         allowedTools: metadata.metadata.allowedTools,
         loadedAt,
         content,
-        resources
+        // Progressive Disclosure Level 2: Only return instructions, not resource listing.
+        // The LLM reads the SKILL.md body which references files by path.
+        // It should use read_skill_resource or run_skill_script to access them on demand.
+        resourceHint: 'Use read_skill_resource to read reference files or assets from this skill. Use run_skill_script to execute scripts in the scripts/ directory.',
+        // Body size warning for observability
+        ...(bodyCheck.withinLimit ? {} : { bodySizeWarning: bodyCheck.warning })
       });
     }
   };
