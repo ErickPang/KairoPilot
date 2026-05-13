@@ -31,6 +31,10 @@ export interface ToolDefinition {
   description: string;
   parameters: z.ZodSchema;
   execute: (args: Record<string, unknown>) => Promise<unknown>;
+  /** Optional: The plugin ID that registered this tool (for audit/tracing) */
+  pluginId?: string;
+  /** Optional: The plugin version that registered this tool */
+  pluginVersion?: string;
 }
 
 export type LLMProviderProtocol = 'openai-compatible' | 'native';

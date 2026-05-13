@@ -82,6 +82,9 @@ export async function executeApprovedTool(params: ExecuteApprovedToolParams) {
     ? redactSensitiveValue(args) as Record<string, unknown>
     : args;
 
+  // Track execution timing for observability
+  const executionStartTime = Date.now();
+
   emitUpdate(onUpdate, {
     type: 'tool-call',
     tool: toolName,
@@ -93,6 +96,7 @@ export async function executeApprovedTool(params: ExecuteApprovedToolParams) {
 
   try {
     const rawOutput = await tool.execute(args);
+    const executionDurationMs = Date.now() - executionStartTime;
     const executionResult = unwrapToolExecutionResult(rawOutput);
     if (!executionResult.ok) {
       await recordToolFailure({
@@ -117,13 +121,22 @@ export async function executeApprovedTool(params: ExecuteApprovedToolParams) {
     const redactedOutput = permissionGuard.shouldRedactSensitiveOutput()
       ? redactSensitiveValue(output)
       : output;
+
+    // Enhanced step metadata with execution metrics and plugin tracing
+    const stepMetadata: Record<string, unknown> = {
+      tool: toolName,
+      result: output,
+      callId,
+      executionDurationMs
+    };
+    if (tool.pluginId) {
+      stepMetadata.pluginId = tool.pluginId;
+      stepMetadata.pluginVersion = tool.pluginVersion;
+    }
+
     updateRunStep(toolStepId || '', {
       status: 'completed',
-      output: {
-        tool: toolName,
-        result: output,
-        callId
-      }
+      output: stepMetadata
     });
     createRunStep(runId, 'tool_result', `${toolName} 返回结果`, {
       status: 'completed',
@@ -131,7 +144,11 @@ export async function executeApprovedTool(params: ExecuteApprovedToolParams) {
         tool: toolName,
         callId
       },
-      output
+      output,
+      metadata: {
+        executionDurationMs,
+        ...(tool.pluginId ? { pluginId: tool.pluginId, pluginVersion: tool.pluginVersion } : {})
+      }
     });
     if (toolRecordId) {
       updateToolCallRecord(toolRecordId, {
@@ -144,7 +161,11 @@ export async function executeApprovedTool(params: ExecuteApprovedToolParams) {
         tool: toolName,
         args: redactedArgs,
         result: redactedOutput,
-        policyTags,
+        policyTags: [
+          ...policyTags,
+          ...(tool.pluginId ? [`plugin:${tool.pluginId}`, `plugin_version:${tool.pluginVersion}`] : []),
+          `duration_ms:${executionDurationMs}`
+        ],
         sessionId,
         runId,
         stepId: toolStepId
@@ -160,6 +181,7 @@ export async function executeApprovedTool(params: ExecuteApprovedToolParams) {
     });
     appendToolMessage(toolName, callId, JSON.stringify(output));
   } catch (error) {
+    const executionDurationMs = Date.now() - executionStartTime;
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     await recordToolFailure({
       runId,
@@ -172,7 +194,12 @@ export async function executeApprovedTool(params: ExecuteApprovedToolParams) {
       onUpdate,
       toolStepId,
       toolRecordId,
-      policyTags: [...policyTags, 'decision:error'],
+      policyTags: [
+        ...policyTags,
+        'decision:error',
+        ...(tool.pluginId ? [`plugin:${tool.pluginId}`] : []),
+        `duration_ms:${executionDurationMs}`
+      ],
       auditLog,
       emitUpdate,
       appendToolMessage
@@ -264,6 +291,26 @@ export async function recordToolFailure(params: ToolFailureParams) {
   });
   appendToolMessage(toolName, callId, `Error executing tool: ${errorMessage}`);
 }
+
+/**
+ * Set of tool names that are built-in to KairoPilot and have explicit permission checks.
+ * Any tool NOT in this set is treated as a dynamic/plugin tool and subject to
+ * additional security constraints.
+ */
+const BUILTIN_TOOL_NAMES = new Set([
+  'read_file',
+  'write_file',
+  'list_directory',
+  'delete_file',
+  'execute_command',
+  'system_info',
+  'web_search',
+  'fetch_webpage',
+  'http_request',
+  'load_skill',
+  'read_skill_resource',
+  'run_skill_script'
+]);
 
 export function checkPermission(
   permissionGuard: PermissionGuard,
@@ -412,6 +459,36 @@ export function checkPermission(
     };
   }
 
+  // ===== Plugin/Dynamic Tool Permission Enforcement =====
+  // Tools not in the built-in set come from plugins. Apply additional
+  // security constraints to prevent uncontrolled plugin execution.
+  if (!BUILTIN_TOOL_NAMES.has(toolName)) {
+    const riskLevel = permissionGuard.getToolRiskLevel(toolName, args);
+
+    // High-risk or critical plugin tools always require approval
+    if (riskLevel === 'critical' || riskLevel === 'high') {
+      return {
+        kind: 'approval',
+        args
+      };
+    }
+
+    // For medium-risk plugin tools: require approval unless execution profile
+    // is trusted_automation with approval mode 'never'
+    if (riskLevel === 'medium') {
+      const approvalMode = permissionGuard.getApprovalMode();
+      if (approvalMode !== 'never') {
+        return {
+          kind: 'approval',
+          args
+        };
+      }
+    }
+
+    // Low-risk plugin tools in read_only_workspace can still run
+    // (they don't directly write or execute commands)
+  }
+
   return {
     kind: 'allow',
     args
@@ -421,6 +498,15 @@ export function checkPermission(
 export function getPolicyTags(toolName: string, args: Record<string, unknown>, permissionGuard?: PermissionGuard): string[] {
   const tags = [`tool:${toolName}`];
   const riskLevel = permissionGuard?.getToolRiskLevel(toolName, args);
+
+  // Tag plugin/dynamic tools for audit visibility
+  if (!BUILTIN_TOOL_NAMES.has(toolName)) {
+    tags.push('tool_source:plugin');
+    tags.push('tool_category:dynamic');
+  } else {
+    tags.push('tool_source:builtin');
+  }
+
   if (toolName === 'load_skill' || toolName === 'read_skill_resource' || toolName === 'run_skill_script') {
     tags.push('policy:skill_used');
     tags.push('tool_category:skill');

@@ -4,7 +4,12 @@ import { KAIRO_INVOKE } from '../../../shared/ipc';
 
 function registerPluginHandlers() {
   ipcMain.handle(KAIRO_INVOKE.pluginsGetStore, async () => {
-    return pluginManager.getStorePlugins();
+    const plugins = await pluginManager.getStorePlugins();
+    // Enrich with permission summaries for the UI
+    return plugins.map((plugin) => ({
+      ...plugin,
+      permissionSummary: pluginManager.getPermissionSummary(plugin)
+    }));
   });
 
   ipcMain.handle(KAIRO_INVOKE.pluginsGetInstalled, async () => {

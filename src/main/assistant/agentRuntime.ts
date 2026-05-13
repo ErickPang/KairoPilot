@@ -1,4 +1,5 @@
 import path from 'path';
+import os from 'os';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { z } from 'zod';
@@ -87,6 +88,48 @@ function createRuntimeSignature(config: ResolvedAgentConfig) {
 
 const execFileAsync = promisify(execFile);
 const SKILL_SCRIPT_MAX_BUFFER_BYTES = 1024 * 1024;
+const SKILL_SCRIPT_TIMEOUT_MS = 60_000;
+
+/**
+ * Creates a minimal, safe environment for skill script execution.
+ * Strips all potentially sensitive environment variables (API keys, tokens, secrets)
+ * and only passes through essential system paths and locale settings.
+ */
+function createSkillScriptEnv(skillDir: string, skillName: string): NodeJS.ProcessEnv {
+  const safeEnv: NodeJS.ProcessEnv = {
+    // System essentials
+    PATH: process.env.PATH,
+    LANG: process.env.LANG || 'en_US.UTF-8',
+    LC_ALL: process.env.LC_ALL,
+    HOME: skillDir,
+    TMPDIR: os.tmpdir(),
+    // Skill context
+    SKILL_NAME: skillName,
+    SKILL_DIR: skillDir,
+    // Node/Python runtime helpers
+    NODE_ENV: 'production',
+    PYTHONDONTWRITEBYTECODE: '1',
+    PYTHONUNBUFFERED: '1'
+  };
+
+  // Platform-specific essentials
+  if (process.platform === 'win32') {
+    safeEnv.SYSTEMROOT = process.env.SYSTEMROOT;
+    safeEnv.COMSPEC = process.env.COMSPEC;
+    safeEnv.PATHEXT = process.env.PATHEXT;
+    safeEnv.TEMP = process.env.TEMP;
+    safeEnv.TMP = process.env.TMP;
+  }
+
+  // Remove any undefined values
+  for (const key of Object.keys(safeEnv)) {
+    if (safeEnv[key] === undefined) {
+      delete safeEnv[key];
+    }
+  }
+
+  return safeEnv;
+}
 interface ResolvedAgentConfig {
   agent: AgentConfig;
   model: ModelConfig;
@@ -342,15 +385,19 @@ function createRunSkillScriptTool(agentId: string, getRuntime: () => AgentRuntim
         }
 
         const command = resolveSkillScriptCommand(absoluteScriptPath);
+        const skillDir = path.dirname(absoluteScriptPath);
         const { stdout, stderr } = await execFileAsync(command, [absoluteScriptPath, ...scriptArgs], {
-          cwd: path.dirname(absoluteScriptPath),
+          cwd: skillDir,
           maxBuffer: SKILL_SCRIPT_MAX_BUFFER_BYTES,
-          windowsHide: true
+          timeout: SKILL_SCRIPT_TIMEOUT_MS,
+          windowsHide: true,
+          env: createSkillScriptEnv(skillDir, skill)
         });
 
         return toolOk({
           command,
           scriptPath: absoluteScriptPath,
+          cwd: skillDir,
           stdout: stdout.trim(),
           stderr: stderr.trim(),
           exitCode: 0

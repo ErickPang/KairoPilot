@@ -6,6 +6,31 @@ import { z } from 'zod';
 import { ToolDefinition } from '../llm/types';
 import { getPluginRegistry, savePluginRegistry } from '../../store/config';
 
+/**
+ * Declared permissions for a plugin.
+ * Plugins should declare what capabilities they need. During installation,
+ * these are shown to the user for review. At runtime, the PermissionGuard
+ * uses these to enforce access boundaries.
+ */
+export interface PluginPermissions {
+  /** Whether the plugin needs to read files */
+  fileSystemRead?: boolean;
+  /** Whether the plugin needs to write files */
+  fileSystemWrite?: boolean;
+  /** Whether the plugin needs network access */
+  network?: {
+    enabled?: boolean;
+    domains?: string[];
+  };
+  /** Whether the plugin needs shell execution */
+  shell?: {
+    enabled?: boolean;
+    commands?: string[];
+  };
+  /** Self-declared risk level by the plugin author */
+  riskLevel?: 'low' | 'medium' | 'high';
+}
+
 export interface PluginManifest {
   id: string;
   name: string;
@@ -13,12 +38,20 @@ export interface PluginManifest {
   version: string;
   author: string;
   icon?: string;
+  /** Declared permissions — shown during install review */
+  permissions?: PluginPermissions;
+  /** Minimum KairoPilot version required */
+  engines?: {
+    kairopilot?: string;
+  };
 }
 
 export interface InstalledPlugin extends PluginManifest {
   installedAt: number;
   filePath: string;
   scope: string; // 'public' or 'agent:{agentId}'
+  /** Whether the user has explicitly approved this plugin's permissions */
+  permissionsApproved?: boolean;
 }
 
 interface BuiltInStorePlugin {
@@ -34,7 +67,10 @@ const STORE_PLUGINS: BuiltInStorePlugin[] = [
       description: 'Get weather summaries and simple travel hints for a city.',
       version: '1.0.0',
       author: 'KairoPilot',
-      icon: '🌤️'
+      icon: '🌤️',
+      permissions: {
+        riskLevel: 'low'
+      }
     },
     code: `
 module.exports.tools = [
@@ -66,7 +102,10 @@ module.exports.tools = [
       description: 'Get mock crypto asset snapshots for demos and local testing.',
       version: '1.0.0',
       author: 'KairoPilot',
-      icon: '₿'
+      icon: '₿',
+      permissions: {
+        riskLevel: 'low'
+      }
     },
     code: `
 module.exports.tools = [
@@ -93,19 +132,38 @@ module.exports.tools = [
 const PLUGIN_LOAD_TIMEOUT_MS = 1000;
 const PLUGIN_EXECUTE_TIMEOUT_MS = 30000;
 
+const PluginPermissionsSchema = z.object({
+  fileSystemRead: z.boolean().optional(),
+  fileSystemWrite: z.boolean().optional(),
+  network: z.object({
+    enabled: z.boolean().optional(),
+    domains: z.array(z.string()).optional()
+  }).optional(),
+  shell: z.object({
+    enabled: z.boolean().optional(),
+    commands: z.array(z.string()).optional()
+  }).optional(),
+  riskLevel: z.enum(['low', 'medium', 'high']).optional()
+}).optional();
+
 const PluginManifestSchema = z.object({
   id: z.string().trim().min(1),
   name: z.string().trim().min(1),
   description: z.string().trim().min(1),
   version: z.string().trim().min(1),
   author: z.string().trim().min(1),
-  icon: z.string().trim().optional()
+  icon: z.string().trim().optional(),
+  permissions: PluginPermissionsSchema,
+  engines: z.object({
+    kairopilot: z.string().optional()
+  }).optional()
 });
 
 const InstalledPluginSchema = PluginManifestSchema.extend({
   installedAt: z.number().finite().nonnegative(),
   filePath: z.string().trim().min(1),
-  scope: z.string().trim().min(1)
+  scope: z.string().trim().min(1),
+  permissionsApproved: z.boolean().optional()
 });
 
 function getStorePluginById(id: string): BuiltInStorePlugin | undefined {
@@ -198,6 +256,8 @@ export class PluginManager {
         name: candidate.name,
         description: candidate.description,
         parameters: candidate.parameters,
+        pluginId: plugin.id,
+        pluginVersion: plugin.version,
         execute: async (args: Record<string, unknown>) => {
           const execution = Promise.resolve(candidate.execute!(args));
           const timeout = new Promise<never>((_, reject) => {
@@ -279,7 +339,8 @@ export class PluginManager {
       ...manifestValidation.data,
       installedAt: Date.now(),
       filePath,
-      scope
+      scope,
+      permissionsApproved: true  // Marked as approved since user initiated install
     };
 
     const registryPlugins = getPluginRegistry() as InstalledPlugin[];
@@ -349,16 +410,49 @@ export class PluginManager {
         }
 
         const code = await fs.readFile(codePath, 'utf-8');
-        const sandbox = Object.freeze({
-          module: { exports: { tools: [] } },
-          console: console,
-          z: z
+
+        // Hardened sandbox: use null prototype to prevent prototype-chain escape.
+        // Block access to process, require, global, globalThis, Function constructor
+        // which are common vm escape vectors.
+        const sandboxExports = { tools: [] as unknown[] };
+        const sandboxModule = { exports: sandboxExports };
+        const sandbox = Object.create(null) as Record<string, unknown>;
+        sandbox.module = sandboxModule;
+        sandbox.exports = sandboxExports;
+        sandbox.console = Object.freeze({
+          log: console.log.bind(console),
+          warn: console.warn.bind(console),
+          error: console.error.bind(console),
+          info: console.info.bind(console),
+          debug: () => {}
         });
-        const context = vm.createContext(sandbox);
+        sandbox.z = z;
+        sandbox.setTimeout = setTimeout;
+        sandbox.clearTimeout = clearTimeout;
+        sandbox.Promise = Promise;
+
+        // Explicitly block escape vectors
+        sandbox.process = undefined;
+        sandbox.require = undefined;
+        sandbox.global = undefined;
+        sandbox.globalThis = undefined;
+        sandbox.Function = undefined;
+        sandbox.eval = undefined;
+        sandbox.WebAssembly = undefined;
+
+        // Freeze the sandbox to prevent modifications
+        Object.freeze(sandbox);
+
+        const context = vm.createContext(sandbox, {
+          codeGeneration: {
+            strings: false,  // Block eval() and new Function() from strings
+            wasm: false      // Block WebAssembly compilation
+          }
+        });
         const script = new vm.Script(code, { filename: codePath });
         script.runInContext(context, { timeout: PLUGIN_LOAD_TIMEOUT_MS });
 
-        const loadedTools = this.normalizePluginTools(plugin, sandbox.module.exports.tools);
+        const loadedTools = this.normalizePluginTools(plugin, sandboxModule.exports.tools);
         for (const tool of loadedTools) {
           if (seenToolNames.has(tool.name)) {
             console.warn(`[PluginManager] Skipping duplicate tool name ${tool.name} from plugin ${plugin.id}.`);
@@ -373,6 +467,65 @@ export class PluginManager {
     }
 
     return allTools;
+  }
+
+  /**
+   * Returns a human-readable permission summary for a plugin.
+   * Used in the install confirmation UI to show users what the plugin requires.
+   */
+  getPermissionSummary(manifest: PluginManifest): string[] {
+    const summary: string[] = [];
+    const perms = manifest.permissions;
+
+    if (!perms) {
+      summary.push('No permissions declared (will run with default restrictions).');
+      return summary;
+    }
+
+    if (perms.fileSystemRead) {
+      summary.push('📂 Read files from the workspace');
+    }
+    if (perms.fileSystemWrite) {
+      summary.push('✏️ Write/modify files in the workspace');
+    }
+    if (perms.network?.enabled) {
+      const domains = perms.network.domains;
+      if (domains && domains.length > 0) {
+        summary.push(`🌐 Network access to: ${domains.join(', ')}`);
+      } else {
+        summary.push('🌐 Network access (unrestricted domains)');
+      }
+    }
+    if (perms.shell?.enabled) {
+      const commands = perms.shell.commands;
+      if (commands && commands.length > 0) {
+        summary.push(`⚡ Execute commands: ${commands.join(', ')}`);
+      } else {
+        summary.push('⚡ Execute shell commands');
+      }
+    }
+    if (perms.riskLevel) {
+      summary.push(`⚠️ Risk level: ${perms.riskLevel}`);
+    }
+
+    if (summary.length === 0) {
+      summary.push('✅ No special permissions required.');
+    }
+
+    return summary;
+  }
+
+  /**
+   * Returns the declared risk level for a plugin, defaulting to 'medium'
+   * if not specified (conservative default for unknown plugins).
+   */
+  getPluginRiskLevel(pluginId: string): 'low' | 'medium' | 'high' {
+    const storePlugin = getStorePluginById(pluginId);
+    if (storePlugin?.manifest.permissions?.riskLevel) {
+      return storePlugin.manifest.permissions.riskLevel;
+    }
+    // Default to medium for plugins that don't declare their risk
+    return 'medium';
   }
 }
 
