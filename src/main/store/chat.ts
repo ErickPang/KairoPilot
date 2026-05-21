@@ -15,6 +15,12 @@ import {
 } from './chatMessageUtils';
 import { buildAgentStats, mapMonitoringRows } from './chatAnalyticsUtils';
 import {
+  deleteSessionAttachmentFiles,
+  deleteWorkspaceAttachmentUploads,
+  getAttachmentById,
+  prepareChatAttachments
+} from './attachments';
+import {
   buildMonitoringWhereClause,
   buildRunQueryWhere,
   buildTokenMetricFacets,
@@ -30,6 +36,7 @@ import {
 import type {
   AgentStats,
   ApprovalRecord,
+  ChatAttachment,
   MonitoringTokenQuery,
   MonitoringTokenQueryResult,
   QueryFacet,
@@ -76,6 +83,87 @@ function getActiveSessionStateKey(agentId?: string | null) {
   return `active_session_id:${normalizeAgentId(agentId)}`;
 }
 
+function getAgentWorkspaceById(agentId?: string | null) {
+  const normalizedAgentId = normalizeAgentId(agentId);
+  return getAgents().find((agent) => normalizeAgentId(agent.id) === normalizedAgentId)?.workspace || null;
+}
+
+function getAllAgentWorkspaces() {
+  return [...new Set(getAgents()
+    .map((agent) => agent.workspace)
+    .filter((workspace): workspace is string => typeof workspace === 'string' && workspace.trim().length > 0))];
+}
+
+function cleanupSessionAttachments(workspace: string | null, sessionIds: string[]) {
+  if (!workspace || sessionIds.length === 0) {
+    return;
+  }
+
+  void Promise.all(sessionIds.map((sessionId) => deleteSessionAttachmentFiles(workspace, sessionId)))
+    .catch((error) => {
+      console.warn('[DB] Failed to cleanup session attachment files:', error);
+    });
+}
+
+function cleanupWorkspaceAttachments(workspaces: string[]) {
+  if (workspaces.length === 0) {
+    return;
+  }
+
+  void Promise.all(workspaces.map((workspace) => deleteWorkspaceAttachmentUploads(workspace)))
+    .catch((error) => {
+      console.warn('[DB] Failed to cleanup workspace attachment files:', error);
+    });
+}
+
+
+function insertMessageAttachments(
+  database: Database.Database,
+  sessionId: string,
+  messageId: string,
+  attachments: ChatAttachment[] | undefined
+) {
+  if (!attachments || attachments.length === 0) {
+    return;
+  }
+
+  const insertAttachment = database.prepare(`
+    INSERT OR REPLACE INTO message_attachments (
+      id,
+      session_id,
+      message_id,
+      name,
+      mime_type,
+      size,
+      kind,
+      original_path,
+      stored_path,
+      content_hash,
+      preview_uri,
+      extracted_text,
+      created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  for (const attachment of attachments) {
+    insertAttachment.run(
+      attachment.id,
+      sessionId,
+      messageId,
+      attachment.name,
+      attachment.mimeType,
+      attachment.size,
+      attachment.kind,
+      attachment.originalPath || null,
+      attachment.storedPath,
+      attachment.contentHash,
+      attachment.previewUri || null,
+      attachment.extractedText || null,
+      attachment.createdAt
+    );
+  }
+}
+
 // Initialize Database
 function getDb(): Database.Database {
   if (!db) {
@@ -97,6 +185,62 @@ function getDb(): Database.Database {
     });
   }
   return db;
+}
+
+export function getSessionAttachmentById(attachmentId: string, sessionId?: string | null) {
+  return getAttachmentById(getDb(), attachmentId, sessionId);
+}
+
+function extractLegacyAttachmentPaths(content: string) {
+  const paths: string[] = [];
+  const contextFileRegex = /^Context file:\s*(.+)$/gm;
+  let contextMatch: RegExpExecArray | null;
+  while ((contextMatch = contextFileRegex.exec(content)) !== null) {
+    const candidate = contextMatch[1]?.trim();
+    if (candidate) {
+      paths.push(candidate.replace(/^file:\/\//, ''));
+    }
+  }
+
+  const markdownImageRegex = /!\[[^\]]*\]\((kairopilot:\/\/[^)]+|file:\/\/[^)]+|\/[^)\s]+)\)/g;
+  let imageMatch: RegExpExecArray | null;
+  while ((imageMatch = markdownImageRegex.exec(content)) !== null) {
+    const raw = imageMatch[1]?.trim();
+    if (!raw) {
+      continue;
+    }
+    if (raw.startsWith('kairopilot://')) {
+      paths.push(decodeURIComponent(raw.slice('kairopilot://'.length)));
+    } else if (raw.startsWith('file://')) {
+      paths.push(decodeURIComponent(raw.slice('file://'.length)));
+    } else {
+      paths.push(raw);
+    }
+  }
+
+  return [...new Set(paths)].filter((item) => path.isAbsolute(item) && fs.existsSync(item));
+}
+
+async function migrateLegacyMessageAttachments(params: {
+  database: Database.Database;
+  sessionId: string;
+  messageId: string;
+  workspace: string;
+  content: string;
+}) {
+  const legacyPaths = extractLegacyAttachmentPaths(params.content);
+  if (legacyPaths.length === 0) {
+    return [];
+  }
+
+  const attachments = await prepareChatAttachments({
+    sessionId: params.sessionId,
+    workspace: params.workspace,
+    files: legacyPaths.map((legacyPath) => ({ path: legacyPath }))
+  });
+  insertMessageAttachments(params.database, params.sessionId, params.messageId, attachments);
+  params.database.prepare('UPDATE messages SET attachments = ? WHERE id = ?').run(JSON.stringify(attachments), params.messageId);
+  return attachments;
 }
 
 function getSessionAgentId(sessionId: string): string | null {
@@ -202,7 +346,7 @@ export function getSessionById(sessionId: string): Session | null {
   const sessionRow = db.prepare('SELECT * FROM sessions WHERE id = ?').get(sessionId) as { id: string; title: string; agent_id: string; created_at: number; updated_at: number } | undefined;
   if (!sessionRow) return null;
 
-  const messages = db.prepare('SELECT role, content, timestamp, name, tool_call_id, tool_calls, usage, model FROM messages WHERE session_id = ? ORDER BY timestamp ASC').all(sessionId) as { role: ChatMessage['role']; content: string; timestamp: number; name?: string; tool_call_id?: string; tool_calls?: string; usage?: string; model?: string }[];
+  const messages = db.prepare('SELECT role, content, timestamp, name, tool_call_id, tool_calls, attachments, usage, model FROM messages WHERE session_id = ? ORDER BY timestamp ASC').all(sessionId) as { role: ChatMessage['role']; content: string; timestamp: number; name?: string; tool_call_id?: string; tool_calls?: string; attachments?: string; usage?: string; model?: string }[];
 
   return {
     ...mapSessionRowToSummary(sessionRow),
@@ -210,6 +354,32 @@ export function getSessionById(sessionId: string): Session | null {
       .filter((message) => isVisibleSessionMessage(message))
       .map(mapMessageRowToChatMessage)
   };
+}
+
+export async function migrateLegacyAttachmentsForSession(sessionId: string, workspace: string) {
+  const db = getDb();
+  const rows = db.prepare(`
+    SELECT id, content, attachments
+    FROM messages
+    WHERE session_id = ? AND role = 'user'
+    ORDER BY timestamp ASC
+  `).all(sessionId) as Array<{ id: string; content: string; attachments?: string | null }>;
+
+  let migrated = 0;
+  for (const row of rows) {
+    if (row.attachments && row.attachments.trim() && row.attachments.trim() !== '[]') {
+      continue;
+    }
+    const attachments = await migrateLegacyMessageAttachments({
+      database: db,
+      sessionId,
+      messageId: row.id,
+      workspace,
+      content: row.content || ''
+    });
+    migrated += attachments.length;
+  }
+  return migrated;
 }
 
 export function setActiveSessionId(sessionId: string | null, agentId?: string) {
@@ -235,7 +405,7 @@ export function updateSessionMessages(sessionId: string, messages: ChatMessage[]
     db.prepare('UPDATE sessions SET updated_at = ? WHERE id = ?').run(now, sessionId);
 
     const existingRows = db.prepare(
-      'SELECT role, content, timestamp, name, tool_call_id, tool_calls, usage, model FROM messages WHERE session_id = ? ORDER BY timestamp ASC'
+      'SELECT role, content, timestamp, name, tool_call_id, tool_calls, attachments, usage, model FROM messages WHERE session_id = ? ORDER BY timestamp ASC'
     ).all(sessionId) as Array<{
       role: ChatMessage['role'];
       content: string;
@@ -243,17 +413,19 @@ export function updateSessionMessages(sessionId: string, messages: ChatMessage[]
       name?: string;
       tool_call_id?: string;
       tool_calls?: string;
+      attachments?: string;
       usage?: string;
       model?: string;
     }>;
     const existingMessages = existingRows.map(mapMessageRowToChatMessage);
     const sharedPrefixLength = getSharedMessagePrefixLength(existingMessages, visibleMessages);
-    const insert = db.prepare('INSERT INTO messages (id, session_id, role, content, timestamp, name, tool_call_id, tool_calls, usage, model) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+    const insert = db.prepare('INSERT INTO messages (id, session_id, role, content, timestamp, name, tool_call_id, tool_calls, attachments, usage, model) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
 
     if (sharedPrefixLength === existingMessages.length && visibleMessages.length >= existingMessages.length) {
       for (const msg of visibleMessages.slice(sharedPrefixLength)) {
+        const messageId = uuidv4();
         insert.run(
-          uuidv4(),
+          messageId,
           sessionId,
           msg.role,
           msg.content || '',
@@ -261,18 +433,22 @@ export function updateSessionMessages(sessionId: string, messages: ChatMessage[]
           msg.name || null,
           msg.tool_call_id || null,
           msg.tool_calls ? JSON.stringify(msg.tool_calls) : null,
+          msg.attachments ? JSON.stringify(msg.attachments) : null,
           msg.usage ? JSON.stringify(msg.usage) : null,
           msg.model || null
         );
+        insertMessageAttachments(db, sessionId, messageId, msg.attachments);
       }
       return;
     }
 
     db.prepare('DELETE FROM messages WHERE session_id = ?').run(sessionId);
+    db.prepare('DELETE FROM message_attachments WHERE session_id = ?').run(sessionId);
 
     for (const msg of visibleMessages) {
+      const messageId = uuidv4();
       insert.run(
-        uuidv4(), 
+        messageId, 
         sessionId, 
         msg.role, 
         msg.content || '',
@@ -280,9 +456,11 @@ export function updateSessionMessages(sessionId: string, messages: ChatMessage[]
         msg.name || null,
         msg.tool_call_id || null,
         msg.tool_calls ? JSON.stringify(msg.tool_calls) : null,
+        msg.attachments ? JSON.stringify(msg.attachments) : null,
         msg.usage ? JSON.stringify(msg.usage) : null,
         msg.model || null
       );
+      insertMessageAttachments(db, sessionId, messageId, msg.attachments);
     }
   });
 
@@ -296,10 +474,12 @@ export function updateSessionTitle(sessionId: string, title: string) {
 
 export function deleteSession(sessionId: string) {
   const db = getDb();
+  let attachmentWorkspace: string | null = null;
   const transaction = db.transaction(() => {
     const sessionRow = db.prepare('SELECT agent_id FROM sessions WHERE id = ?').get(sessionId) as { agent_id: string | null } | undefined;
     const sessionAgentId = normalizeAgentId(sessionRow?.agent_id);
     const stateKey = getActiveSessionStateKey(sessionAgentId);
+    attachmentWorkspace = getAgentWorkspaceById(sessionAgentId);
 
     // Cascade delete handles messages, but we need to check active session
     db.prepare('DELETE FROM sessions WHERE id = ?').run(sessionId);
@@ -316,6 +496,7 @@ export function deleteSession(sessionId: string) {
   });
   
   transaction();
+  cleanupSessionAttachments(attachmentWorkspace, [sessionId]);
 }
 
 export function deleteSessionsByAgent(agentId: string) {
@@ -324,6 +505,7 @@ export function deleteSessionsByAgent(agentId: string) {
   const stateKey = getActiveSessionStateKey(normalizedAgentId);
   const sessionRows = db.prepare('SELECT id FROM sessions WHERE agent_id = ?').all(normalizedAgentId) as Array<{ id: string }>;
   const sessionIds = sessionRows.map((row) => row.id);
+  const attachmentWorkspace = getAgentWorkspaceById(normalizedAgentId);
 
   const transaction = db.transaction(() => {
     const deleteMessages = db.prepare('DELETE FROM messages WHERE session_id = ?');
@@ -335,17 +517,20 @@ export function deleteSessionsByAgent(agentId: string) {
   });
 
   transaction();
+  cleanupSessionAttachments(attachmentWorkspace, sessionIds);
   return sessionIds;
 }
 
 export function clearAllSessions() {
   const db = getDb();
+  const attachmentWorkspaces = getAllAgentWorkspaces();
   const transaction = db.transaction(() => {
     db.prepare('DELETE FROM sessions').run(); // Cascade deletes messages
     db.prepare("DELETE FROM app_state WHERE key LIKE 'active_session_id:%'").run();
     db.prepare('DELETE FROM app_state WHERE key = ?').run('active_session_id');
   });
   transaction();
+  cleanupWorkspaceAttachments(attachmentWorkspaces);
 }
 
 export function getAgentStats(): AgentStats[] {

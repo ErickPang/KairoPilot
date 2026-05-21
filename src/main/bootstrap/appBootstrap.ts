@@ -4,6 +4,8 @@ import { skillsManager } from '../core/skills/manager';
 import { setupHandlers } from '../bridge/ipc/setupHandlers';
 import { ensureAppPaths, seedBuiltinSkills } from '../services/appRuntime';
 import { registerKairopilotProtocol } from '../services/protocolService';
+import { getAgents } from '../store/config';
+import { getWorkspaceAttachmentUploadsRoot } from '../store/attachments';
 import { createMainWindow } from '../services/windowService';
 
 export interface BootstrapContext {
@@ -42,7 +44,12 @@ export function bootstrapMainProcess(context: BootstrapContext) {
   const appPaths = ensureAppPaths();
 
   app.whenReady().then(async () => {
-    registerKairopilotProtocol(appPaths.allowedProtocolRoots);
+    registerKairopilotProtocol(() => [
+      ...appPaths.allowedProtocolRoots,
+      ...getAgents()
+        .map((agent) => agent.workspace ? getWorkspaceAttachmentUploadsRoot(agent.workspace) : '')
+        .filter((root) => root.length > 0)
+    ]);
 
     if (process.platform === 'darwin') {
       app.dock.setIcon(path.join(context.publicPath, 'icon.png'));

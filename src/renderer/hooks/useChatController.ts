@@ -1,5 +1,5 @@
 import { Dispatch, RefObject, SetStateAction, useCallback, useEffect, useRef, useState } from 'react';
-import { AppConfirmationOptions, Message, SessionContextState, SessionContextUpdate, SessionSummary } from '../types';
+import { AppConfirmationOptions, ChatAttachment, Message, SessionContextState, SessionContextUpdate, SessionSummary } from '../types';
 import { I18nContextValue } from '../components/layout/I18nContext';
 import { KAIRO_EVENT, KAIRO_INVOKE } from '../../shared/ipc';
 import type { RuntimeUpdateEvent } from '../types';
@@ -440,8 +440,8 @@ export function useChatController(options: UseChatControllerOptions) {
     }
   }, [clearChatError, loadRunState, loadSessions, reportChatError, sessionContext.activeSessionId, sessionContext.latestRun?.id, t]);
 
-  const handleSend = useCallback(async () => {
-    if (!input.trim()) {
+  const handleSend = useCallback(async (attachments: ChatAttachment[] = []) => {
+    if (!input.trim() && attachments.length === 0) {
       return;
     }
 
@@ -455,9 +455,9 @@ export function useChatController(options: UseChatControllerOptions) {
       return;
     }
 
-    const pendingInput = input.trim();
+    const pendingInput = input.trim() || 'Please review the attached file(s).';
 
-    const userMessage: Message = { role: 'user', content: pendingInput };
+    const userMessage: Message = { role: 'user', content: pendingInput, attachments };
 
     try {
       clearChatError();
@@ -484,7 +484,10 @@ export function useChatController(options: UseChatControllerOptions) {
       setInput('');
       setLoading(true);
 
-      const result = await window.kairo.invoke(KAIRO_INVOKE.agentChat, pendingInput);
+      const result = await window.kairo.invoke(KAIRO_INVOKE.agentChat, {
+        content: pendingInput,
+        attachments
+      }) as { success: boolean; error?: string };
       if (!result.success) {
         throw new Error(result.error || 'Failed to send message');
       }

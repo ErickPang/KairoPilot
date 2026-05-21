@@ -1,6 +1,7 @@
 import path from 'path';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
+import { createHash } from 'crypto';
 import { z } from 'zod';
 import { WebContents } from 'electron';
 import { AgentRuntime } from '../core/agent/runtime';
@@ -12,6 +13,7 @@ import { PromptBuilder } from '../core/llm/prompt';
 import { PermissionGuard } from '../core/security/permissions';
 import { SUPPORTED_SKILL_SCRIPT_EXTENSIONS } from '../core/security/policyConstants';
 import { ReadFileTool, WriteFileTool, ListDirectoryTool, DeleteFileTool } from '../core/tools/filesystem';
+import { createReadAttachmentTool } from '../core/tools/attachments';
 import { toolError, toolOk } from '../core/tools/result';
 import { createExecuteCommandTool } from '../core/tools/shell';
 import { SystemInfoTool } from '../core/tools/system';
@@ -107,6 +109,8 @@ interface ResolvedSkillLoad {
   skillId: string;
   skillPath: string;
   skillFiles: string[];
+  contentHash: string;
+  source: string;
   loadedAt: number;
   scopeRevision: string;
 }
@@ -219,6 +223,10 @@ function renderSkillTemplate(content: string, resolvedArguments: Record<string, 
   });
 }
 
+function hashSkillContent(content: string) {
+  return createHash('sha256').update(content).digest('hex');
+}
+
 async function resolveSkillLoad(
   skillName: string,
   agentId: string,
@@ -246,6 +254,8 @@ async function resolveSkillLoad(
     skillId: path.basename(skillPath),
     skillPath,
     skillFiles,
+    contentHash: skillRecord.contentHash,
+    source: skillRecord.scope,
     loadedAt: Date.now(),
     scopeRevision: skillsManager.getSkillScopeRevision(agentId)
   };
@@ -321,7 +331,13 @@ async function resolveInitialSkillsForRun(userInput: string, agentId: string): P
 
   const loadedSkills: LoadedSkillCapability[] = []
   for (const candidate of selectedCandidates) {
-    const resolvedSkill = await resolveSkillLoad(candidate.skill.id, agentId)
+    let resolvedSkill: ResolvedSkillLoad | null = null
+    try {
+      resolvedSkill = await resolveSkillLoad(candidate.skill.id, agentId)
+    } catch (error) {
+      console.warn(`[Skills] Failed to auto-load skill ${candidate.skill.id}:`, error)
+      continue
+    }
     if (!resolvedSkill) {
       continue
     }
@@ -329,6 +345,8 @@ async function resolveInitialSkillsForRun(userInput: string, agentId: string): P
     loadedSkills.push({
       skillName: resolvedSkill.metadata.name || resolvedSkill.skillId,
       skillId: resolvedSkill.skillId,
+      contentHash: resolvedSkill.contentHash,
+      source: resolvedSkill.source,
       aliases: [candidate.skill.id, candidate.skill.name, resolvedSkill.skillId]
         .filter((value, index, values): value is string => Boolean(value) && values.indexOf(value) === index),
       description: resolvedSkill.metadata.description,
@@ -341,6 +359,9 @@ async function resolveInitialSkillsForRun(userInput: string, agentId: string): P
       activationSource: 'automatic',
       allowedTools: resolvedSkill.metadata.allowedTools,
       resolvedArguments: resolvedSkill.resolvedArguments,
+      resolverScore: candidate.score,
+      resolverReasons: candidate.reasons,
+      explicitMention: candidate.explicitMention,
       loadedAt: resolvedSkill.loadedAt,
       scopeRevision: resolvedSkill.scopeRevision,
       resourcePaths: resolvedSkill.skillFiles,
@@ -372,6 +393,8 @@ async function reloadRetainedSkillsForSession(
     refreshedSkills.push({
       skillName: resolvedSkill.metadata.name || resolvedSkill.skillId,
       skillId: resolvedSkill.skillId,
+      contentHash: resolvedSkill.contentHash,
+      source: resolvedSkill.source,
       aliases: skill.aliases,
       description: resolvedSkill.metadata.description,
       whenToUse: resolvedSkill.metadata.whenToUse,
@@ -383,6 +406,9 @@ async function reloadRetainedSkillsForSession(
       activationSource: skill.activationSource === 'automatic' ? 'automatic' : 'manual',
       allowedTools: resolvedSkill.metadata.allowedTools,
       resolvedArguments: resolvedSkill.resolvedArguments,
+      resolverScore: skill.resolverScore,
+      resolverReasons: skill.resolverReasons ? [...skill.resolverReasons] : undefined,
+      explicitMention: skill.explicitMention,
       loadedAt: resolvedSkill.loadedAt,
       scopeRevision: resolvedSkill.scopeRevision,
       resourcePaths: resolvedSkill.skillFiles,
@@ -425,6 +451,8 @@ async function createLoadSkillTool(
       onSkillLoaded?.({
         skillName: resolvedSkill.metadata.name || resolvedSkill.skillId || name,
         skillId: resolvedSkill.skillId,
+        contentHash: resolvedSkill.contentHash,
+        source: resolvedSkill.source,
         aliases,
         description: resolvedSkill.metadata.description,
         whenToUse: resolvedSkill.metadata.whenToUse,
@@ -436,6 +464,8 @@ async function createLoadSkillTool(
         activationSource: 'manual',
         allowedTools: resolvedSkill.metadata.allowedTools,
         resolvedArguments: resolvedSkill.resolvedArguments,
+        resolverReasons: ['manual_load_skill'],
+        explicitMention: true,
         loadedAt: resolvedSkill.loadedAt,
         scopeRevision: resolvedSkill.scopeRevision,
         resourcePaths: resolvedSkill.skillFiles,
@@ -493,11 +523,18 @@ function createReadSkillResourceTool(agentId: string, getRuntime: () => AgentRun
         return toolError(`Skill resource not found: ${skill}/${normalizedResourcePath}`);
       }
       const activeSkill = runtime.getLoadedSkillCapability(skill);
+      const renderedContent = activeSkill?.resolvedArguments
+        ? renderSkillTemplate(resource.content, activeSkill.resolvedArguments)
+        : resource.content;
       return toolOk({
         ...resource,
-        content: activeSkill?.resolvedArguments
-          ? renderSkillTemplate(resource.content, activeSkill.resolvedArguments)
-          : resource.content
+        skill: activeSkill?.skillId || skill,
+        skillName: activeSkill?.skillName || skill,
+        skillContentHash: activeSkill?.contentHash,
+        relativePath: normalizedResourcePath,
+        sizeBytes: Buffer.byteLength(renderedContent, 'utf-8'),
+        contentHash: hashSkillContent(renderedContent),
+        content: renderedContent
       });
     }
   };
@@ -554,7 +591,10 @@ function createRunSkillScriptTool(
         });
 
         return toolOk({
+          skill,
+          relativeScriptPath: normalizedScriptPath,
           command,
+          args: scriptArgs,
           scriptPath: absoluteScriptPath,
           stdout: stdout.trim(),
           stderr: stderr.trim(),
@@ -652,6 +692,7 @@ async function initializeAgent(config: ResolvedAgentConfig, sender?: WebContents
   runtimeRef = runtime;
 
   runtime.registerTool(ReadFileTool as unknown as ToolDefinition);
+  runtime.registerTool(createReadAttachmentTool(() => runtime.getActiveSessionId()));
   runtime.registerTool(WriteFileTool as unknown as ToolDefinition);
   runtime.registerTool(ListDirectoryTool as unknown as ToolDefinition);
   runtime.registerTool(DeleteFileTool as unknown as ToolDefinition);

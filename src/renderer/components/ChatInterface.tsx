@@ -1,17 +1,18 @@
 import React, { useEffect, useLayoutEffect, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Message, ModelConfig } from '../types';
-import { IconUser, IconBot, IconTool, IconSend, IconCpu, IconChevronDown, IconCheck } from './Icons';
+import { ChatAttachment, Message, ModelConfig } from '../types';
+import { IconUser, IconBot, IconTool, IconSend, IconCpu, IconChevronDown, IconCheck, IconPlus, IconX } from './Icons';
 import { useTranslation } from '../hooks/useTranslation';
 import type { I18nContextValue } from './layout/I18nContext';
+import { KAIRO_INVOKE } from '../../shared/ipc';
 
 interface ChatInterfaceProps {
   messages: Message[];
   input: string;
   setInput: (input: string | ((prev: string) => string)) => void;
   loading: boolean;
-  handleSend: () => void;
+  handleSend: (attachments?: ChatAttachment[]) => void;
   handleClear: () => void;
   messagesEndRef: React.RefObject<HTMLDivElement>;
   models: ModelConfig[];
@@ -37,6 +38,43 @@ interface ChatMessagesPanelProps {
   t: I18nContextValue['t'];
   toRenderableMarkdown: (content?: string) => string;
 }
+
+function formatBytes(value: number) {
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  return `${(value / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function AttachmentList({ attachments, onRemove, compact = false }: { attachments?: ChatAttachment[]; onRemove?: (id: string) => void; compact?: boolean }) {
+  if (!attachments || attachments.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className={`attachment-list ${compact ? 'is-compact' : ''}`}>
+      {attachments.map((attachment) => (
+        <div key={attachment.id} className="attachment-chip" title={attachment.name}>
+          {attachment.kind === 'image' && attachment.previewUri ? (
+            <img className="attachment-thumb" src={attachment.previewUri} alt={attachment.name} />
+          ) : (
+            <span className="attachment-file-icon">{attachment.kind === 'text' ? 'TXT' : 'FILE'}</span>
+          )}
+          <span className="attachment-meta">
+            <span className="attachment-name" title={attachment.name}>{attachment.name}</span>
+            <span className="attachment-size">{formatBytes(attachment.size)}</span>
+          </span>
+          {onRemove && (
+            <button type="button" className="attachment-remove" onClick={() => onRemove(attachment.id)} aria-label="Remove attachment">
+              <IconX size={12} />
+            </button>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+type PendingAttachmentFile = { path: string; name?: string; mimeType?: string };
 
 const MARKDOWN_REMARK_PLUGINS = [remarkGfm];
 
@@ -87,6 +125,7 @@ const ChatMessagesPanel = React.memo(function ChatMessagesPanel({
                           {msg.role === 'tool' || msg.role === 'thinking' ? (
                             <div className="message-prewrap">
                               {msg.content}
+                              <AttachmentList attachments={msg.attachments} compact />
                               {msg.details && (
                                 <details className="message-details">
                                   <summary className="message-summary">{t('chat.details')}</summary>
@@ -120,6 +159,7 @@ const ChatMessagesPanel = React.memo(function ChatMessagesPanel({
               {msg.role === 'user' || msg.role === 'tool' ? (
                 <div className="message-prewrap">
                   {msg.content}
+                  <AttachmentList attachments={msg.attachments} compact />
                   {msg.details && (
                     <details className="message-details">
                       <summary className="message-summary">{t('chat.details')}</summary>
@@ -163,6 +203,10 @@ export const ChatInterface = React.memo(function ChatInterface({
   const [previewZoom, setPreviewZoom] = useState(1);
   const [isModelDropdownOpen, setIsModelDropdownOpen] = useState(false);
   const [activeModelIndex, setActiveModelIndex] = useState(-1);
+  const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
+  const [attachmentError, setAttachmentError] = useState<string | null>(null);
+  const [failedAttachmentFiles, setFailedAttachmentFiles] = useState<PendingAttachmentFile[]>([]);
+  const [isPreparingAttachments, setIsPreparingAttachments] = useState(false);
   const [modelDropdownPlacement, setModelDropdownPlacement] = useState<'top' | 'bottom'>('top');
   const dragCounter = React.useRef(0);
   const messagesContainerRef = React.useRef<HTMLDivElement>(null);
@@ -170,6 +214,75 @@ export const ChatInterface = React.memo(function ChatInterface({
   const modelTriggerRef = React.useRef<HTMLButtonElement>(null);
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
   const shouldAutoScrollRef = React.useRef(true);
+
+  const addAttachmentsFromPaths = React.useCallback(async (files: PendingAttachmentFile[]) => {
+    const filteredFiles = files.filter((file) => file.path);
+    if (filteredFiles.length === 0) {
+      return;
+    }
+
+    setIsPreparingAttachments(true);
+    setAttachmentError(null);
+    try {
+      const activeSession = await window.kairo.invoke(KAIRO_INVOKE.chatGetActiveSession) as { id?: string } | null;
+      const sessionId = activeSession?.id || ((await window.kairo.invoke(KAIRO_INVOKE.chatCreateSession, 'New Chat')) as { id?: string } | null)?.id;
+      if (!sessionId) {
+        throw new Error('Create or select a chat session before attaching files.');
+      }
+      const result = await window.kairo.invoke(KAIRO_INVOKE.chatPrepareAttachments, {
+        sessionId,
+        files: filteredFiles
+      }) as { success?: boolean; attachments?: ChatAttachment[]; error?: string };
+      if (!result?.success) {
+        throw new Error(result?.error || 'Failed to prepare attachments.');
+      }
+      setAttachments((prev) => [...prev, ...(result.attachments || [])]);
+      setFailedAttachmentFiles([]);
+    } catch (error) {
+      setFailedAttachmentFiles(filteredFiles);
+      setAttachmentError(error instanceof Error ? error.message : 'Failed to prepare attachments.');
+    } finally {
+      setIsPreparingAttachments(false);
+    }
+  }, []);
+
+  const retryFailedAttachments = React.useCallback(async () => {
+    await addAttachmentsFromPaths(failedAttachmentFiles);
+  }, [addAttachmentsFromPaths, failedAttachmentFiles]);
+
+  const handleAttachClick = React.useCallback(async () => {
+    try {
+      const selectedFiles = await window.kairo.invoke(KAIRO_INVOKE.systemSelectFiles);
+      if (Array.isArray(selectedFiles) && selectedFiles.length > 0) {
+        await addAttachmentsFromPaths(selectedFiles.map((filePath) => ({ path: String(filePath) })));
+      }
+    } catch (error) {
+      setAttachmentError(error instanceof Error ? error.message : 'Failed to select attachments.');
+    }
+  }, [addAttachmentsFromPaths]);
+
+  const submitMessage = React.useCallback(() => {
+    const nextAttachments = attachments;
+    if (!input.trim() && nextAttachments.length === 0) {
+      return;
+    }
+    handleSend(nextAttachments);
+    setAttachments([]);
+    setAttachmentError(null);
+  }, [attachments, handleSend, input]);
+
+  const removeAttachment = React.useCallback((id: string) => {
+    setAttachments((prev) => {
+      const removed = prev.find((attachment) => attachment.id === id);
+      if (removed) {
+        void window.kairo.invoke(KAIRO_INVOKE.chatDeleteAttachment, {
+          sessionId: removed.sessionId,
+          attachment: removed
+        });
+      }
+      return prev.filter((attachment) => attachment.id !== id);
+    });
+  }, []);
 
   const modelGroups = React.useMemo(
     () =>
@@ -517,23 +630,13 @@ export const ChatInterface = React.memo(function ChatInterface({
       return;
     }
 
-    const addedText = files
-      .map((file) => {
-        const path = (file as File & { path?: string }).path;
-        if (!path) {
-          return '';
-        }
-        if (file.type.startsWith('image/')) {
-          return `![${file.name}](kairopilot://${path})`;
-        }
-        return `Context file: ${path}`;
-      })
-      .filter(Boolean)
-      .join('\n');
-
-    if (addedText) {
-      setInput((prev) => (prev ? `${prev}\n${addedText}` : addedText));
-    }
+    void addAttachmentsFromPaths(files
+      .map((file) => ({
+        path: (file as File & { path?: string }).path || '',
+        name: file.name,
+        mimeType: file.type
+      }))
+      .filter((file) => file.path));
   };
 
   return (
@@ -574,7 +677,7 @@ export const ChatInterface = React.memo(function ChatInterface({
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
-                handleSend();
+                submitMessage();
               }
             }}
             placeholder={t('chat.placeholder')}
@@ -586,7 +689,28 @@ export const ChatInterface = React.memo(function ChatInterface({
               target.style.height = `${Math.min(target.scrollHeight, 200)}px`;
             }}
           />
+          <AttachmentList attachments={attachments} onRemove={removeAttachment} />
+          {attachmentError && (
+            <div className="attachment-error">
+              <span>{attachmentError}</span>
+              {failedAttachmentFiles.length > 0 && (
+                <button type="button" className="attachment-retry" onClick={retryFailedAttachments} disabled={isPreparingAttachments}>
+                  {t('chat.retryAttachment')}
+                </button>
+              )}
+            </div>
+          )}
           <div className="input-actions">
+            <button
+              type="button"
+              className="attach-btn"
+              onClick={handleAttachClick}
+              disabled={loading || isPreparingAttachments}
+              title={t('chat.attachFiles')}
+              aria-label={t('chat.attachFiles')}
+            >
+              <IconPlus size={16} />
+            </button>
             <div ref={modelDropdownRef} className="model-switcher">
               <button
                 ref={modelTriggerRef}
@@ -672,7 +796,7 @@ export const ChatInterface = React.memo(function ChatInterface({
                 </div>
               )}
             </div>
-            <button type="button" className="send-btn" onClick={handleSend} disabled={loading || !input.trim()} title={`${t('chat.send')} · Enter`}>
+            <button type="button" className="send-btn" onClick={submitMessage} disabled={loading || (!input.trim() && attachments.length === 0)} title={`${t('chat.send')} · Enter`}>
               <IconSend size={16} />
             </button>
           </div>

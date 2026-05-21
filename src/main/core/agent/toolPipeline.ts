@@ -275,7 +275,7 @@ export function checkPermission(
   const isWriteTool = toolName === 'write_file' || toolName === 'delete_file';
   const isCommandTool = toolName === 'execute_command' || toolName === 'run_skill_script';
 
-  if (executionProfile === 'chat_only') {
+  if (executionProfile === 'chat_only' && toolName !== 'read_attachment') {
     return {
       kind: 'deny',
       args,
@@ -405,6 +405,13 @@ export function checkPermission(
     }
   }
 
+  if (toolName === 'read_attachment') {
+    return {
+      kind: 'allow',
+      args
+    };
+  }
+
   if (permissionGuard.shouldRequireApproval(toolName, args)) {
     return {
       kind: 'approval',
@@ -424,6 +431,27 @@ export function getPolicyTags(toolName: string, args: Record<string, unknown>, p
   if (toolName === 'load_skill' || toolName === 'read_skill_resource' || toolName === 'run_skill_script') {
     tags.push('policy:skill_used');
     tags.push('tool_category:skill');
+    const skillName = typeof args.skill === 'string'
+      ? args.skill
+      : typeof args.name === 'string'
+        ? args.name
+        : '';
+    const normalizedSkillName = normalizePolicyTagValue(skillName);
+    if (normalizedSkillName) {
+      tags.push(`skill:${normalizedSkillName}`);
+    }
+    if (toolName === 'read_skill_resource' && typeof args.path === 'string') {
+      const resourcePath = normalizePolicyTagValue(args.path);
+      if (resourcePath) {
+        tags.push(`skill_resource:${resourcePath}`);
+      }
+    }
+    if (toolName === 'run_skill_script' && typeof args.scriptPath === 'string') {
+      const scriptPath = normalizePolicyTagValue(args.scriptPath);
+      if (scriptPath) {
+        tags.push(`skill_script:${scriptPath}`);
+      }
+    }
   }
 
   if (riskLevel) {
@@ -452,4 +480,13 @@ export function getPolicyTags(toolName: string, args: Record<string, unknown>, p
   }
 
   return tags;
+}
+
+function normalizePolicyTagValue(value: string) {
+  return value
+    .trim()
+    .replace(/\\/g, '/')
+    .replace(/[^a-zA-Z0-9._/-]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 120);
 }

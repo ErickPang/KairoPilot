@@ -3,7 +3,7 @@ import {
   updateRun,
   updateRunStep
 } from '../../store/chat';
-import type { RuntimeUpdateEvent } from '../../../shared/contracts';
+import type { ChatAttachment, RuntimeUpdateEvent } from '../../../shared/contracts';
 import type { ContextAssemblyMetadata } from '../context/assembler';
 import type { ChatMessage, LLMProvider, ToolDefinition } from '../llm/types';
 import type { LoadedSkillCapability } from './capabilityOrchestrator';
@@ -31,6 +31,7 @@ export interface RuntimeChatOptions {
   agentId?: string;
   runId?: string;
   maxIterations?: number;
+  attachments?: ChatAttachment[];
 }
 
 export interface RuntimeModelContext {

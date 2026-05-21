@@ -254,6 +254,50 @@ export interface AgentRuntimeInvokeResult {
   approvalId?: string
 }
 
+export type ChatAttachmentKind = 'image' | 'text' | 'file'
+
+export interface ChatAttachment {
+  id: string
+  sessionId: string
+  name: string
+  mimeType: string
+  size: number
+  kind: ChatAttachmentKind
+  originalPath?: string
+  storedPath: string
+  contentHash: string
+  previewUri?: string
+  extractedText?: string
+  createdAt: number
+}
+
+export interface PrepareAttachmentInput {
+  path: string
+  name?: string
+  mimeType?: string
+}
+
+export interface PrepareAttachmentsRequest {
+  sessionId: string
+  files: PrepareAttachmentInput[]
+}
+
+export interface PrepareAttachmentsResult {
+  success: boolean
+  attachments?: ChatAttachment[]
+  error?: string
+}
+
+export interface DeleteAttachmentRequest {
+  sessionId: string
+  attachment: ChatAttachment
+}
+
+export interface AgentChatRequest {
+  content: string
+  attachments?: ChatAttachment[]
+}
+
 export type RuntimeUpdateEvent =
   | {
       type: 'thinking'

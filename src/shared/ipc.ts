@@ -21,6 +21,8 @@ export const KAIRO_INVOKE = {
   chatGetSessionRuns: 'chat:getSessionRuns',
   chatGetTokenUsageDetails: 'chat:getTokenUsageDetails',
   chatListSessions: 'chat:listSessions',
+  chatDeleteAttachment: 'chat:deleteAttachment',
+  chatPrepareAttachments: 'chat:prepareAttachments',
   chatSetActiveSession: 'chat:setActiveSession',
   chatUpdateSessionTitle: 'chat:updateSessionTitle',
   configCreateAgentDraft: 'config:create-agent-draft',
@@ -59,6 +61,7 @@ export const KAIRO_INVOKE = {
   skillsImport: 'skills:import',
   skillsUninstall: 'skills:uninstall',
   systemSelectFile: 'system:selectFile',
+  systemSelectFiles: 'system:selectFiles',
   systemSelectDirectory: 'system:selectDirectory',
   systemStats: 'system:stats'
 } as const

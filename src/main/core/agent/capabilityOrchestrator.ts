@@ -6,6 +6,8 @@ import { matchesAllowedToolName, resolveAllowedToolToRegisteredNames } from '../
 export interface LoadedSkillCapability {
   skillName: string;
   skillId?: string;
+  contentHash?: string;
+  source?: string;
   aliases?: string[];
   allowedTools: string[];
   loadedAt: number;
@@ -19,6 +21,9 @@ export interface LoadedSkillCapability {
   executionMode?: SkillExecutionMode;
   activationSource?: 'manual' | 'automatic';
   resolvedArguments?: Record<string, string>;
+  resolverScore?: number;
+  resolverReasons?: string[];
+  explicitMention?: boolean;
   resourcePaths?: string[];
   scriptPaths?: string[];
 }
@@ -123,6 +128,8 @@ export class CapabilityOrchestrator {
     this.loadedSkills.set(capabilityKey, {
       skillName: normalizedSkillName,
       skillId,
+      contentHash: typeof capability.contentHash === 'string' ? capability.contentHash : undefined,
+      source: typeof capability.source === 'string' ? capability.source : undefined,
       aliases,
       allowedTools: Array.from(new Set(capability.allowedTools.map((toolName) => toolName.trim()).filter(Boolean))),
       loadedAt: capability.loadedAt ?? loadedAt,
@@ -136,6 +143,9 @@ export class CapabilityOrchestrator {
       executionMode: capability.executionMode === 'fork' ? 'fork' : 'inline',
       activationSource: capability.activationSource === 'automatic' ? 'automatic' : 'manual',
       resolvedArguments: capability.resolvedArguments ? { ...capability.resolvedArguments } : undefined,
+      resolverScore: typeof capability.resolverScore === 'number' ? capability.resolverScore : undefined,
+      resolverReasons: Array.isArray(capability.resolverReasons) ? [...capability.resolverReasons] : undefined,
+      explicitMention: typeof capability.explicitMention === 'boolean' ? capability.explicitMention : undefined,
       resourcePaths,
       scriptPaths
     });
@@ -145,6 +155,8 @@ export class CapabilityOrchestrator {
     return Array.from(this.loadedSkills.values()).map((skill) => ({
       skillName: skill.skillName,
       skillId: skill.skillId,
+      contentHash: skill.contentHash,
+      source: skill.source,
       aliases: skill.aliases ? [...skill.aliases] : undefined,
       allowedTools: [...skill.allowedTools],
       loadedAt: skill.loadedAt,
@@ -158,6 +170,9 @@ export class CapabilityOrchestrator {
       executionMode: skill.executionMode,
       activationSource: skill.activationSource,
       resolvedArguments: skill.resolvedArguments ? { ...skill.resolvedArguments } : undefined,
+      resolverScore: skill.resolverScore,
+      resolverReasons: skill.resolverReasons ? [...skill.resolverReasons] : undefined,
+      explicitMention: skill.explicitMention,
       resourcePaths: skill.resourcePaths ? [...skill.resourcePaths] : undefined,
       scriptPaths: skill.scriptPaths ? [...skill.scriptPaths] : undefined
     }));

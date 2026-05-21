@@ -206,7 +206,7 @@ export class PermissionGuard {
       return 'medium';
     }
 
-    if (toolName === 'read_file' || toolName === 'list_directory' || toolName === 'system_info') {
+    if (toolName === 'read_file' || toolName === 'read_attachment' || toolName === 'list_directory' || toolName === 'system_info') {
       return this.getDataClass() === 'sensitive' ? 'medium' : 'low';
     }
 

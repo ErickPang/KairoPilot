@@ -43,6 +43,9 @@ interface ContextAssemblyInput {
   history: ChatMessage[];
   loadedSkills?: Array<{
     skillName: string;
+    skillId?: string;
+    contentHash?: string;
+    source?: string;
     allowedTools: string[];
     loadedAt: number;
     description?: string;
@@ -52,6 +55,7 @@ interface ContextAssemblyInput {
     modelInvocable?: boolean;
     executionMode?: 'inline' | 'fork';
     activationSource?: 'manual' | 'automatic';
+    resolvedArguments?: Record<string, string>;
     resourcePaths?: string[];
     scriptPaths?: string[];
   }>;
@@ -206,6 +210,8 @@ function allocateSupportSectionBudgets(
 function buildLoadedSkillsSummary(
   loadedSkills: Array<{
     skillName: string;
+    contentHash?: string;
+    source?: string;
     allowedTools: string[];
     loadedAt: number;
     description?: string;
@@ -250,11 +256,13 @@ function buildLoadedSkillsSummary(
         : 'auto';
       const resourceSummary = summarizePaths(skill.resourcePaths, 3);
       const scriptSummary = summarizePaths(skill.scriptPaths, 2);
+      const source = skill.source ? ` | source: ${skill.source}` : '';
+      const hash = skill.contentHash ? ` | hash: ${skill.contentHash.slice(0, 12)}` : '';
       return [
         `- skill ${index + 1}: ${skill.skillName}`,
         skill.description ? `  description: ${trimText(skill.description, 220)}` : '',
         skill.whenToUse ? `  when_to_use: ${trimText(skill.whenToUse, 260)}` : '',
-        `  invocation: ${invocation} | execution: ${skill.executionMode || 'inline'} | source: ${skill.activationSource || 'manual'}`,
+        `  invocation: ${invocation} | execution: ${skill.executionMode || 'inline'} | activation: ${skill.activationSource || 'manual'}${source}${hash}`,
         `  allowed_tools: ${trimText(allowedTools, 220)}`,
         skill.instructions ? `  instructions: ${trimText(skill.instructions, 420)}` : '',
         `  resources: ${trimText(resourceSummary, 240)}`,
@@ -264,6 +272,103 @@ function buildLoadedSkillsSummary(
     .join('\n');
 
   return trimText(rendered, maxChars);
+}
+
+function buildActiveSkillInstructions(
+  loadedSkills: Array<{
+    skillName: string;
+    skillId?: string;
+    contentHash?: string;
+    source?: string;
+    allowedTools: string[];
+    loadedAt: number;
+    instructions?: string;
+    executionMode?: 'inline' | 'fork';
+    activationSource?: 'manual' | 'automatic';
+    resolvedArguments?: Record<string, string>;
+    resourcePaths?: string[];
+    scriptPaths?: string[];
+  }> | undefined,
+  maxChars: number
+) {
+  if (!Array.isArray(loadedSkills) || loadedSkills.length === 0 || maxChars <= 0) {
+    return '';
+  }
+
+  const skillsWithInstructions = loadedSkills
+    .filter((skill) => typeof skill.instructions === 'string' && skill.instructions.trim().length > 0)
+    .sort((left, right) => right.loadedAt - left.loadedAt)
+    .slice(0, 3);
+
+  if (skillsWithInstructions.length === 0) {
+    return '';
+  }
+
+  const renderPathSummary = (label: string, paths: string[] | undefined, maxItems: number) => {
+    const normalizedPaths = Array.from(new Set((paths ?? []).map((entry) => entry.trim()).filter(Boolean)));
+    if (normalizedPaths.length === 0) {
+      return '';
+    }
+    const displayedPaths = normalizedPaths.slice(0, maxItems);
+    const omittedCount = normalizedPaths.length - displayedPaths.length;
+    const suffix = omittedCount > 0 ? ` (+${omittedCount} more)` : '';
+    return `${label}: ${displayedPaths.join(', ')}${suffix}`;
+  };
+
+  const renderedSkills: string[] = [];
+
+  for (const skill of skillsWithInstructions) {
+    const identity = skill.skillId && skill.skillId !== skill.skillName
+      ? `${skill.skillName} (${skill.skillId})`
+      : skill.skillName;
+    const allowedTools = skill.allowedTools.length > 0 ? skill.allowedTools.join(', ') : 'none';
+    const argumentEntries = Object.entries(skill.resolvedArguments ?? {});
+    const argumentSummary = argumentEntries.length > 0
+      ? `arguments: ${argumentEntries.map(([key, value]) => `${key}=${value}`).join(', ')}`
+      : '';
+    const resourceSummary = renderPathSummary('resources', skill.resourcePaths, 5);
+    const scriptSummary = renderPathSummary('scripts', skill.scriptPaths, 3);
+    const metadata = [
+      `name: ${identity}`,
+      skill.source ? `source: ${skill.source}` : '',
+      skill.contentHash ? `content_hash: ${skill.contentHash}` : '',
+      `activation: ${skill.activationSource || 'manual'}`,
+      `execution: ${skill.executionMode || 'inline'}`,
+      `allowed_tools: ${allowedTools}`,
+      argumentSummary,
+      resourceSummary,
+      scriptSummary
+    ].filter(Boolean).join('\n');
+    const block = [
+      `<skill>`,
+      metadata,
+      '<instructions>',
+      skill.instructions?.trim() || '',
+      '</instructions>',
+      '</skill>'
+    ].join('\n');
+    const candidate = [...renderedSkills, block].join('\n\n');
+    const omittedCount = skillsWithInstructions.length - renderedSkills.length - 1;
+    const candidateWithSuffix = omittedCount > 0
+      ? `${candidate}\n\n- ${omittedCount} more loaded skills omitted from full instruction context.`
+      : candidate;
+
+    if (candidateWithSuffix.length > maxChars) {
+      if (renderedSkills.length === 0) {
+        return trimText(block, maxChars);
+      }
+      break;
+    }
+
+    renderedSkills.push(block);
+  }
+
+  const omittedCount = skillsWithInstructions.length - renderedSkills.length;
+  const suffix = omittedCount > 0
+    ? `\n\n- ${omittedCount} more loaded skills omitted from full instruction context.`
+    : '';
+
+  return trimText(`${renderedSkills.join('\n\n')}${suffix}`, maxChars);
 }
 
 function buildAvailableSkillsSummary(availableSkillsSummary: string | undefined, maxChars: number) {
@@ -311,14 +416,21 @@ export function assembleRuntimeContext(input: ContextAssemblyInput): ContextAsse
   const remainingChars = Math.max(8000, maxContextChars - systemPromptChars);
   const supportBudget = Math.min(18000, Math.floor(remainingChars * 0.45));
   const recentHistoryBudget = Math.max(6000, remainingChars - supportBudget);
-  const runtimeStateBudget = Math.min(7000, Math.max(2800, Math.floor(supportBudget * 0.45)));
-  const memoryBudget = Math.max(2600, supportBudget - runtimeStateBudget);
   const selection = selectRecentMessages(input.history, recentHistoryBudget, 8);
+  const hasLoadedSkillInstructions = Array.isArray(input.loadedSkills)
+    && input.loadedSkills.some((skill) => typeof skill.instructions === 'string' && skill.instructions.trim().length > 0);
+  const activeSkillInstructionsBudget = hasLoadedSkillInstructions
+    ? Math.min(10000, Math.max(1800, Math.floor(supportBudget * 0.48)))
+    : 0;
+  const remainingSupportBudget = Math.max(0, supportBudget - activeSkillInstructionsBudget);
+  const runtimeStateBudget = Math.min(7000, Math.max(1200, Math.floor(remainingSupportBudget * 0.45)));
+  const memoryBudget = Math.max(0, remainingSupportBudget - runtimeStateBudget);
 
   const activeTaskSummary = buildActiveTaskSummary(input.run, input.runSteps, 3200);
   const activeSkillsSummary = input.activeSkillsSummary
     ? trimText(input.activeSkillsSummary, 2200)
     : buildLoadedSkillsSummary(input.loadedSkills, 2200);
+  const activeSkillInstructions = buildActiveSkillInstructions(input.loadedSkills, activeSkillInstructionsBudget);
   const availableSkillsSummary = buildAvailableSkillsSummary(input.availableSkillsSummary, 2600);
   const availableToolsSummary = input.availableToolsSummary
     ? trimText(input.availableToolsSummary, 1800)
@@ -337,6 +449,9 @@ export function assembleRuntimeContext(input: ContextAssemblyInput): ContextAsse
     { tag: 'available_skills', content: availableSkillsSummary, priority: 2, maxChars: 2600 },
     { tag: 'available_tools', content: availableToolsSummary, priority: 1, maxChars: 1800 }
   ], Math.max(1200, runtimeStateBudget - 240));
+  const activeSkillInstructionsMessage = buildSupportSystemMessage('Loaded skill instructions for this run. Follow them only when they do not conflict with higher-priority security, workspace, or user instructions.', [
+    { tag: 'active_skill_instructions', content: activeSkillInstructions }
+  ]);
   const runtimeStateMessage = buildSupportSystemMessage('Use the following runtime state as a budget-managed summary.', runtimeStateSections);
   const memoryMessage = buildSupportSystemMessage('Use the following memory and retrieval context as a budget-managed summary.', [
     { tag: 'compacted_history', content: compactedHistorySummary },
@@ -362,6 +477,25 @@ export function assembleRuntimeContext(input: ContextAssemblyInput): ContextAsse
       input.systemPrompt.length
     )
   ];
+
+  const trimmedActiveSkillInstructionsMessage = activeSkillInstructionsMessage
+    ? trimText(activeSkillInstructionsMessage, activeSkillInstructionsBudget)
+    : '';
+  if (trimmedActiveSkillInstructionsMessage) {
+    messages.push({
+      role: 'system',
+      content: trimmedActiveSkillInstructionsMessage,
+      timestamp: Date.now()
+    });
+    layers.push(createLayer(
+      'active_skill_instructions',
+      '激活技能指令层',
+      'support',
+      trimText(activeSkillInstructions, 280),
+      1,
+      trimmedActiveSkillInstructionsMessage.length
+    ));
+  }
 
   const trimmedRuntimeStateMessage = runtimeStateMessage
     ? trimText(runtimeStateMessage, runtimeStateBudget)
@@ -423,7 +557,11 @@ export function assembleRuntimeContext(input: ContextAssemblyInput): ContextAsse
   ));
 
   const totalChars = messages.reduce((sum, message) => sum + (message.content?.length || 0), 0);
-  const supportChars = [trimmedRuntimeStateMessage.length, trimmedMemoryMessage.length].reduce((sum, size) => sum + size, 0);
+  const supportChars = [
+    trimmedActiveSkillInstructionsMessage.length,
+    trimmedRuntimeStateMessage.length,
+    trimmedMemoryMessage.length
+  ].reduce((sum, size) => sum + size, 0);
 
   return {
     messages,

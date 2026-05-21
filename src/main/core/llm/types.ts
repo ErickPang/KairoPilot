@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { ProviderType } from '../../../shared/contracts';
+import type { ChatAttachment, ProviderType } from '../../../shared/contracts';
 
 export interface LLMUsage {
   prompt_tokens: number;
@@ -17,6 +17,7 @@ export interface ChatMessage {
   timestamp?: number;
   model?: string;
   usage?: LLMUsage;
+  attachments?: ChatAttachment[];
 }
 
 export interface LLMConfig {

@@ -7,6 +7,7 @@ export function mapMessageRowToChatMessage(message: {
   name?: string;
   tool_call_id?: string;
   tool_calls?: string;
+  attachments?: string;
   usage?: string;
   model?: string;
 }): ChatMessage {
@@ -29,6 +30,17 @@ export function mapMessageRowToChatMessage(message: {
       chatMessage.tool_calls = JSON.parse(message.tool_calls);
     } catch (error) {
       console.warn('[DB] Failed to parse tool_calls:', error);
+    }
+  }
+
+  if (message.attachments) {
+    try {
+      const parsed = JSON.parse(message.attachments);
+      if (Array.isArray(parsed)) {
+        chatMessage.attachments = parsed;
+      }
+    } catch (error) {
+      console.warn('[DB] Failed to parse attachments:', error);
     }
   }
 

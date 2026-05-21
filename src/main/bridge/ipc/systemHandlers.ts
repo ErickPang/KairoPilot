@@ -72,6 +72,29 @@ function registerSystemHandlers() {
     return filePaths[0];
   });
 
+  ipcMain.handle(KAIRO_INVOKE.systemSelectFiles, async (_, args) => {
+    const payload = typeof args === 'object' && args ? args : {};
+    const filters = Array.isArray(payload.filters)
+      ? payload.filters.filter((item: unknown): item is { name: string; extensions: string[] } => {
+          if (typeof item !== 'object' || !item) {
+            return false;
+          }
+          const candidate = item as { name?: unknown; extensions?: unknown };
+          return typeof candidate.name === 'string'
+            && Array.isArray(candidate.extensions)
+            && candidate.extensions.every((extension: unknown) => typeof extension === 'string');
+        })
+      : undefined;
+    const { canceled, filePaths } = await dialog.showOpenDialog({
+      properties: ['openFile', 'multiSelections'],
+      filters
+    });
+    if (canceled) {
+      return [];
+    }
+    return filePaths;
+  });
+
   ipcMain.handle(KAIRO_INVOKE.ollamaCheck, async (_, baseUrl: string) => {
     try {
       const url = baseUrl || 'http://localhost:11434';

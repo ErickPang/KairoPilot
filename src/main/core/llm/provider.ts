@@ -1,5 +1,6 @@
 import { OpenAI } from 'openai';
 import { z } from 'zod';
+import fs from 'node:fs/promises';
 import type { ProviderCapabilitySnapshot, ProviderType } from '../../../shared/contracts';
 import type {
   ChatMessage,
@@ -55,7 +56,7 @@ function createOpenAICompatibleCapabilities(): LLMProviderCapabilities {
     toolCalling: true,
     modelListing: true,
     structuredOutput: false,
-    multimodalInput: false,
+    multimodalInput: true,
     protocol: 'openai-compatible'
   };
 }
@@ -79,7 +80,7 @@ function createAnthropicCapabilities(): LLMProviderCapabilities {
     toolCalling: true,
     modelListing: true,
     structuredOutput: false,
-    multimodalInput: false,
+    multimodalInput: true,
     protocol: 'native'
   };
 }
@@ -244,9 +245,10 @@ export class OpenAICompatibleProvider implements LLMProvider {
 
   async complete(request: LLMRequest): Promise<LLMResponse> {
     try {
+      const messages = await this.formatMessages(request.messages);
       const response = await this.client.chat.completions.create({
         model: this.model,
-        messages: this.formatMessages(request.messages) as unknown as Parameters<typeof this.client.chat.completions.create>[0]['messages'],
+        messages: messages as unknown as Parameters<typeof this.client.chat.completions.create>[0]['messages'],
         tools: this.formatTools(request.tools),
         temperature: request.generationConfig?.temperature,
         top_p: request.generationConfig?.topP,
@@ -295,9 +297,10 @@ export class OpenAICompatibleProvider implements LLMProvider {
 
   async stream(request: LLMRequest, onEvent: (event: LLMStreamEvent) => void): Promise<void> {
     try {
+      const messages = await this.formatMessages(request.messages);
       const response = await this.client.chat.completions.create({
         model: this.model,
-        messages: this.formatMessages(request.messages) as unknown as Parameters<typeof this.client.chat.completions.create>[0]['messages'],
+        messages: messages as unknown as Parameters<typeof this.client.chat.completions.create>[0]['messages'],
         tools: this.formatTools(request.tools),
         temperature: request.generationConfig?.temperature,
         top_p: request.generationConfig?.topP,
@@ -368,13 +371,15 @@ export class OpenAICompatibleProvider implements LLMProvider {
     }
   }
 
-  private formatMessages(messages: ChatMessage[]) {
+  private async formatMessages(messages: ChatMessage[]) {
     let lastToolCalls: Record<string, unknown>[] = [];
+    const formattedMessages: Array<ChatMessage | Record<string, unknown>> = [];
 
-    return messages.map((message) => {
+    for (const message of messages) {
       if (message.role === 'assistant' && message.tool_calls) {
         lastToolCalls = message.tool_calls;
-        return message;
+        formattedMessages.push(message);
+        continue;
       }
 
       if (message.role === 'tool') {
@@ -390,15 +395,43 @@ export class OpenAICompatibleProvider implements LLMProvider {
               : undefined;
         }
 
-        return {
+        formattedMessages.push({
           role: message.role,
           content: message.content,
           tool_call_id: callId || `call_${Math.random().toString(36).slice(2)}`
-        };
+        });
+        continue;
       }
 
-      return message;
-    });
+      if (message.role === 'user' && Array.isArray(message.attachments) && message.attachments.some((attachment) => attachment.kind === 'image')) {
+        const content: Array<Record<string, unknown>> = [];
+        if (message.content) {
+          content.push({ type: 'text', text: message.content });
+        }
+        for (const attachment of message.attachments.filter((item) => item.kind === 'image')) {
+          try {
+            const data = (await fs.readFile(attachment.storedPath)).toString('base64');
+            content.push({
+              type: 'image_url',
+              image_url: {
+                url: `data:${attachment.mimeType || 'image/png'};base64,${data}`
+              }
+            });
+          } catch {
+            continue;
+          }
+        }
+        formattedMessages.push({
+          role: 'user',
+          content
+        });
+        continue;
+      }
+
+      formattedMessages.push(message);
+    }
+
+    return formattedMessages;
   }
 
   private formatTools(tools?: ToolDefinition[]) {
@@ -459,7 +492,7 @@ export class AnthropicNativeProvider implements LLMProvider {
   async complete(request: LLMRequest): Promise<LLMResponse> {
     const response = await this.requestJson<AnthropicMessageResponse>('/messages', {
       method: 'POST',
-      body: JSON.stringify(this.buildAnthropicRequestBody(request))
+      body: JSON.stringify(await this.buildAnthropicRequestBody(request))
     });
 
     const normalizedMessage = this.normalizeAnthropicResponseMessage(response);
@@ -486,7 +519,7 @@ export class AnthropicNativeProvider implements LLMProvider {
       method: 'POST',
       headers: this.createHeaders(),
       body: JSON.stringify({
-        ...this.buildAnthropicRequestBody(request),
+        ...(await this.buildAnthropicRequestBody(request)),
         stream: true
       })
     });
@@ -612,13 +645,13 @@ export class AnthropicNativeProvider implements LLMProvider {
     }
   }
 
-  private buildAnthropicRequestBody(request: LLMRequest) {
+  private async buildAnthropicRequestBody(request: LLMRequest) {
     const systemPrompt = request.messages
       .filter((message) => message.role === 'system' && message.content.trim().length > 0)
       .map((message) => message.content.trim())
       .join('\n\n');
 
-    const messages = this.normalizeAnthropicMessages(request.messages);
+    const messages = await this.normalizeAnthropicMessages(request.messages);
     return {
       model: this.model,
       max_tokens: request.generationConfig?.maxOutputTokens ?? 4096,
@@ -631,7 +664,7 @@ export class AnthropicNativeProvider implements LLMProvider {
     };
   }
 
-  private normalizeAnthropicMessages(messages: ChatMessage[]): AnthropicRequestMessage[] {
+  private async normalizeAnthropicMessages(messages: ChatMessage[]): Promise<AnthropicRequestMessage[]> {
     const normalizedMessages: AnthropicRequestMessage[] = [];
     let lastAssistantToolCalls: Record<string, unknown>[] = [];
 
@@ -684,6 +717,35 @@ export class AnthropicNativeProvider implements LLMProvider {
             tool_use_id: message.tool_call_id || (typeof fallbackToolUse?.id === 'string' ? fallbackToolUse.id : `tool_${Math.random().toString(36).slice(2)}`),
             content: message.content
           }]
+        });
+        continue;
+      }
+
+      if (Array.isArray(message.attachments) && message.attachments.some((attachment) => attachment.kind === 'image')) {
+        const contentBlocks: Array<Record<string, unknown>> = [];
+        for (const attachment of message.attachments.filter((item) => item.kind === 'image')) {
+          try {
+            contentBlocks.push({
+              type: 'image',
+              source: {
+                type: 'base64',
+                media_type: attachment.mimeType || 'image/png',
+                data: (await fs.readFile(attachment.storedPath)).toString('base64')
+              }
+            });
+          } catch {
+            continue;
+          }
+        }
+        if (message.content) {
+          contentBlocks.push({
+            type: 'text',
+            text: message.content
+          });
+        }
+        normalizedMessages.push({
+          role: 'user',
+          content: contentBlocks.length > 0 ? contentBlocks : message.content
         });
         continue;
       }

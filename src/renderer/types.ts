@@ -1,3 +1,5 @@
+import type { ChatAttachment } from '../shared/contracts';
+
 export type {
   AgentConfig,
   AgentStats,
@@ -32,9 +34,12 @@ export type {
   WebSearchConfig
 } from '../shared/contracts';
 
+export type { ChatAttachment } from '../shared/contracts';
+
 export interface Message {
   role: 'user' | 'assistant' | 'system' | 'tool' | 'thinking';
   content?: string;
+  attachments?: ChatAttachment[];
   details?: Record<string, unknown>;
   tool_calls?: Record<string, unknown>[];
   tool_call_id?: string;
