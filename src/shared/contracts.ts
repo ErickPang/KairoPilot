@@ -9,6 +9,8 @@ export interface ProviderConfig {
   provider: ProviderType
   baseUrl: string
   apiKey: string
+  apiKeyEncrypted?: string
+  apiKeyStored?: boolean
   model: ModelOption[]
 }
 
@@ -18,6 +20,7 @@ export interface ModelConfig {
   provider: ProviderType
   baseUrl: string
   apiKey: string
+  apiKeyStored?: boolean
   model: string
   availableModels?: ModelOption[]
 }
@@ -301,6 +304,14 @@ export interface AgentChatRequest {
 export type RuntimeUpdateEvent =
   | {
       type: 'thinking'
+      content: string
+      runId: string
+      stepId?: string
+      status?: 'running'
+    }
+  | {
+      type: 'assistant-delta'
+      delta: string
       content: string
       runId: string
       stepId?: string
@@ -735,13 +746,48 @@ export const DEFAULT_SKILL_MARKETPLACE_PRESETS: SkillMarketplacePreset[] = [
   }
 ]
 
-export interface PluginRegistryEntry {
+export interface PluginToolManifest {
+  name: string
+  description: string
+}
+
+export interface PluginPermissionRequirement {
+  fileSystem?: {
+    read?: boolean
+    write?: boolean
+    paths?: string[]
+  }
+  network?: {
+    enabled?: boolean
+    domains?: string[]
+  }
+  shell?: {
+    enabled?: boolean
+    commands?: string[]
+  }
+}
+
+export interface PluginCapabilityDeclaration {
+  id: string
+  label: string
+  description?: string
+  riskLevel: RiskLevel
+  requiredPermissions?: PluginPermissionRequirement
+}
+
+export interface PluginManifest {
   id: string
   name: string
   description: string
   version: string
   author: string
   icon?: string
+  tools: PluginToolManifest[]
+  capabilities: PluginCapabilityDeclaration[]
+  riskLevel: RiskLevel
+}
+
+export interface PluginRegistryEntry extends PluginManifest {
   installedAt: number
   filePath: string
   scope: string
@@ -760,6 +806,8 @@ export interface WebSearchSearxngConfig extends WebSearchProviderToggleConfig {
 export interface WebSearchTavilyConfig extends WebSearchProviderToggleConfig {
   baseUrl: string
   apiKey: string
+  apiKeyEncrypted?: string
+  apiKeyStored?: boolean
 }
 
 export interface WebSearchConfig {
@@ -802,6 +850,7 @@ export interface KairoPilotConfig {
 export interface LegacyAgentConfig {
   provider: ProviderType
   apiKey: string
+  apiKeyStored?: boolean
   baseUrl: string
   model: string
   workspace: string
@@ -818,10 +867,8 @@ export interface LegacyAgentConfig {
 
 export const DEFAULT_SHELL_COMMANDS = [
   'ls',
-  'cd',
   'pwd',
   'mkdir',
-  'rm',
   'touch',
   'cat',
   'grep',
@@ -830,7 +877,11 @@ export const DEFAULT_SHELL_COMMANDS = [
   'node',
   'git',
   'python',
-  'python3',
+  'python3'
+] as const
+
+export const PRIVILEGED_SHELL_COMMANDS = [
+  'rm',
   'open',
   'curl'
 ] as const

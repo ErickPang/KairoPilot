@@ -9,35 +9,52 @@ import { SkillSummary } from '../../../shared/contracts';
 import {
   createRuntimeUpdateForwarder,
   mapRuntimeExecutionResult,
-  mapUnknownError,
+  mapRuntimeHandlerFailure,
   persistAgentSessionHistory,
   resolveRuntimeForApproval,
   resolveRuntimeForRun,
   runActiveAgentChat
 } from './agentHandlerService';
+import { AgentInitInputSchema, parseIpcInput } from './configValidation';
+import {
+  SkillImportInputSchema,
+  SkillMarketplaceQueryInputSchema,
+  SkillPrepareInstallInputSchema,
+  SkillRequestInputSchema,
+  SkillsRegistryInputSchema,
+  SkillUninstallInputSchema
+} from './skillPluginValidation';
+import {
+  ApprovalResponseInputSchema,
+  AuditLogQueryInputSchema,
+  RetryStepInputSchema,
+  RunIdInputSchema
+} from './chatSystemValidation';
+import { ipcFailure, ipcSuccess } from './ipcResult';
 
 function registerAgentHandlers() {
   ipcMain.handle(KAIRO_INVOKE.agentInit, async (event, configOrId) => {
     try {
-      const config = await resolveAgentConfig(configOrId);
+      const payload = parseIpcInput(AgentInitInputSchema, configOrId, 'agent init request');
+      const config = await resolveAgentConfig(payload);
 
-      if (typeof configOrId === 'string') {
-        setActiveAgentId(configOrId);
-        ensureActiveSession(configOrId);
+      if (typeof payload === 'string') {
+        setActiveAgentId(payload);
+        ensureActiveSession(payload);
       }
 
       await ensureAgentRuntime(config, event.sender);
-      return { success: true };
+      return ipcSuccess();
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
       if (!message.startsWith('Model not found for agent model:')) {
         console.error('Failed to init agent:', error);
       }
-      return { success: false, error: message };
+      return ipcFailure(message);
     }
   });
 
-  ipcMain.handle(KAIRO_INVOKE.agentConfirmResponse, async (event, { id, approved }) => {
+  ipcMain.handle(KAIRO_INVOKE.agentConfirmResponse, async (event, input) => {
     let agent:
       | {
           getSessionHistory: () => import('../../core/llm/types').ChatMessage[];
@@ -46,13 +63,14 @@ function registerAgentHandlers() {
       | undefined;
     let sessionId: string | undefined;
     try {
-      const resolved = await resolveRuntimeForApproval(id, event.sender);
+      const payload = parseIpcInput(ApprovalResponseInputSchema, input, 'approval response');
+      const resolved = await resolveRuntimeForApproval(payload.id, event.sender);
       agent = resolved.agent;
       sessionId = resolved.approval?.sessionId;
-      const result = await agent.resumeRun(id, approved, createRuntimeUpdateForwarder(event.sender, sessionId));
+      const result = await agent.resumeRun(payload.id, payload.approved, createRuntimeUpdateForwarder(event.sender, sessionId));
       return mapRuntimeExecutionResult(result);
     } catch (error) {
-      return { success: false, error: mapUnknownError(error) };
+      return mapRuntimeHandlerFailure(error);
     } finally {
       if (agent && sessionId) {
         persistAgentSessionHistory(agent, sessionId);
@@ -62,12 +80,12 @@ function registerAgentHandlers() {
 
   ipcMain.handle(KAIRO_INVOKE.agentPauseRun, async (event, args) => {
     try {
-      const payload = typeof args === 'object' && args ? args : { runId: '' };
-      const { agent } = await resolveRuntimeForRun(typeof payload.runId === 'string' ? payload.runId : '', event.sender);
-      await agent.pauseRun(typeof payload.runId === 'string' ? payload.runId : '');
-      return { success: true };
+      const payload = parseIpcInput(RunIdInputSchema, args, 'run pause request');
+      const { agent } = await resolveRuntimeForRun(payload.runId, event.sender);
+      await agent.pauseRun(payload.runId);
+      return ipcSuccess();
     } catch (error) {
-      return { success: false, error: mapUnknownError(error) };
+      return mapRuntimeHandlerFailure(error);
     }
   });
 
@@ -80,15 +98,15 @@ function registerAgentHandlers() {
       | undefined;
     let sessionId: string | undefined;
     try {
-      const payload = typeof args === 'object' && args ? args : { runId: '' };
-      const runId = typeof payload.runId === 'string' ? payload.runId : '';
+      const payload = parseIpcInput(RunIdInputSchema, args, 'run cancel request');
+      const runId = payload.runId;
       const resolved = await resolveRuntimeForRun(runId, event.sender);
       agent = resolved.agent;
       sessionId = resolved.run.sessionId;
       await agent.cancelRun(runId);
-      return { success: true };
+      return ipcSuccess();
     } catch (error) {
-      return { success: false, error: mapUnknownError(error) };
+      return mapRuntimeHandlerFailure(error);
     } finally {
       if (agent && sessionId) {
         persistAgentSessionHistory(agent, sessionId);
@@ -105,15 +123,15 @@ function registerAgentHandlers() {
       | undefined;
     let sessionId: string | undefined;
     try {
-      const payload = typeof args === 'object' && args ? args : { runId: '' };
-      const runId = typeof payload.runId === 'string' ? payload.runId : '';
+      const payload = parseIpcInput(RunIdInputSchema, args, 'run resume request');
+      const runId = payload.runId;
       const resolved = await resolveRuntimeForRun(runId, event.sender);
       agent = resolved.agent;
       sessionId = resolved.run.sessionId;
       const result = await agent.resumeInterruptedRun(runId, createRuntimeUpdateForwarder(event.sender, sessionId));
       return mapRuntimeExecutionResult(result);
     } catch (error) {
-      return { success: false, error: mapUnknownError(error) };
+      return mapRuntimeHandlerFailure(error);
     } finally {
       if (agent && sessionId) {
         persistAgentSessionHistory(agent, sessionId);
@@ -130,16 +148,15 @@ function registerAgentHandlers() {
       | undefined;
     let sessionId: string | undefined;
     try {
-      const payload = typeof args === 'object' && args ? args : { runId: '', stepId: '' };
-      const runId = typeof payload.runId === 'string' ? payload.runId : '';
-      const stepId = typeof payload.stepId === 'string' ? payload.stepId : '';
+      const payload = parseIpcInput(RetryStepInputSchema, args, 'run retry request');
+      const { runId, stepId } = payload;
       const resolved = await resolveRuntimeForRun(runId, event.sender);
       agent = resolved.agent;
       sessionId = resolved.run.sessionId;
       const result = await agent.retryStep(runId, stepId, createRuntimeUpdateForwarder(event.sender, sessionId));
       return mapRuntimeExecutionResult(result);
     } catch (error) {
-      return { success: false, error: mapUnknownError(error) };
+      return mapRuntimeHandlerFailure(error);
     } finally {
       if (agent && sessionId) {
         persistAgentSessionHistory(agent, sessionId);
@@ -148,10 +165,8 @@ function registerAgentHandlers() {
   });
 
   ipcMain.handle(KAIRO_INVOKE.auditGet, async (_, query) => {
-    if (typeof query === 'number') {
-      return queryAuditLogs({ page: 1, pageSize: query });
-    }
-    return queryAuditLogs(typeof query === 'object' && query ? query : {});
+    const payload = parseIpcInput(AuditLogQueryInputSchema, query, 'audit log query');
+    return queryAuditLogs(payload);
   });
 
   ipcMain.handle(KAIRO_INVOKE.skillsGetAll, async () => {
@@ -173,9 +188,11 @@ function registerAgentHandlers() {
   });
 
   ipcMain.handle(KAIRO_INVOKE.skillsGetStoreByQuery, async (_, query) => {
-    const payload = typeof query === 'object' && query ? query : { kind: 'curated' };
+    const payload = typeof query === 'undefined'
+      ? { kind: 'curated' as const }
+      : parseIpcInput(SkillMarketplaceQueryInputSchema, query, 'skill marketplace query');
     return skillsManager.getStoreSkills(
-      payload.kind === 'registry' && typeof payload.url === 'string'
+      payload.kind === 'registry'
         ? { kind: 'registry', url: payload.url }
         : { kind: 'curated' }
     );
@@ -187,23 +204,21 @@ function registerAgentHandlers() {
 
   ipcMain.handle(KAIRO_INVOKE.skillsSetRegistry, async (_, entries) => {
     try {
-      const payload = Array.isArray(entries) ? entries : [];
+      const payload = parseIpcInput(SkillsRegistryInputSchema, entries, 'skills registry');
       await skillsManager.saveRegistrySources(payload);
-      return { success: true };
+      return ipcSuccess();
     } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+      return ipcFailure(error);
     }
   });
 
   ipcMain.handle(KAIRO_INVOKE.skillsPrepareInstall, async (_, args) => {
     try {
-      const payload = typeof args === 'object' && args ? args : { id: '', scope: 'public' };
+      const payload = parseIpcInput(SkillPrepareInstallInputSchema, args, 'skill install review request');
       return await skillsManager.prepareStoreSkillInstall({
-        id: typeof payload.id === 'string' ? payload.id : '',
-        scope: typeof payload.scope === 'string' ? payload.scope : 'public',
-        marketplaceQuery: typeof payload.marketplaceQuery === 'object' && payload.marketplaceQuery
-          ? payload.marketplaceQuery
-          : undefined
+        id: payload.id,
+        scope: payload.scope,
+        marketplaceQuery: payload.marketplaceQuery
       });
     } catch (error) {
       throw new Error(error instanceof Error ? error.message : 'Unknown error');
@@ -212,51 +227,51 @@ function registerAgentHandlers() {
 
   ipcMain.handle(KAIRO_INVOKE.skillsInstall, async (_, args) => {
     try {
-      const payload = typeof args === 'object' && args ? args : { requestId: '' };
+      const payload = parseIpcInput(SkillRequestInputSchema, args, 'skill install request');
       await skillsManager.installStoreSkill({
-        requestId: typeof payload.requestId === 'string' ? payload.requestId : ''
+        requestId: payload.requestId
       });
-      return { success: true };
+      return ipcSuccess();
     } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+      return ipcFailure(error);
     }
   });
 
   ipcMain.handle(KAIRO_INVOKE.skillsDiscardInstall, async (_, args) => {
     try {
-      const payload = typeof args === 'object' && args ? args : { requestId: '' };
+      const payload = parseIpcInput(SkillRequestInputSchema, args, 'skill discard request');
       await skillsManager.discardPreparedInstall({
-        requestId: typeof payload.requestId === 'string' ? payload.requestId : ''
+        requestId: payload.requestId
       });
-      return { success: true };
+      return ipcSuccess();
     } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+      return ipcFailure(error);
     }
   });
 
   ipcMain.handle(KAIRO_INVOKE.skillsImport, async (_, args) => {
     try {
-      const payload = typeof args === 'object' && args ? args : { sourceFile: '', scope: 'public' };
+      const payload = parseIpcInput(SkillImportInputSchema, args, 'skill import request');
       await skillsManager.importSkill({
-        sourceFile: typeof payload.sourceFile === 'string' ? payload.sourceFile : '',
-        scope: typeof payload.scope === 'string' ? payload.scope : 'public'
+        sourceFile: payload.sourceFile,
+        scope: payload.scope
       });
-      return { success: true };
+      return ipcSuccess();
     } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+      return ipcFailure(error);
     }
   });
 
   ipcMain.handle(KAIRO_INVOKE.skillsUninstall, async (_, args) => {
     try {
-      const payload = typeof args === 'object' && args ? args : { id: '', scope: 'public' };
+      const payload = parseIpcInput(SkillUninstallInputSchema, args, 'skill uninstall request');
       await skillsManager.uninstallSkill({
-        id: typeof payload.id === 'string' ? payload.id : '',
-        scope: typeof payload.scope === 'string' ? payload.scope : 'public'
+        id: payload.id,
+        scope: payload.scope
       });
-      return { success: true };
+      return ipcSuccess();
     } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+      return ipcFailure(error);
     }
   });
 
@@ -265,7 +280,7 @@ function registerAgentHandlers() {
       return await runActiveAgentChat(message, event.sender);
     } catch (error) {
       console.error('Agent chat error:', error);
-      return { success: false, error: mapUnknownError(error) };
+      return mapRuntimeHandlerFailure(error);
     }
   });
 }

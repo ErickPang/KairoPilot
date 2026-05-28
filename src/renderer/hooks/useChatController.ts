@@ -3,10 +3,11 @@ import { AppConfirmationOptions, ChatAttachment, Message, SessionContextState, S
 import { I18nContextValue } from '../components/layout/I18nContext';
 import { KAIRO_EVENT, KAIRO_INVOKE } from '../../shared/ipc';
 import type { RuntimeUpdateEvent } from '../types';
-import { createErrorNotice, getErrorMessage, logRendererError } from './errorUtils';
+import { createErrorNotice, getErrorMessage, logRendererError, withActionableErrorHint } from './errorUtils';
 import {
   appendRuntimeMessage,
   applyRuntimeUpdateToSessionContext,
+  upsertAssistantStreamMessage,
   upsertThinkingMessage
 } from './runtimeEventUtils';
 
@@ -51,9 +52,9 @@ export function useChatController(options: UseChatControllerOptions) {
 
   const reportChatError = useCallback((message: string, source: string) => {
     updateSessionContext({
-      appNotice: createErrorNotice(message, source)
+      appNotice: createErrorNotice(withActionableErrorHint(message, t), source)
     });
-  }, [updateSessionContext]);
+  }, [t, updateSessionContext]);
 
   const clearChatError = useCallback(() => {
     updateSessionContext({ appNotice: null });
@@ -105,6 +106,12 @@ export function useChatController(options: UseChatControllerOptions) {
         return;
       }
 
+      if (update.type === 'assistant-delta') {
+        setMessages((prev) => upsertAssistantStreamMessage(prev, update.content || ''));
+        scheduleRunStateRefresh();
+        return;
+      }
+
       if (update.type === 'tool-call') {
         setMessages((prev) => appendRuntimeMessage(prev, {
           role: 'tool',
@@ -136,10 +143,7 @@ export function useChatController(options: UseChatControllerOptions) {
       }
 
       if (update.type === 'assistant-response') {
-        setMessages((prev) => appendRuntimeMessage(prev, {
-          role: 'assistant',
-          content: String(update.content || '')
-        }));
+        setMessages((prev) => upsertAssistantStreamMessage(prev, String(update.content || '')));
         setLoading(false);
         scheduleRunStateRefresh('immediate');
         return;
@@ -349,7 +353,7 @@ export function useChatController(options: UseChatControllerOptions) {
       logRendererError('Failed to clear history', error);
       reportChatError(t('app.error.clearHistory', { error: getErrorMessage(error) }), 'clear_history');
     }
-  }, [clearChatError, loadSessions, reportChatError, setMessages, t, updateSessionContext]);
+  }, [clearChatError, loadSessions, reportChatError, requestConfirmation, setMessages, t, updateSessionContext]);
 
   const handlePauseRun = useCallback(async () => {
     const runId = sessionContext.latestRun?.id;

@@ -80,23 +80,31 @@ KairoPilot 当前聚焦以下四个方向：
 - `load_skill` 支持参数化技能正文渲染，`read_skill_resource` 会复用当前技能参数上下文
 - `run_skill_script` 仅允许访问已加载技能的 `scripts/` 目录，并复用 Shell 白名单、超时与缓冲区策略
 - 插件加载前执行 manifest 校验
-- 插件工具执行具备超时控制与基础边界保护
+- 插件 capability 可声明 `requiredPermissions`，运行时会与当前 Agent 权限交叉校验，超出权限的插件工具不会注册
+- 插件工具执行具备超时、代码体积、返回值序列化与输出大小限制，并要求 manifest 已声明的工具名称匹配
 - 当前已具备插件管理与技能展示能力，插件商店接口仍在持续建设中
 
 ### 安全、审计与监控
 
+- 支持 Provider 流式输出，运行中可增量更新助手消息，并与暂停 / 取消链路保持一致
 - 文件系统访问采用允许路径白名单策略
-- Shell 执行采用命令白名单策略
-- 网络访问支持域名白名单
+- Shell 执行采用命令白名单策略，推荐配置不会默认放开删除、系统打开或网络请求类命令
+- 网络访问支持域名白名单；空白名单默认阻断外部访问，需显式填写域名、URL 前缀或 `*`
+- 工具注册时会绑定权限 guard，工具即使绕过常规编排入口直接执行，也会重新校验文件、Shell 与网络边界
 - 高风险操作支持 Human-in-the-Loop 确认弹窗
 - 保护性禁止直接访问敏感目录与核心 Prompt 文件
 - 预加载层 IPC 使用显式白名单，减少渲染进程暴露面
 - 审计日志记录工具调用、参数、结果、错误与策略标签
+- 插件安装与卸载会写入审计日志，便于追踪扩展能力变更
+- 插件 manifest 声明工具、能力与风险等级，安装前可查看能力边界
+- 插件声明权限超出 Agent 当前策略时会被阻断，并记录 `plugin_permission_denied` 审计事件
+- 模型 Provider 与 Tavily 的 API Key 使用 Electron `safeStorage` 加密落盘，旧明文配置会在下次保存时迁移；配置备份与渲染进程配置接口只保留“已保存密钥”状态，不回传明文密钥
 - 系统监控面板支持查看：
   - Agent 活动统计
   - 提示 / 补全 / 总 Tokens
   - Agent 维度 Tokens 消耗明细
   - CPU / 内存 / 运行时长等系统资源
+- 配置保存采用临时文件原子替换，并保留最近配置备份以降低写入中断风险
 
 ## 适合的使用场景
 
@@ -131,6 +139,20 @@ npm run dev
 npm run lint
 ```
 
+### 产品冒烟检查
+
+```bash
+npm run smoke
+```
+
+### 发布前验证
+
+```bash
+npm run verify
+```
+
+CI 会在 push、pull request 与手动触发时运行同一条验证命令，并覆盖 Node.js 18 与 20。
+
 ### 构建应用
 
 ```bash
@@ -140,6 +162,7 @@ npm run build
 说明：
 
 - 开发环境基于 Vite + Electron
+- 发布前建议先运行 `npm run verify`，统一覆盖 ESLint、TypeScript、Vitest 与产品冒烟检查
 - 生产构建会先执行 TypeScript 编译与前后端打包，再调用 electron-builder 产出安装包
 - 当前构建配置已覆盖 macOS、Windows 与 Linux 打包目标
 
@@ -243,12 +266,15 @@ KairoPilot 目前已经具备一个可用的桌面 Agent MVP，并持续向“�
 - 审计日志与系统监控
 - Agent 级 Tokens 消耗明细
 - 插件 / 技能的完整加载、召回与执行框架
+- 流式输出、插件权限联动、插件沙箱基础边界与本地产品 smoke 检查
+
+更细的产品级优化进度见 [KairoPilot 优化进度记录](docs/optimization-progress.md)。
 
 后续将继续完善：
 
 - Prompt 文件系统进一步建模
 - 插件商店与技能生态
-- 更细粒度的权限管理
+- 插件签名、可信来源校验与更强隔离
 - 更清晰的主进程服务化结构
 - 更多桌面端自动化能力
 

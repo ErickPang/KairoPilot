@@ -1,7 +1,7 @@
 import React, { useEffect, useLayoutEffect, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { ChatAttachment, Message, ModelConfig } from '../types';
+import { AgentConfig, ChatAttachment, Message, ModelConfig } from '../types';
 import { IconUser, IconBot, IconTool, IconSend, IconCpu, IconChevronDown, IconCheck, IconPlus, IconX } from './Icons';
 import { useTranslation } from '../hooks/useTranslation';
 import type { I18nContextValue } from './layout/I18nContext';
@@ -16,6 +16,7 @@ interface ChatInterfaceProps {
   handleClear: () => void;
   messagesEndRef: React.RefObject<HTMLDivElement>;
   models: ModelConfig[];
+  activeAgent: AgentConfig | null;
   activeModelId: string | null;
   activeAgentName: string;
   focusInputToken: number;
@@ -35,9 +36,16 @@ interface ChatMessagesPanelProps {
   markdownComponents: React.ComponentProps<typeof ReactMarkdown>['components'];
   messages: Message[];
   messagesEndRef: React.RefObject<HTMLDivElement>;
+  setupSteps: SetupStep[];
   t: I18nContextValue['t'];
   toRenderableMarkdown: (content?: string) => string;
 }
+
+type SetupStep = {
+  key: string;
+  label: string;
+  state: 'done' | 'pending';
+};
 
 function formatBytes(value: number) {
   if (value < 1024) return `${value} B`;
@@ -86,6 +94,7 @@ const ChatMessagesPanel = React.memo(function ChatMessagesPanel({
   markdownComponents,
   messages,
   messagesEndRef,
+  setupSteps,
   t,
   toRenderableMarkdown
 }: ChatMessagesPanelProps) {
@@ -96,6 +105,17 @@ const ChatMessagesPanel = React.memo(function ChatMessagesPanel({
           <span className="chat-empty-kicker">{t('chat.welcome')}</span>
           <h2 className="chat-empty-title">{activeAgentName}</h2>
           <p className="chat-empty-description">{t('chat.welcomeDesc')}</p>
+          <div className="chat-setup-checklist" aria-label={t('chat.setupTitle')}>
+            <div className="chat-setup-title">{t('chat.setupTitle')}</div>
+            {setupSteps.map((step) => (
+              <div key={step.key} className={`chat-setup-step ${step.state === 'done' ? 'is-done' : 'is-pending'}`}>
+                <span className="chat-setup-step-dot">
+                  {step.state === 'done' ? <IconCheck size={12} /> : null}
+                </span>
+                <span>{step.label}</span>
+              </div>
+            ))}
+          </div>
           <div className="chat-empty-notes">
             <div className="chat-empty-note">
               <span className="chat-empty-note-label">{t('chat.currentTask')}</span>
@@ -192,6 +212,7 @@ export const ChatInterface = React.memo(function ChatInterface({
   handleSend,
   messagesEndRef,
   models,
+  activeAgent,
   activeModelId,
   activeAgentName,
   focusInputToken,
@@ -214,6 +235,37 @@ export const ChatInterface = React.memo(function ChatInterface({
   const modelTriggerRef = React.useRef<HTMLButtonElement>(null);
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
   const shouldAutoScrollRef = React.useRef(true);
+  const activeProfile = activeAgent?.permissions.executionProfile;
+  const setupSteps = React.useMemo<SetupStep[]>(() => {
+    const hasModel = models.length > 0 && Boolean(activeModelId);
+    const hasAgent = Boolean(activeAgent);
+    const profileLabel = activeProfile
+      ? t(`config.executionProfile.${activeProfile}` as Parameters<typeof t>[0])
+      : t('chat.setupPermissionPending');
+
+    return [
+      {
+        key: 'model',
+        state: hasModel ? 'done' : 'pending',
+        label: hasModel ? t('chat.setupModelReady') : t('chat.setupModelPending')
+      },
+      {
+        key: 'agent',
+        state: hasAgent ? 'done' : 'pending',
+        label: hasAgent ? t('chat.setupAgentReady', { name: activeAgentName || t('chat.agentName') }) : t('chat.setupAgentPending')
+      },
+      {
+        key: 'permission',
+        state: hasAgent ? 'done' : 'pending',
+        label: hasAgent ? t('chat.setupPermissionReady', { profile: profileLabel }) : t('chat.setupPermissionPending')
+      },
+      {
+        key: 'start',
+        state: hasModel && hasAgent ? 'done' : 'pending',
+        label: t('chat.setupStart')
+      }
+    ];
+  }, [activeAgent, activeAgentName, activeModelId, activeProfile, models.length, t]);
 
   const addAttachmentsFromPaths = React.useCallback(async (files: PendingAttachmentFile[]) => {
     const filteredFiles = files.filter((file) => file.path);
@@ -663,6 +715,7 @@ export const ChatInterface = React.memo(function ChatInterface({
         markdownComponents={markdownComponents}
         messages={messages}
         messagesEndRef={messagesEndRef}
+        setupSteps={setupSteps}
         t={t}
         toRenderableMarkdown={toRenderableMarkdown}
       />

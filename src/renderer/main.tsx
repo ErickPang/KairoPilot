@@ -79,8 +79,28 @@ if (!window.kairo) {
       if (channel === KAIRO_INVOKE.skillsInstall) return { success: true };
       if (channel === KAIRO_INVOKE.skillsUninstall) return { success: true };
       if (channel === KAIRO_INVOKE.pluginsGetStore) return [
-        { id: 'kairo-weather-plugin', name: 'Weather Forecaster', description: 'Mock Weather', version: '1.0', author: 'Kairo', icon: '🌤️' },
-        { id: 'kairo-crypto-plugin', name: 'Crypto Tracker', description: 'Mock Crypto', version: '1.0', author: 'Kairo', icon: '₿' }
+        {
+          id: 'kairo-weather-plugin',
+          name: 'Weather Forecaster',
+          description: 'Mock Weather',
+          version: '1.0',
+          author: 'Kairo',
+          icon: '🌤️',
+          riskLevel: 'low',
+          tools: [{ name: 'get_weather_forecast', description: 'Mock weather tool' }],
+          capabilities: [{ id: 'demo-data', label: 'Demo data', riskLevel: 'low' }]
+        },
+        {
+          id: 'kairo-crypto-plugin',
+          name: 'Crypto Tracker',
+          description: 'Mock Crypto',
+          version: '1.0',
+          author: 'Kairo',
+          icon: '₿',
+          riskLevel: 'low',
+          tools: [{ name: 'get_crypto_snapshot', description: 'Mock crypto tool' }],
+          capabilities: [{ id: 'demo-data', label: 'Demo data', riskLevel: 'low' }]
+        }
       ];
       if (channel === KAIRO_INVOKE.pluginsGetInstalled) return [];
       if (channel === KAIRO_INVOKE.pluginsInstall) return { success: true };

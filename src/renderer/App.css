@@ -1652,6 +1652,28 @@ textarea.form-control {
   margin-top: 0.75rem;
 }
 
+.permission-profile-note {
+  display: grid;
+  gap: 0.28rem;
+  margin-top: 0.75rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  background: var(--surface-muted);
+}
+
+.permission-profile-note-title {
+  color: var(--foreground);
+  font-size: 0.84rem;
+  font-weight: 800;
+}
+
+.permission-profile-note-body {
+  color: var(--muted-fg);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
 .permission-card-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
@@ -3330,6 +3352,52 @@ body {
   color: var(--muted-fg);
   font-size: 1rem;
   line-height: 1.7;
+}
+
+.chat-setup-checklist {
+  display: grid;
+  gap: 0.55rem;
+  margin-top: 1.35rem;
+  padding: 1rem;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  background: var(--surface-panel);
+}
+
+.chat-setup-title {
+  color: var(--foreground);
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.chat-setup-step {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  color: var(--muted-fg);
+  font-size: 0.9rem;
+}
+
+.chat-setup-step.is-done {
+  color: var(--foreground);
+}
+
+.chat-setup-step-dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--success);
+  background: var(--surface-muted);
+  flex-shrink: 0;
+}
+
+.chat-setup-step.is-done .chat-setup-step-dot {
+  border-color: var(--state-success-border);
+  background: var(--state-success-bg);
 }
 
 .chat-empty-notes {

@@ -185,22 +185,42 @@
 .audit-log-timestamp,
 .audit-log-reference,
 .audit-summary-label,
-.audit-step-item-label {
+.audit-step-item-label,
+.audit-step-item-meta,
+.audit-step-detail-chip {
   color: var(--muted-fg);
   font-size: 0.82rem;
 }
 
 .audit-run-record-subtitle,
-.audit-run-record-meta {
+.audit-run-record-meta,
+.audit-step-item-meta {
   line-height: 1.45;
   word-break: break-word;
 }
 
 .audit-run-record-meta,
-.audit-log-reference {
+.audit-log-reference,
+.audit-step-item-meta,
+.audit-step-detail-meta-row {
   display: flex;
   gap: 0.75rem;
   flex-wrap: wrap;
+  align-items: center;
+}
+
+.audit-step-detail-meta-row {
+  margin-top: 0.55rem;
+}
+
+.audit-step-detail-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.75rem;
+  padding: 0.35rem 0.65rem;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: var(--surface-muted);
 }
 
 .audit-detail-layout {

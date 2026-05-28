@@ -118,7 +118,7 @@ function getProviderStatus(config: WebSearchConfig, providerId: ProviderId): Pro
     if (!config.providers.tavily.baseUrl.trim()) {
       return 'needs_base_url';
     }
-    if (!config.providers.tavily.apiKey.trim()) {
+    if (!config.providers.tavily.apiKey.trim() && !config.providers.tavily.apiKeyStored) {
       return 'needs_api_key';
     }
     return 'ready';
@@ -165,7 +165,7 @@ function createEnabledProviderSnapshot(current: ProviderSnapshot, previous: Prov
       ...snapshot.tavily,
       enabled: snapshot.tavily.enabled
         && snapshot.tavily.baseUrl.trim().length > 0
-        && snapshot.tavily.apiKey.trim().length > 0
+        && (snapshot.tavily.apiKey.trim().length > 0 || Boolean(snapshot.tavily.apiKeyStored))
     },
     bing: {
       enabled: true
@@ -240,6 +240,19 @@ export const GeneralSettings = memo(function GeneralSettings() {
       setSaveStatus('idle');
       const result = await window.kairo.invoke(KAIRO_INVOKE.configSaveWebSearch, webSearchConfig);
       setSaveStatus(result.success ? 'success' : 'error');
+      if (result.success && webSearchConfig.providers.tavily.apiKey.trim()) {
+        setWebSearchConfig((current) => ({
+          ...current,
+          providers: {
+            ...current.providers,
+            tavily: {
+              ...current.providers.tavily,
+              apiKey: '',
+              apiKeyStored: true
+            }
+          }
+        }));
+      }
     } catch (error) {
       console.error('Failed to save web search settings:', error);
       setSaveStatus('error');
@@ -551,7 +564,7 @@ export const GeneralSettings = memo(function GeneralSettings() {
                             type="password"
                             value={webSearchConfig.providers.tavily.apiKey}
                             disabled={loading || saving}
-                            placeholder="tvly-..."
+                            placeholder={webSearchConfig.providers.tavily.apiKeyStored ? '••••••••' : 'tvly-...'}
                             onChange={(event) => {
                               const apiKey = event.target.value;
                               setWebSearchConfig((current) => ({

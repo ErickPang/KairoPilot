@@ -1,4 +1,5 @@
 import type { KairoPilotConfig, WebSearchConfig, WebSearchProviderId } from '../../shared/contracts';
+import { prepareConfigSecretForStorage, resolveConfigSecret } from './configSecrets';
 
 type PartialWebSearchConfig = Omit<Partial<WebSearchConfig>, 'providers'> & {
   providers?: Partial<WebSearchConfig['providers']>;
@@ -62,6 +63,10 @@ export function createDefaultWebSearchConfig(): WebSearchConfig {
 
 export function normalizeWebSearchConfig(config: PartialWebSearchConfig | undefined): WebSearchConfig {
   const defaults = createDefaultWebSearchConfig();
+  const tavilyApiKey = resolveConfigSecret(
+    normalizeBaseUrl(config?.providers?.tavily?.apiKey),
+    config?.providers?.tavily?.apiKeyEncrypted
+  );
 
   return {
     timeoutMs: typeof config?.timeoutMs === 'number' && Number.isFinite(config.timeoutMs)
@@ -76,7 +81,9 @@ export function normalizeWebSearchConfig(config: PartialWebSearchConfig | undefi
       tavily: {
         enabled: normalizeEnabledFlag(config?.providers?.tavily?.enabled, defaults.providers.tavily.enabled),
         baseUrl: normalizeBaseUrl(config?.providers?.tavily?.baseUrl) || defaults.providers.tavily.baseUrl,
-        apiKey: normalizeBaseUrl(config?.providers?.tavily?.apiKey)
+        apiKey: tavilyApiKey,
+        apiKeyEncrypted: config?.providers?.tavily?.apiKeyEncrypted,
+        apiKeyStored: Boolean(tavilyApiKey)
       },
       bing: {
         enabled: normalizeEnabledFlag(config?.providers?.bing?.enabled, defaults.providers.bing.enabled)
@@ -86,6 +93,40 @@ export function normalizeWebSearchConfig(config: PartialWebSearchConfig | undefi
       },
       baidu: {
         enabled: normalizeEnabledFlag(config?.providers?.baidu?.enabled, defaults.providers.baidu.enabled)
+      }
+    }
+  };
+}
+
+export function redactWebSearchConfig(webSearch: WebSearchConfig): WebSearchConfig {
+  return {
+    ...webSearch,
+    providers: {
+      ...webSearch.providers,
+      tavily: {
+        ...webSearch.providers.tavily,
+        apiKey: '',
+        apiKeyEncrypted: undefined,
+        apiKeyStored: Boolean(webSearch.providers.tavily.apiKey)
+      }
+    }
+  };
+}
+
+export function sanitizeWebSearchForStorage(webSearch: WebSearchConfig): WebSearchConfig {
+  const tavilySecret = prepareConfigSecretForStorage(
+    webSearch.providers.tavily.apiKey,
+    webSearch.providers.tavily.apiKeyEncrypted
+  );
+  return {
+    ...webSearch,
+    providers: {
+      ...webSearch.providers,
+      tavily: {
+        ...webSearch.providers.tavily,
+        apiKey: tavilySecret.plainValue,
+        apiKeyEncrypted: tavilySecret.encryptedValue,
+        apiKeyStored: undefined
       }
     }
   };

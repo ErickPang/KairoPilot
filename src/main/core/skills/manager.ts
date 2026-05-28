@@ -4,7 +4,7 @@ import fs from 'fs/promises'
 import path from 'path'
 import { randomUUID } from 'crypto'
 import { createLLMProvider } from '../llm/provider'
-import { getAgent, getAgents, getKairoPilotConfig, getModelForAgent, saveKairoPilotConfig } from '../../store/config'
+import { getAgent, getAgents, getModelForAgent, readKairoPilotConfig, saveKairoPilotConfig } from '../../store/config'
 import {
   DEFAULT_SKILL_MARKETPLACE_PRESETS,
   SKILL_IMPORT_ERROR,
@@ -364,12 +364,12 @@ export class SkillsManager {
   }
 
   async getRegistrySources() {
-    const config = getKairoPilotConfig()
+    const config = readKairoPilotConfig()
     return [...config.skills.registry]
   }
 
   async saveRegistrySources(entries: SkillsRegistryEntry[]) {
-    const config = getKairoPilotConfig()
+    const config = readKairoPilotConfig()
     config.skills.registry = entries
       .map((entry) => normalizeSkillsRegistryEntry(entry))
       .filter((entry): entry is NormalizedSkillsRegistrySource => entry !== null)
@@ -977,7 +977,7 @@ export class SkillsManager {
   }
 
   private getMarketplaceSources(): NormalizedSkillsRegistrySource[] {
-    const config = getKairoPilotConfig()
+    const config = readKairoPilotConfig()
     const configuredSources = config.skills.registry
       .map((entry) => normalizeSkillsRegistryEntry(entry))
       .filter((entry): entry is NormalizedSkillsRegistrySource => entry !== null)

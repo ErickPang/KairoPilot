@@ -33,4 +33,10 @@ ceshi.md
 .claude/*
 .qwen/*
 HARNESS_ANALYSIS.md
-AGENT.md
+AGENTS.md
+*.AGENTS.md
+docs
+.github
+.qwen
+.trae
+.claude

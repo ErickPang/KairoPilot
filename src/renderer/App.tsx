@@ -264,6 +264,7 @@ function App() {
                 handleClear={handleClear} 
                 messagesEndRef={messagesEndRef}
                 models={models}
+                activeAgent={agents.find((agent) => agent.id === activeAgentId) || null}
                 activeModelId={agents.find((agent) => agent.id === activeAgentId)?.model || null}
                 activeAgentName={activeAgentName}
                 focusInputToken={focusChatInputToken}

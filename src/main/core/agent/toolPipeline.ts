@@ -5,10 +5,14 @@ import {
 } from '../../store/chat';
 import type { ToolDefinition } from '../llm/types';
 import { PermissionGuard, redactSensitiveValue } from '../security/permissions';
-import { unwrapToolExecutionResult } from '../tools/result';
+import { toolError, unwrapToolExecutionResult } from '../tools/result';
 import { normalizeExecuteCommandInput } from '../tools/shell';
 import { getConfiguredWebSearchProviders } from '../tools/web';
 import type { RuntimeUpdate } from './runEngine';
+
+export interface PermissionGuardedToolDefinition extends ToolDefinition {
+  executeApproved: (args: Record<string, unknown>) => Promise<unknown>;
+}
 
 export type PermissionDecision =
   | { kind: 'allow'; args: Record<string, unknown> }
@@ -56,8 +60,43 @@ interface ExecuteApprovedToolParams {
   toolRecordId?: string;
   policyTags: string[];
   auditLog?: (entry: AuditLogEntry) => void;
+  shouldInterrupt?: () => { kind: 'pause' | 'cancel'; reason?: string } | null;
   emitUpdate: (onUpdate: ((update: RuntimeUpdate) => void) | undefined, update: RuntimeUpdate) => void;
   appendToolMessage: (toolName: string, callId: string, content: string) => void;
+}
+
+function isPermissionGuardedTool(tool: ToolDefinition): tool is PermissionGuardedToolDefinition {
+  return typeof (tool as Partial<PermissionGuardedToolDefinition>).executeApproved === 'function';
+}
+
+export function createPermissionGuardedTool(
+  tool: ToolDefinition,
+  permissionGuard: PermissionGuard
+): PermissionGuardedToolDefinition {
+  if (isPermissionGuardedTool(tool)) {
+    return tool;
+  }
+
+  return {
+    ...tool,
+    async execute(args: Record<string, unknown>) {
+      const decision = checkPermission(permissionGuard, tool.name, args);
+      if (decision.kind === 'deny') {
+        return toolError(decision.error);
+      }
+      if (decision.kind === 'approval') {
+        return toolError(`Permission Denied: Tool '${tool.name}' requires approval through the runtime approval flow.`);
+      }
+      return tool.execute(decision.args);
+    },
+    async executeApproved(args: Record<string, unknown>) {
+      const decision = checkPermission(permissionGuard, tool.name, args);
+      if (decision.kind === 'deny') {
+        return toolError(decision.error);
+      }
+      return tool.execute(decision.args);
+    }
+  };
 }
 
 export async function executeApprovedTool(params: ExecuteApprovedToolParams) {
@@ -74,6 +113,7 @@ export async function executeApprovedTool(params: ExecuteApprovedToolParams) {
     toolRecordId,
     policyTags,
     auditLog,
+    shouldInterrupt,
     emitUpdate,
     appendToolMessage
   } = params;
@@ -92,7 +132,38 @@ export async function executeApprovedTool(params: ExecuteApprovedToolParams) {
   });
 
   try {
-    const rawOutput = await tool.execute(args);
+    const rawOutput = isPermissionGuardedTool(tool)
+      ? await tool.executeApproved(args)
+      : await tool.execute(args);
+    const postToolInterrupt = shouldInterrupt?.();
+    if (postToolInterrupt) {
+      const cancelled = postToolInterrupt.kind === 'cancel';
+      const reason = postToolInterrupt.reason || (cancelled ? 'Run cancelled by user.' : 'Run paused by user.');
+      updateRunStep(toolStepId || '', {
+        status: cancelled ? 'cancelled' : 'completed',
+        output: {
+          tool: toolName,
+          callId,
+          interrupted: true,
+          reason,
+          discardedToolOutput: true
+        }
+      });
+      if (toolRecordId) {
+        updateToolCallRecord(toolRecordId, {
+          status: cancelled ? 'cancelled' : 'running'
+        });
+      }
+      emitUpdate(onUpdate, {
+        type: cancelled ? 'run-cancelled' : 'run-paused',
+        runId,
+        stepId: toolStepId,
+        status: cancelled ? 'cancelled' : 'paused',
+        error: cancelled ? reason : undefined
+      });
+      return;
+    }
+
     const executionResult = unwrapToolExecutionResult(rawOutput);
     if (!executionResult.ok) {
       await recordToolFailure({
@@ -479,6 +550,27 @@ export function getPolicyTags(toolName: string, args: Record<string, unknown>, p
     }
   }
 
+  return tags;
+}
+
+export function getToolMetadataPolicyTags(tool?: ToolDefinition): string[] {
+  if (tool?.metadata?.source !== 'plugin') {
+    return [];
+  }
+
+  const tags = ['tool_category:plugin'];
+  const pluginId = normalizePolicyTagValue(tool.metadata.pluginId || '');
+  const pluginScope = normalizePolicyTagValue(tool.metadata.pluginScope || '');
+  const riskLevel = tool.metadata.riskLevel;
+  if (pluginId) {
+    tags.push(`plugin:${pluginId}`);
+  }
+  if (pluginScope) {
+    tags.push(`plugin_scope:${pluginScope}`);
+  }
+  if (riskLevel) {
+    tags.push(`plugin_risk:${riskLevel}`);
+  }
   return tags;
 }
 

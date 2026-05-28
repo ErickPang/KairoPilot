@@ -74,6 +74,15 @@ export interface SessionSummary {
 let db: Database.Database | null = null;
 const DEFAULT_AGENT_ID = 'mainAgent';
 const MAX_RUN_QUERY_PAGE_SIZE = 100;
+const RUN_TERMINAL_STATUSES = new Set<RunStatus>(['completed', 'failed', 'cancelled']);
+const ALLOWED_RUN_STATUS_TRANSITIONS: Record<RunStatus, RunStatus[]> = {
+  running: ['running', 'waiting_approval', 'paused', 'completed', 'failed', 'cancelled'],
+  waiting_approval: ['waiting_approval', 'running', 'completed', 'failed', 'cancelled'],
+  paused: ['paused', 'running', 'failed', 'cancelled'],
+  completed: ['completed', 'running'],
+  failed: ['failed', 'running'],
+  cancelled: ['cancelled', 'running']
+};
 
 function normalizeAgentId(agentId?: string | null) {
   return agentId || DEFAULT_AGENT_ID;
@@ -81,6 +90,16 @@ function normalizeAgentId(agentId?: string | null) {
 
 function getActiveSessionStateKey(agentId?: string | null) {
   return `active_session_id:${normalizeAgentId(agentId)}`;
+}
+
+function assertRunStatusTransition(currentStatus: RunStatus, nextStatus: RunStatus) {
+  if (currentStatus === nextStatus) {
+    return;
+  }
+
+  if (!ALLOWED_RUN_STATUS_TRANSITIONS[currentStatus]?.includes(nextStatus)) {
+    throw new Error(`Invalid run status transition: ${currentStatus} -> ${nextStatus}`);
+  }
 }
 
 function getAgentWorkspaceById(agentId?: string | null) {
@@ -660,7 +679,7 @@ export function getLatestRun(sessionId: string): RunSummary | null {
 export function queryRuns(query: RunQuery = {}): RunQueryResult {
   const database = getDb();
   const page = Number.isFinite(query.page) && Number(query.page) > 0 ? Math.floor(Number(query.page)) : 1;
-  const pageSize = Number.isFinite(query.page) && Number(query.pageSize) > 0
+  const pageSize = Number.isFinite(query.pageSize) && Number(query.pageSize) > 0
     ? Math.min(Math.floor(Number(query.pageSize)), MAX_RUN_QUERY_PAGE_SIZE)
     : 20;
   const { whereClause, params } = buildRunQueryWhere(query);
@@ -773,11 +792,16 @@ export function updateRun(
   }
 
   const nextStatus = patch.status ?? current.status;
+  assertRunStatusTransition(current.status, nextStatus);
   const nextFinalResponse = patch.finalResponse === undefined ? current.finalResponse || null : patch.finalResponse;
   const nextError = patch.error === undefined ? current.error || null : patch.error;
-  const nextWaitingApprovalId = patch.waitingApprovalId === undefined ? current.waitingApprovalId || null : patch.waitingApprovalId;
+  const nextWaitingApprovalId = nextStatus === 'waiting_approval'
+    ? (patch.waitingApprovalId === undefined ? current.waitingApprovalId || null : patch.waitingApprovalId)
+    : (patch.waitingApprovalId === undefined ? null : patch.waitingApprovalId);
   const nextStartedAt = patch.startedAt === undefined ? current.startedAt || null : patch.startedAt;
-  const nextCompletedAt = patch.completedAt === undefined ? current.completedAt || null : patch.completedAt;
+  const nextCompletedAt = patch.completedAt === undefined
+    ? (RUN_TERMINAL_STATUSES.has(nextStatus) ? current.completedAt || Date.now() : null)
+    : patch.completedAt;
   const updatedAt = Date.now();
 
   database.prepare(`

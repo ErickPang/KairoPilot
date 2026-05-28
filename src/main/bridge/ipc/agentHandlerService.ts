@@ -6,6 +6,7 @@ import { ensureActiveSession, getApprovalRecord, getRunById, updateSessionMessag
 import type { ChatMessage } from '../../core/llm/types';
 import type { RuntimeExecutionResult, RuntimeUpdate } from '../../core/agent/runEngine';
 import type { AgentChatRequest, AgentRuntimeInvokeResult, ChatAttachment } from '../../../shared/contracts';
+import { ipcFailure } from './ipcResult';
 
 const DEFAULT_INIT_ERROR = 'Agent not initialized. Please configure settings first.';
 
@@ -89,6 +90,10 @@ export function mapRuntimeExecutionResult(result: RuntimeExecutionResult): Agent
 
 export function mapUnknownError(error: unknown, fallback = 'Unknown error') {
   return error instanceof Error ? error.message : fallback;
+}
+
+export function mapRuntimeHandlerFailure(error: unknown) {
+  return ipcFailure(mapUnknownError(error));
 }
 
 function normalizeAgentChatRequest(input: unknown): AgentChatRequest {

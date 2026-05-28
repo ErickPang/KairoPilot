@@ -1435,6 +1435,102 @@
   font-size: 0.88rem;
 }
 
+.plugin-capability-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.plugin-risk-badge {
+  align-self: flex-start;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  padding: 0.18rem 0.52rem;
+  background: var(--surface-muted);
+  color: var(--muted-fg);
+  font-size: 0.74rem;
+  font-weight: 650;
+  line-height: 1.4;
+}
+
+.plugin-risk-badge.risk-medium,
+.plugin-capability-dot.risk-medium {
+  color: var(--warning);
+}
+
+.plugin-risk-badge.risk-high,
+.plugin-risk-badge.risk-critical,
+.plugin-capability-dot.risk-high,
+.plugin-capability-dot.risk-critical {
+  color: var(--danger);
+}
+
+.plugin-detail-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.34rem;
+}
+
+.plugin-detail-label {
+  color: var(--muted-fg);
+  font-size: 0.74rem;
+  font-weight: 650;
+}
+
+.plugin-chip-list,
+.plugin-capability-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.plugin-chip,
+.plugin-capability-item {
+  min-width: 0;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: var(--surface-muted);
+  color: var(--foreground);
+  font-size: 0.74rem;
+  line-height: 1.4;
+}
+
+.plugin-chip {
+  max-width: 100%;
+  overflow: hidden;
+  padding: 0.18rem 0.5rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plugin-capability-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.34rem;
+  padding: 0.18rem 0.46rem;
+}
+
+.plugin-capability-dot {
+  width: 0.44rem;
+  height: 0.44rem;
+  border-radius: 999px;
+  background: currentColor;
+  color: var(--success);
+  flex-shrink: 0;
+}
+
+.plugin-capability-risk {
+  color: var(--muted-fg);
+}
+
+.plugin-capability-permissions {
+  max-width: 18rem;
+  overflow: hidden;
+  color: var(--muted-fg);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .plugin-empty-state,
 .skill-marketplace-empty,
 .skill-store-loading {
@@ -1474,6 +1570,24 @@
 .plugin-modal-title {
   margin: 0 0 1rem;
   color: var(--foreground);
+}
+
+.plugin-install-review {
+  display: flex;
+  flex-direction: column;
+  gap: 0.68rem;
+  margin-bottom: 1rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border-soft);
+  border-radius: 1rem;
+  background: var(--surface-muted);
+}
+
+.plugin-modal-section-label {
+  margin: 0 0 0.48rem;
+  color: var(--muted-fg);
+  font-size: 0.78rem;
+  font-weight: 700;
 }
 
 .plugin-modal-scope-list {

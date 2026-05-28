@@ -2,24 +2,18 @@ import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { IconPlugin, IconTrash, IconRefresh } from './Icons';
 import './PluginStorePanel.css';
 import { useTranslation } from '../hooks/useTranslation';
-import type { AgentConfig, AppConfirmationOptions, AppNotice } from '../types';
+import type {
+  AgentConfig,
+  AppConfirmationOptions,
+  AppNotice,
+  PluginCapabilityDeclaration,
+  PluginManifest,
+  PluginRegistryEntry
+} from '../types';
 import { KAIRO_INVOKE } from '../../shared/ipc';
 import { createErrorNotice } from '../hooks/errorUtils';
 
-interface PluginManifest {
-  id: string;
-  name: string;
-  description: string;
-  version: string;
-  author: string;
-  icon?: string;
-}
-
-interface InstalledPlugin extends PluginManifest {
-  installedAt: number;
-  filePath: string;
-  scope: string; // 'public' | 'agent:{agentId}'
-}
+type InstalledPlugin = PluginRegistryEntry;
 
 interface PluginStorePanelProps {
   onClearNotice: () => void;
@@ -63,8 +57,62 @@ export const PluginStorePanel = memo(function PluginStorePanel({ onClearNotice, 
       
       // Inject native tools as installed plugins
       const nativeTools: InstalledPlugin[] = [
-        { id: 'web_search', name: 'Web Search', description: 'Search the internet for real-time information.', version: '1.0.0', author: 'KairoPilot', installedAt: Date.now(), filePath: 'built-in', scope: 'public', icon: '🔍' },
-        { id: 'fetch_webpage', name: 'Fetch Webpage', description: 'Fetch and read content from specific URLs.', version: '1.0.0', author: 'KairoPilot', installedAt: Date.now(), filePath: 'built-in', scope: 'public', icon: '🌐' }
+        {
+          id: 'web_search',
+          name: 'Web Search',
+          description: 'Search the internet for real-time information.',
+          version: '1.0.0',
+          author: 'KairoPilot',
+          installedAt: Date.now(),
+          filePath: 'built-in',
+          scope: 'public',
+          icon: '🔍',
+          riskLevel: 'medium',
+          tools: [
+            { name: 'web_search', description: 'Searches configured web providers.' }
+          ],
+          capabilities: [
+            {
+              id: 'network',
+              label: 'Network access',
+              description: 'Sends search requests to configured providers.',
+              riskLevel: 'medium',
+              requiredPermissions: {
+                network: {
+                  enabled: true
+                }
+              }
+            }
+          ]
+        },
+        {
+          id: 'fetch_webpage',
+          name: 'Fetch Webpage',
+          description: 'Fetch and read content from specific URLs.',
+          version: '1.0.0',
+          author: 'KairoPilot',
+          installedAt: Date.now(),
+          filePath: 'built-in',
+          scope: 'public',
+          icon: '🌐',
+          riskLevel: 'medium',
+          tools: [
+            { name: 'fetch_webpage', description: 'Fetches and extracts webpage content.' }
+          ],
+          capabilities: [
+            {
+              id: 'network',
+              label: 'Network access',
+              description: 'Requests user-supplied URLs.',
+              riskLevel: 'medium',
+              requiredPermissions: {
+                network: {
+                  enabled: true
+                }
+              }
+            }
+          ]
+        }
       ];
       
       setStorePlugins(store as unknown as PluginManifest[]);
@@ -146,6 +194,10 @@ export const PluginStorePanel = memo(function PluginStorePanel({ onClearNotice, 
   const sortedAgents = useMemo(
     () => [...agents].sort((a, b) => a.name.localeCompare(b.name)),
     [agents]
+  );
+  const selectedPlugin = useMemo(
+    () => storePlugins.find((plugin) => plugin.id === selectedPluginId) || null,
+    [selectedPluginId, storePlugins]
   );
 
   return (
@@ -238,6 +290,7 @@ export const PluginStorePanel = memo(function PluginStorePanel({ onClearNotice, 
                     <p className="plugin-card-description">
                       {plugin.description}
                     </p>
+                    <PluginCapabilitySummary plugin={plugin} />
 
                     <div className="store-card-actions">
                       <button 
@@ -259,7 +312,27 @@ export const PluginStorePanel = memo(function PluginStorePanel({ onClearNotice, 
       {installModalOpen && (
         <div className="modal-overlay" onClick={() => setInstallModalOpen(false)}>
           <div className="modal-content" onClick={e => e.stopPropagation()}>
-            <h3 className="plugin-modal-title">{t('plugins.installScope')}</h3>
+            <h3 className="plugin-modal-title">{t('plugins.installReview')}</h3>
+            {selectedPlugin && (
+              <div className="plugin-install-review">
+                <div className="plugin-card-header">
+                  <div className="plugin-card-icon">
+                    {selectedPlugin.icon || '🧩'}
+                  </div>
+                  <div className="plugin-card-copy">
+                    <h4 className="plugin-card-title">{selectedPlugin.name}</h4>
+                    <div className="plugin-card-meta">
+                      v{selectedPlugin.version} • {t('plugins.by', { author: selectedPlugin.author })}
+                    </div>
+                  </div>
+                </div>
+                <p className="plugin-card-description">
+                  {selectedPlugin.description}
+                </p>
+                <PluginCapabilitySummary plugin={selectedPlugin} />
+              </div>
+            )}
+            <div className="plugin-modal-section-label">{t('plugins.installScope')}</div>
             <div className="plugin-modal-scope-list">
               <button
                 type="button"
@@ -321,6 +394,7 @@ function InstalledPluginItem({
       <p className="plugin-card-description">
         {plugin.description}
       </p>
+      <PluginCapabilitySummary plugin={plugin} />
 
       <div className="plugin-card-meta">
         <strong>{t('plugins.installedAt')}:</strong> {new Date(plugin.installedAt).toLocaleString()}
@@ -350,4 +424,104 @@ function InstalledPluginItem({
       </div>
     </div>
   );
+}
+
+function PluginCapabilitySummary({ plugin }: { plugin: PluginManifest }) {
+  const { t } = useTranslation();
+  const tools = plugin.tools || [];
+  const capabilities = plugin.capabilities || [];
+  const riskLevel = plugin.riskLevel || 'low';
+
+  return (
+    <div className="plugin-capability-summary">
+      <div className={`plugin-risk-badge risk-${riskLevel}`}>
+        {t('plugins.risk')}: {t(getRiskTranslationKey(riskLevel))}
+      </div>
+      {tools.length > 0 && (
+        <div className="plugin-detail-block">
+          <div className="plugin-detail-label">{t('plugins.tools')}</div>
+          <div className="plugin-chip-list">
+            {tools.map((tool) => (
+              <span className="plugin-chip" key={tool.name} title={tool.description}>
+                {tool.name}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+      {capabilities.length > 0 && (
+        <div className="plugin-detail-block">
+          <div className="plugin-detail-label">{t('plugins.capabilities')}</div>
+          <div className="plugin-capability-list">
+            {capabilities.map((capability) => (
+              <PluginCapabilityItem capability={capability} key={capability.id} />
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PluginCapabilityItem({ capability }: { capability: PluginCapabilityDeclaration }) {
+  const { t } = useTranslation();
+  const permissionLabels = getRequiredPermissionLabels(capability, t);
+
+  return (
+    <div className="plugin-capability-item" title={capability.description}>
+      <span className={`plugin-capability-dot risk-${capability.riskLevel}`} />
+      <span>{capability.label}</span>
+      <span className="plugin-capability-risk">{t(getRiskTranslationKey(capability.riskLevel))}</span>
+      {permissionLabels.length > 0 && (
+        <span className="plugin-capability-permissions">
+          {permissionLabels.join(' · ')}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function getRequiredPermissionLabels(
+  capability: PluginCapabilityDeclaration,
+  t: ReturnType<typeof useTranslation>['t']
+) {
+  const required = capability.requiredPermissions;
+  if (!required) {
+    return [];
+  }
+
+  const labels: string[] = [];
+  if (required.fileSystem?.read) {
+    labels.push(t('plugins.permission.fileRead'));
+  }
+  if (required.fileSystem?.write) {
+    labels.push(t('plugins.permission.fileWrite'));
+  }
+  if (required.network?.enabled || (required.network?.domains?.length ?? 0) > 0) {
+    const domains = required.network?.domains?.join(', ');
+    labels.push(domains
+      ? t('plugins.permission.networkDomains', { domains })
+      : t('plugins.permission.network'));
+  }
+  if (required.shell?.enabled || (required.shell?.commands?.length ?? 0) > 0) {
+    const commands = required.shell?.commands?.join(', ');
+    labels.push(commands
+      ? t('plugins.permission.shellCommands', { commands })
+      : t('plugins.permission.shell'));
+  }
+
+  return labels;
+}
+
+function getRiskTranslationKey(riskLevel: PluginCapabilityDeclaration['riskLevel']) {
+  switch (riskLevel) {
+    case 'critical':
+      return 'plugins.risk.critical';
+    case 'high':
+      return 'plugins.risk.high';
+    case 'medium':
+      return 'plugins.risk.medium';
+    default:
+      return 'plugins.risk.low';
+  }
 }

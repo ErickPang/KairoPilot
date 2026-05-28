@@ -2,6 +2,13 @@ import { ipcMain, dialog } from 'electron';
 import os from 'os';
 import { spawn } from 'child_process';
 import { KAIRO_EVENT, KAIRO_INVOKE } from '../../../shared/ipc';
+import { parseIpcInput } from './configValidation';
+import {
+  OllamaBaseUrlInputSchema,
+  OllamaPullInputSchema,
+  SelectFileInputSchema
+} from './chatSystemValidation';
+import { ipcFailure, ipcSuccess } from './ipcResult';
 
 let previousCpus = os.cpus();
 
@@ -50,21 +57,10 @@ function registerSystemHandlers() {
   });
 
   ipcMain.handle(KAIRO_INVOKE.systemSelectFile, async (_, args) => {
-    const payload = typeof args === 'object' && args ? args : {};
-    const filters = Array.isArray(payload.filters)
-      ? payload.filters.filter((item: unknown): item is { name: string; extensions: string[] } => {
-          if (typeof item !== 'object' || !item) {
-            return false;
-          }
-          const candidate = item as { name?: unknown; extensions?: unknown };
-          return typeof candidate.name === 'string'
-            && Array.isArray(candidate.extensions)
-            && candidate.extensions.every((extension: unknown) => typeof extension === 'string');
-        })
-      : undefined;
+    const payload = parseIpcInput(SelectFileInputSchema, args, 'file selection options');
     const { canceled, filePaths } = await dialog.showOpenDialog({
       properties: ['openFile'],
-      filters
+      filters: payload?.filters
     });
     if (canceled) {
       return null;
@@ -73,21 +69,10 @@ function registerSystemHandlers() {
   });
 
   ipcMain.handle(KAIRO_INVOKE.systemSelectFiles, async (_, args) => {
-    const payload = typeof args === 'object' && args ? args : {};
-    const filters = Array.isArray(payload.filters)
-      ? payload.filters.filter((item: unknown): item is { name: string; extensions: string[] } => {
-          if (typeof item !== 'object' || !item) {
-            return false;
-          }
-          const candidate = item as { name?: unknown; extensions?: unknown };
-          return typeof candidate.name === 'string'
-            && Array.isArray(candidate.extensions)
-            && candidate.extensions.every((extension: unknown) => typeof extension === 'string');
-        })
-      : undefined;
+    const payload = parseIpcInput(SelectFileInputSchema, args, 'file selection options');
     const { canceled, filePaths } = await dialog.showOpenDialog({
       properties: ['openFile', 'multiSelections'],
-      filters
+      filters: payload?.filters
     });
     if (canceled) {
       return [];
@@ -97,7 +82,8 @@ function registerSystemHandlers() {
 
   ipcMain.handle(KAIRO_INVOKE.ollamaCheck, async (_, baseUrl: string) => {
     try {
-      const url = baseUrl || 'http://localhost:11434';
+      const payload = parseIpcInput(OllamaBaseUrlInputSchema, baseUrl, 'Ollama base URL');
+      const url = payload || 'http://localhost:11434';
       const response = await fetch(url);
       if (response.ok) {
         return { running: true, message: await response.text() };
@@ -117,19 +103,21 @@ function registerSystemHandlers() {
       });
 
       child.on('error', (err: Error) => {
-        resolve({ success: false, error: err.message });
+        resolve(ipcFailure(err));
       });
 
       child.unref();
 
       setTimeout(() => {
-        resolve({ success: true });
+        resolve(ipcSuccess());
       }, 2000);
     });
   });
 
-  ipcMain.handle(KAIRO_INVOKE.ollamaPull, async (event, { baseUrl, modelName }) => {
+  ipcMain.handle(KAIRO_INVOKE.ollamaPull, async (event, input) => {
     try {
+      const payload = parseIpcInput(OllamaPullInputSchema, input, 'Ollama pull request');
+      const { baseUrl, modelName } = payload;
       const url = `${baseUrl || 'http://localhost:11434'}/api/pull`;
       const response = await fetch(url, {
         method: 'POST',
@@ -138,11 +126,11 @@ function registerSystemHandlers() {
       });
 
       if (!response.ok) {
-        return { success: false, error: `Failed to pull: ${response.statusText}` };
+        return ipcFailure(`Failed to pull: ${response.statusText}`);
       }
 
       if (!response.body) {
-        return { success: false, error: 'No response body' };
+        return ipcFailure('No response body');
       }
 
       const reader = response.body.getReader();
@@ -167,9 +155,9 @@ function registerSystemHandlers() {
         }
       }
 
-      return { success: true };
+      return ipcSuccess();
     } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+      return ipcFailure(error);
     }
   });
 }

@@ -16,7 +16,7 @@ describe('runtime skill inventory helpers', () => {
   });
 
   it('识别中英文技能盘点问题', async () => {
-    const { isSkillInventoryQuery } = await import('./runtime');
+    const { isSkillInventoryQuery } = await import('./runtimeSkillInventory');
 
     expect(isSkillInventoryQuery('有哪些可用技能')).toBe(true);
     expect(isSkillInventoryQuery('当前已安装哪些技能？')).toBe(true);
@@ -38,7 +38,7 @@ describe('runtime skill inventory helpers', () => {
       { id: 'workspace-helper', name: 'workspace-helper' }
     ]);
 
-    const { buildSkillInventoryResponse } = await import('./runtime');
+    const { buildSkillInventoryResponse } = await import('./runtimeSkillInventory');
     const response = await buildSkillInventoryResponse('mainAgent');
 
     expect(skillsManagerMock.listPublicSkills).toHaveBeenCalledTimes(1);

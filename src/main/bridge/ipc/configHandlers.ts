@@ -1,84 +1,98 @@
 import { ipcMain } from 'electron';
-import { pluginManager } from '../../core/plugins/manager';
 import { createLLMProvider, describeProvider } from '../../core/llm/provider';
-import { removeAgentRuntime } from '../../assistant/agentRuntime';
-import { deleteAuditLogsBySessionIds } from '../../store/audit';
-import { deleteSessionsByAgent } from '../../store/chat';
+import {
+  deleteAgentWithCleanup,
+  deleteModelAndRefreshAgents,
+  saveAgentAndRefreshRuntime,
+  saveLegacyAgentConfigAndRefreshRuntime,
+  saveModelAndRefreshAgents
+} from '../../services/configService';
 import {
   createAgentDraft,
-  deleteAgentWorkspace,
   getAgentConfig,
-  getAgent,
-  saveAgentConfig,
-  getKairoPilotConfig,
+  getModel,
+  readKairoPilotConfig,
   getAppearanceConfig,
-  getModels,
-  saveModel,
+  getRedactedModels,
   saveAppearanceConfig,
-  getWebSearchConfig,
+  getRedactedWebSearchConfig,
+  redactKairoPilotConfigSecrets,
   saveWebSearchConfig,
-  deleteModel,
   getAgents,
-  saveAgent,
-  deleteAgent,
   setActiveAgentId,
   getActiveAgentId
 } from '../../store/config';
 import { KAIRO_INVOKE } from '../../../shared/ipc';
+import {
+  AgentConfigInputSchema,
+  AgentDraftSeedSchema,
+  AppearanceConfigInputSchema,
+  DeleteAgentInputSchema,
+  IdInputSchema,
+  LegacyAgentConfigInputSchema,
+  LlmProviderInputSchema,
+  ModelConfigInputSchema,
+  parseIpcInput,
+  WebSearchConfigInputSchema
+} from './configValidation';
+import { ipcSuccess } from './ipcResult';
 
-function removeRuntimesForAgents(agentIds: string[]) {
-  const uniqueAgentIds = [...new Set(agentIds.filter((id) => typeof id === 'string' && id.length > 0))];
-  for (const agentId of uniqueAgentIds) {
-    removeAgentRuntime(agentId);
+function resolveProviderPayloadApiKey(payload: { id?: string; apiKey?: string }) {
+  if (payload.apiKey?.trim()) {
+    return payload.apiKey;
   }
+  return payload.id ? getModel(payload.id)?.apiKey || '' : '';
 }
 
-function findAgentIdsByProvider(providerId: string) {
-  return getAgents()
-    .filter((agent) => agent.model === providerId || agent.model.startsWith(`${providerId}/`))
-    .map((agent) => agent.id);
+function redactLegacyAgentConfigSecret(config: ReturnType<typeof getAgentConfig>) {
+  return {
+    ...config,
+    apiKey: '',
+    apiKeyStored: Boolean(config.apiKey)
+  };
 }
 
 function registerConfigHandlers() {
   ipcMain.handle(KAIRO_INVOKE.configGet, async () => {
-    return getAgentConfig();
+    return redactLegacyAgentConfigSecret(getAgentConfig());
   });
 
   ipcMain.handle(KAIRO_INVOKE.configSave, async (_, config) => {
-    const activeAgentId = getActiveAgentId();
-    saveAgentConfig(config);
-    removeRuntimesForAgents([activeAgentId]);
-    return { success: true };
+    const payload = parseIpcInput(LegacyAgentConfigInputSchema, config, 'agent config');
+    saveLegacyAgentConfigAndRefreshRuntime(payload);
+    return ipcSuccess();
   });
 
   ipcMain.handle(KAIRO_INVOKE.llmListModels, async (_, config) => {
+    const payload = parseIpcInput(LlmProviderInputSchema, config, 'model provider config');
     const llm = createLLMProvider({
-      provider: config.provider || 'openai',
-      apiKey: config.apiKey,
-      baseUrl: config.baseUrl,
+      provider: payload.provider,
+      apiKey: resolveProviderPayloadApiKey(payload),
+      baseUrl: payload.baseUrl,
       model: 'dummy'
     });
     return llm.listModels ? await llm.listModels() : [];
   });
 
   ipcMain.handle(KAIRO_INVOKE.llmDescribeProvider, async (_, config) => {
+    const payload = parseIpcInput(LlmProviderInputSchema, config, 'model provider config');
     return describeProvider({
-      provider: config.provider || 'openai',
-      apiKey: config.apiKey,
-      baseUrl: config.baseUrl,
-      model: config.model || 'dummy'
+      provider: payload.provider,
+      apiKey: resolveProviderPayloadApiKey(payload),
+      baseUrl: payload.baseUrl,
+      model: payload.model || 'dummy'
     });
   });
 
   ipcMain.handle(KAIRO_INVOKE.configGetAll, async () => {
-    const config = getKairoPilotConfig();
-    return {
+    const config = readKairoPilotConfig();
+    return redactKairoPilotConfigSecrets({
       ...config,
       agents: {
         ...config.agents,
         list: getAgents()
       }
-    };
+    });
   });
 
   ipcMain.handle(KAIRO_INVOKE.configGetAppearance, async () => {
@@ -86,33 +100,35 @@ function registerConfigHandlers() {
   });
 
   ipcMain.handle(KAIRO_INVOKE.configGetModels, async () => {
-    return getModels();
+    return getRedactedModels();
   });
 
   ipcMain.handle(KAIRO_INVOKE.configGetWebSearch, async () => {
-    return getWebSearchConfig();
+    return getRedactedWebSearchConfig();
   });
 
   ipcMain.handle(KAIRO_INVOKE.configSaveModel, async (_, model) => {
-    saveModel(model);
-    removeRuntimesForAgents(findAgentIdsByProvider(model.id));
-    return { success: true };
+    const payload = parseIpcInput(ModelConfigInputSchema, model, 'model config');
+    saveModelAndRefreshAgents(payload);
+    return ipcSuccess();
   });
 
   ipcMain.handle(KAIRO_INVOKE.configSaveAppearance, async (_, appearance) => {
-    saveAppearanceConfig(typeof appearance === 'object' && appearance ? appearance : getAppearanceConfig());
-    return { success: true };
+    const payload = parseIpcInput(AppearanceConfigInputSchema, appearance, 'appearance config');
+    saveAppearanceConfig(payload);
+    return ipcSuccess();
   });
 
   ipcMain.handle(KAIRO_INVOKE.configSaveWebSearch, async (_, webSearch) => {
-    saveWebSearchConfig(typeof webSearch === 'object' && webSearch ? webSearch : getWebSearchConfig());
-    return { success: true };
+    const payload = parseIpcInput(WebSearchConfigInputSchema, webSearch, 'web search config');
+    saveWebSearchConfig(payload);
+    return ipcSuccess();
   });
 
   ipcMain.handle(KAIRO_INVOKE.configDeleteModel, async (_, id) => {
-    removeRuntimesForAgents(findAgentIdsByProvider(id));
-    deleteModel(id);
-    return { success: true };
+    const modelId = parseIpcInput(IdInputSchema, id, 'model id');
+    deleteModelAndRefreshAgents(modelId);
+    return ipcSuccess();
   });
 
   ipcMain.handle(KAIRO_INVOKE.configGetAgents, async () => {
@@ -120,46 +136,29 @@ function registerConfigHandlers() {
   });
 
   ipcMain.handle(KAIRO_INVOKE.configCreateAgentDraft, async (_, seed) => {
-    return createAgentDraft(seed);
+    const payload = typeof seed === 'undefined'
+      ? undefined
+      : parseIpcInput(AgentDraftSeedSchema, seed, 'agent draft seed');
+    return createAgentDraft(payload);
   });
 
   ipcMain.handle(KAIRO_INVOKE.configSaveAgent, async (_, agent) => {
-    saveAgent(agent);
-    removeRuntimesForAgents([agent.id]);
-    return { success: true };
+    const payload = parseIpcInput(AgentConfigInputSchema, agent, 'agent config');
+    saveAgentAndRefreshRuntime(payload);
+    return ipcSuccess();
   });
 
   ipcMain.handle(KAIRO_INVOKE.configDeleteAgent, async (_, id) => {
-    if (typeof id !== 'string' || id.length === 0) {
-      throw new Error('Invalid agent id');
-    }
-    if (id === 'mainAgent') {
-      throw new Error('Main Agent cannot be deleted');
-    }
-    const agent = getAgent(id);
-    if (!agent) {
-      return { success: true };
-    }
-    const sessionIds = deleteSessionsByAgent(id);
-    deleteAuditLogsBySessionIds(sessionIds);
-    removeAgentRuntime(id);
-    deleteAgent(id);
-    try {
-      await pluginManager.cleanupAgentScopedPlugins(id);
-    } catch (error) {
-      console.warn(`[Handlers] Failed to clean up scoped plugins for agent ${id}:`, error);
-    }
-    try {
-      deleteAgentWorkspace(agent);
-    } catch (error) {
-      console.warn(`[Handlers] Failed to delete workspace for agent ${id}:`, error);
-    }
-    return { success: true };
+    const payload = parseIpcInput(DeleteAgentInputSchema, id, 'agent delete request');
+    const agentId = payload.id;
+    const cleanup = await deleteAgentWithCleanup(agentId, payload.deleteWorkspace);
+    return ipcSuccess({ cleanup });
   });
 
   ipcMain.handle(KAIRO_INVOKE.configSetActiveAgent, async (_, id) => {
-    setActiveAgentId(id);
-    return { success: true };
+    const agentId = parseIpcInput(IdInputSchema, id, 'agent id');
+    setActiveAgentId(agentId);
+    return ipcSuccess();
   });
 
   ipcMain.handle(KAIRO_INVOKE.configGetActiveAgentId, async () => {

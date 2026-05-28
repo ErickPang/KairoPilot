@@ -4,7 +4,7 @@ import { skillsManager } from '../core/skills/manager';
 import { setupHandlers } from '../bridge/ipc/setupHandlers';
 import { ensureAppPaths, seedBuiltinSkills } from '../services/appRuntime';
 import { registerKairopilotProtocol } from '../services/protocolService';
-import { getAgents } from '../store/config';
+import { getAgents, initializeKairoPilotConfig } from '../store/config';
 import { getWorkspaceAttachmentUploadsRoot } from '../store/attachments';
 import { createMainWindow } from '../services/windowService';
 
@@ -44,6 +44,8 @@ export function bootstrapMainProcess(context: BootstrapContext) {
   const appPaths = ensureAppPaths();
 
   app.whenReady().then(async () => {
+    initializeKairoPilotConfig();
+
     registerKairopilotProtocol(() => [
       ...appPaths.allowedProtocolRoots,
       ...getAgents()

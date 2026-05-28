@@ -8,18 +8,6 @@ KairoPilot 是一个面向本地工作流的桌面 AI Agent 工作台
 - **桌面原生能力**：文件系统、Shell 命令、网络检索、系统监控等工具链
 - **安全可观测**：高风险操作可确认、关键工具调用可审计、Token消耗可监控
 
-## 核心原则
-1. **编码前思考:** 不要假设。不要隐藏困惑。呈现权衡。
-- 明确陈述你的所有假设。如果不确定，直接询问用户。
-- 当指令存在歧义时，列出多种可能解释，并说明你准备采用哪一种（不要默默选择）。
-- 如果发现明显更简单、更高效的方案，主动提出异议并说明理由。
-- 如果有任何地方不清楚，立即停止，指出困惑点并请求澄清。
-2. ** 简洁优先:** 用最少的代码解决问题，不要过度推测。
-- 严格只实现用户明确要求的功能，不要额外添加“可能有用”的特性。
-- 如果能用50行解决，就不要写200行。写完后主动检查是否可以简化。
-3. **精准修改:** 只碰必须碰的。只清理自己造成的混乱。
-- 不要“顺手”改进相邻的代码、注释、格式或命名。
-
 ## 技术栈
 
 | 类别 | 技术 |
@@ -87,10 +75,34 @@ skills/                             # 内置技能定义（find-skills、skill-c
 
 ## 编码规范
 ### 命名规范
-- 文件名使用小写加下划线（例如main_process.js、app_controller.cpp）。
-- 函数和变量名使用驼峰式命名。
-- 类名使用帕斯卡命名法。
-- 常量使用全大写下划线分隔（例如API_BASE_URL）。
+| 类型 | 格式 | 示例 |
+|------|------|------|
+| 组件 | PascalCase | `UserProfile.tsx` |
+| 函数/变量 | camelCase | `formatDate`、`userName` |
+| 常量 | UPPER_SNAKE | `MAX_RETRY_COUNT` |
+| 类型/接口 | PascalCase + 后缀 | `UserType`、`ApiResponse` |
+| 事件处理 | `handle` + 事件名 | `handleSubmit`、`handleChange` |
+| 布尔变量 | `is` / `has` / `should` 前缀 | `isLoading`、`hasError` |
+
+### 代码风格（好 vs 坏）
+
+```typescript
+// ✅ 好：纯函数 + 类型标注 + 单一职责
+function calculateTotal(items: Item[]): number {
+  return items.reduce((sum, item) => sum + item.price * item.quantity, 0);
+}
+
+// ❌ 坏：副作用 + 无类型 + 职责混杂
+function calc(items) {
+  console.log('calculating...');  // 副作用 1
+  localStorage.setItem('lastCalc', Date.now());  // 副作用 2
+  var t = 0;
+  for (let i = 0; i < items.length; i++) {
+    t = t + items[i].p * items[i].q;  // 模糊命名
+  }
+  return t;
+}
+```
 
 ## 常用命令
 
@@ -123,19 +135,16 @@ npm run postinstall  # 安装 Electron 原生依赖（postinstall 钩子）
 | bridge/ipc/ | 单元测试 | Agent handler、handler service |
 | store/ | 单元测试 | SQLite 数据库、配置、会话、统计、附件 |
 
-### 验证要求
-
-完成改动后按顺序执行：
-
-1. `npm run lint` — 无 ESLint 警告
-2. `npm run typecheck` — 无类型错误
-3. 涉及运行逻辑时：运行相关测试 `npm test`（或指定文件）
-4. 高风险改动（见第 7 节）必须至少验证一条允许路径和一条拒绝路径
-
-
 ## 约束
-
-
+- 只修改与任务直接相关的文件。
+- 不要引入新依赖，除非用户明确同意。
+### Always — 每次必须执行
+- 提交前lint必须通过,运行`npm run lint`
+- 提交前测试全部通过,运行`npm test`
+### Never—绝对禁止
+- 提交 .env、密钥、Token、密码等敏感信息
+- 配置硬编码到源码中，如数据库连接字符串、API密钥等
+- 执行 `rm -rf` 或 `DROP TABLE` 等危险操作，需要确认。
 
 ## 文档同步规则
 以下内容发生变化时，应同步更新相关文档，至少包括 `README.md`，必要时补充更专门的说明：

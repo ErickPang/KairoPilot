@@ -613,6 +613,47 @@ function createRunSkillScriptTool(
   };
 }
 
+async function registerRuntimeTools(params: {
+  runtime: AgentRuntime;
+  runtimeRef: () => AgentRuntime | null;
+  agentId: string;
+  workspace: string;
+  permissions: PermissionGuard;
+}) {
+  const {
+    runtime,
+    runtimeRef,
+    agentId,
+    workspace,
+    permissions
+  } = params;
+
+  runtime.registerTool(ReadFileTool as unknown as ToolDefinition);
+  runtime.registerTool(createReadAttachmentTool(() => runtime.getActiveSessionId()));
+  runtime.registerTool(WriteFileTool as unknown as ToolDefinition);
+  runtime.registerTool(ListDirectoryTool as unknown as ToolDefinition);
+  runtime.registerTool(DeleteFileTool as unknown as ToolDefinition);
+  runtime.registerTool(createExecuteCommandTool({
+    cwd: workspace,
+    policy: permissions.getShellExecutionPolicy()
+  }) as unknown as ToolDefinition);
+  runtime.registerTool(SystemInfoTool as unknown as ToolDefinition);
+  runtime.registerTool(WebSearchTool as unknown as ToolDefinition);
+  runtime.registerTool(FetchWebpageTool as unknown as ToolDefinition);
+  runtime.registerTool(HttpRequestTool as unknown as ToolDefinition);
+  runtime.registerTool(createListAvailableSkillsTool(agentId));
+  runtime.registerTool(await createLoadSkillTool(agentId, (loadedSkill) => {
+    runtime.activateLoadedSkill(loadedSkill);
+  }));
+  runtime.registerTool(createReadSkillResourceTool(agentId, runtimeRef));
+  runtime.registerTool(createRunSkillScriptTool(agentId, runtimeRef, permissions));
+
+  const dynamicTools = await pluginManager.loadAllTools(agentId, permissions);
+  for (const tool of dynamicTools) {
+    runtime.registerTool(tool as unknown as ToolDefinition);
+  }
+}
+
 async function initializeAgent(config: ResolvedAgentConfig, sender?: WebContents) {
   void sender;
   const { agent, model } = config;
@@ -691,33 +732,16 @@ async function initializeAgent(config: ResolvedAgentConfig, sender?: WebContents
   );
   runtimeRef = runtime;
 
-  runtime.registerTool(ReadFileTool as unknown as ToolDefinition);
-  runtime.registerTool(createReadAttachmentTool(() => runtime.getActiveSessionId()));
-  runtime.registerTool(WriteFileTool as unknown as ToolDefinition);
-  runtime.registerTool(ListDirectoryTool as unknown as ToolDefinition);
-  runtime.registerTool(DeleteFileTool as unknown as ToolDefinition);
-  runtime.registerTool(createExecuteCommandTool({
-    cwd: workspace,
-    policy: permissions.getShellExecutionPolicy()
-  }) as unknown as ToolDefinition);
-  runtime.registerTool(SystemInfoTool as unknown as ToolDefinition);
-  runtime.registerTool(WebSearchTool as unknown as ToolDefinition);
-  runtime.registerTool(FetchWebpageTool as unknown as ToolDefinition);
-  runtime.registerTool(HttpRequestTool as unknown as ToolDefinition);
-  runtime.registerTool(createListAvailableSkillsTool(agent.id));
-  runtime.registerTool(await createLoadSkillTool(agent.id, (loadedSkill) => {
-    runtime.activateLoadedSkill(loadedSkill);
-  }));
-  runtime.registerTool(createReadSkillResourceTool(agent.id, () => runtimeRef));
-  runtime.registerTool(createRunSkillScriptTool(agent.id, () => runtimeRef, permissions));
-
   try {
-    const dynamicTools = await pluginManager.loadAllTools(agent.id);
-    for (const tool of dynamicTools) {
-      runtime.registerTool(tool as unknown as ToolDefinition);
-    }
+    await registerRuntimeTools({
+      runtime,
+      runtimeRef: () => runtimeRef,
+      agentId: agent.id,
+      workspace,
+      permissions
+    });
   } catch (error) {
-    console.error('Failed to load dynamic plugins:', error);
+    console.error('Failed to register runtime tools:', error);
   }
 
   runtimeRegistry.set(agent.id, {

@@ -85,7 +85,10 @@ export const ConfigPanel = memo(function ConfigPanel({
         onReportNotice(createErrorNotice(t('config.validation.provider'), 'model_validation'));
         return;
       }
-      if (editingModel.provider !== 'ollama' && !normalizedApiKey) {
+      const canReuseStoredApiKey = isEditingExistingModel
+        && editingModel.apiKeyStored
+        && normalizedName === editingModel.id;
+      if (editingModel.provider !== 'ollama' && !normalizedApiKey && !canReuseStoredApiKey) {
         onReportNotice(createErrorNotice(t('config.validation.apiKey'), 'model_validation'));
         return;
       }
@@ -98,7 +101,7 @@ export const ConfigPanel = memo(function ConfigPanel({
       setView('list');
       setEditingModel(null);
     }
-  }, [editingModel, onClearNotice, onReportNotice, onSaveModel, t]);
+  }, [editingModel, isEditingExistingModel, onClearNotice, onReportNotice, onSaveModel, t]);
 
   const handleEditAgent = useCallback((agent: AgentConfig) => {
     setEditingAgent({ ...agent });
