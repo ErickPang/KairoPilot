@@ -37,7 +37,14 @@ function resolvePathForContainment(targetPath: string) {
   return absolutePath;
 }
 
-export function resolveKairopilotFilePath(requestUrl: string, allowedProtocolRoots: string[]) {
+export type ProtocolRootResolver = string[] | (() => string[]);
+
+function resolveProtocolRoots(allowedProtocolRoots: ProtocolRootResolver) {
+  const roots = typeof allowedProtocolRoots === 'function' ? allowedProtocolRoots() : allowedProtocolRoots;
+  return [...new Set(roots.filter((root) => typeof root === 'string' && root.trim().length > 0))];
+}
+
+export function resolveKairopilotFilePath(requestUrl: string, allowedProtocolRoots: ProtocolRootResolver) {
   const rawPath = requestUrl.slice('kairopilot://'.length);
   const decodedPath = decodeURIComponent(rawPath);
   const normalizedPath = resolvePathForContainment(decodedPath);
@@ -49,7 +56,7 @@ export function resolveKairopilotFilePath(requestUrl: string, allowedProtocolRoo
     }
 
     const realFilePath = fs.realpathSync(normalizedPath);
-    const normalizedRoots = allowedProtocolRoots.map((root) => resolvePathForContainment(root));
+    const normalizedRoots = resolveProtocolRoots(allowedProtocolRoots).map((root) => resolvePathForContainment(root));
 
     if (!normalizedRoots.some((root) => isPathInsideRoot(realFilePath, root))) {
       return null;
@@ -61,7 +68,7 @@ export function resolveKairopilotFilePath(requestUrl: string, allowedProtocolRoo
   }
 }
 
-export function registerKairopilotProtocol(allowedProtocolRoots: string[]) {
+export function registerKairopilotProtocol(allowedProtocolRoots: ProtocolRootResolver) {
   protocol.handle('kairopilot', (request) => {
     const resolvedPath = resolveKairopilotFilePath(request.url, allowedProtocolRoots);
     if (!resolvedPath) {

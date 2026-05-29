@@ -17,6 +17,10 @@ function ensureIndexes(database: Database.Database) {
       ON sessions(agent_id, updated_at DESC);
     CREATE INDEX IF NOT EXISTS idx_messages_session_timestamp
       ON messages(session_id, timestamp ASC);
+    CREATE INDEX IF NOT EXISTS idx_message_attachments_session
+      ON message_attachments(session_id, created_at ASC);
+    CREATE INDEX IF NOT EXISTS idx_message_attachments_message
+      ON message_attachments(message_id);
     CREATE INDEX IF NOT EXISTS idx_runs_session_updated_at
       ON runs(session_id, updated_at DESC);
     CREATE INDEX IF NOT EXISTS idx_run_steps_run_step_index
@@ -54,10 +58,29 @@ function initTables(database: Database.Database) {
       name TEXT,
       tool_call_id TEXT,
       tool_calls TEXT,
+      attachments TEXT,
       usage TEXT,
       model TEXT,
       timestamp INTEGER NOT NULL,
       FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS message_attachments (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      message_id TEXT,
+      name TEXT NOT NULL,
+      mime_type TEXT NOT NULL,
+      size INTEGER NOT NULL,
+      kind TEXT NOT NULL,
+      original_path TEXT,
+      stored_path TEXT NOT NULL,
+      content_hash TEXT NOT NULL,
+      preview_uri TEXT,
+      extracted_text TEXT,
+      created_at INTEGER NOT NULL,
+      FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
+      FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
     );
 
     CREATE TABLE IF NOT EXISTS app_state (
@@ -180,7 +203,7 @@ function migrateFromElectronStore(database: Database.Database, defaultAgentId: s
       const insertSession = database.prepare(
         'INSERT INTO sessions (id, title, agent_id, created_at, updated_at) VALUES (@id, @title, @agentId, @createdAt, @updatedAt)'
       );
-      const insertMessage = database.prepare('INSERT INTO messages (id, session_id, role, content, timestamp, name, tool_call_id, tool_calls, usage, model) VALUES (@id, @sessionId, @role, @content, @timestamp, @name, @toolCallId, @toolCalls, @usage, @model)');
+      const insertMessage = database.prepare('INSERT INTO messages (id, session_id, role, content, timestamp, name, tool_call_id, tool_calls, attachments, usage, model) VALUES (@id, @sessionId, @role, @content, @timestamp, @name, @toolCallId, @toolCalls, @attachments, @usage, @model)');
 
       const transaction = database.transaction(() => {
         for (const session of oldSessions) {
@@ -202,6 +225,7 @@ function migrateFromElectronStore(database: Database.Database, defaultAgentId: s
               name: msg.name || null,
               toolCallId: msg.tool_call_id || null,
               toolCalls: msg.tool_calls ? JSON.stringify(msg.tool_calls) : null,
+              attachments: msg.attachments ? JSON.stringify(msg.attachments) : null,
               usage: msg.usage ? JSON.stringify(msg.usage) : null,
               model: msg.model || null
             });
@@ -269,6 +293,7 @@ export function initializeChatDatabase(
     ensureMessageColumn(database, 'name', 'name TEXT');
     ensureMessageColumn(database, 'tool_call_id', 'tool_call_id TEXT');
     ensureMessageColumn(database, 'tool_calls', 'tool_calls TEXT');
+    ensureMessageColumn(database, 'attachments', 'attachments TEXT');
     ensureMessageColumn(database, 'usage', 'usage TEXT');
     ensureMessageColumn(database, 'model', 'model TEXT');
   } catch (error) {

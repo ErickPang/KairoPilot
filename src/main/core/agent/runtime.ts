@@ -30,10 +30,15 @@ import {
   RuntimeSnapshotPatch,
   RuntimeUpdate
 } from './runEngine';
+import { createPermissionGuardedTool } from './toolPipeline';
 import {
   SkillCatalogSnapshot,
   shouldBlockSensitiveDisclosure
 } from './runtimeHelpers';
+import {
+  buildSkillInventoryResponse,
+  isSkillInventoryQuery
+} from './runtimeSkillInventory';
 import {
   handleToolCall,
   resumePendingToolCall
@@ -41,10 +46,13 @@ import {
 import { CapabilityOrchestrator, type LoadedSkillCapability } from './capabilityOrchestrator';
 import { RuntimeRunControl } from './runtimeRunControl';
 import { RuntimeSupportState } from './runtimeSupportState';
+import { formatAttachmentContext } from '../../store/attachments';
 
 interface RuntimeSupportContext {
   availableSkillsCatalog?: SkillCatalogSnapshot;
 }
+
+export { buildSkillInventoryResponse, isSkillInventoryQuery };
 
 function isVisibleSessionMessage(message: ChatMessage) {
   const content = message.content.trim();
@@ -73,6 +81,8 @@ export class AgentRuntime {
   private permissionGuard: PermissionGuard;
   private runControl = new RuntimeRunControl();
   private runtimeSupportState = new RuntimeSupportState();
+  private activeSessionId: string | null = null;
+  private activeRunId: string | null = null;
   private auditLog?: (entry: {
     tool: string;
     args: Record<string, unknown>;
@@ -85,6 +95,8 @@ export class AgentRuntime {
   }) => void;
   private refreshSystemPrompt?: () => string | Promise<string>;
   private getRuntimeSupportContext?: () => RuntimeSupportContext;
+  private resolveInitialSkills?: (userInput: string, agentId: string) => Promise<LoadedSkillCapability[]>;
+  private reloadRetainedSkills?: (skills: LoadedSkillCapability[], agentId: string) => Promise<LoadedSkillCapability[]>;
 
   private restoreSnapshotState(snapshot: RuntimeSnapshot) {
     this.systemPrompt = snapshot.systemPrompt || this.systemPrompt;
@@ -119,7 +131,9 @@ export class AgentRuntime {
       stepId?: string;
     }) => void,
     refreshSystemPrompt?: () => string | Promise<string>,
-    getRuntimeSupportContext?: () => RuntimeSupportContext
+    getRuntimeSupportContext?: () => RuntimeSupportContext,
+    resolveInitialSkills?: (userInput: string, agentId: string) => Promise<LoadedSkillCapability[]>,
+    reloadRetainedSkills?: (skills: LoadedSkillCapability[], agentId: string) => Promise<LoadedSkillCapability[]>
   ) {
     this.llm = llm;
     this.systemPrompt = systemPrompt;
@@ -128,13 +142,16 @@ export class AgentRuntime {
     this.auditLog = auditLog;
     this.refreshSystemPrompt = refreshSystemPrompt;
     this.getRuntimeSupportContext = getRuntimeSupportContext;
+    this.resolveInitialSkills = resolveInitialSkills;
+    this.reloadRetainedSkills = reloadRetainedSkills;
     this.tools = new Map();
     this.capabilityOrchestrator = new CapabilityOrchestrator(permissionGuard);
   }
 
   registerTool(tool: ToolDefinition) {
-    this.tools.set(tool.name, tool);
-    this.capabilityOrchestrator.registerTool(tool);
+    const guardedTool = createPermissionGuardedTool(tool, this.permissionGuard);
+    this.tools.set(guardedTool.name, guardedTool);
+    this.capabilityOrchestrator.registerTool(guardedTool);
   }
 
   getHistory(): ChatMessage[] {
@@ -151,8 +168,19 @@ export class AgentRuntime {
     this.history = history;
   }
 
+  getActiveSessionId() {
+    return this.activeSessionId;
+  }
+
   activateLoadedSkill(skillOrCapability: LoadedSkillCapability | string, allowedTools: string[] = [], loadedAt?: number) {
     this.capabilityOrchestrator.activateSkill(skillOrCapability, allowedTools, loadedAt);
+    const skillReference = typeof skillOrCapability === 'string'
+      ? skillOrCapability
+      : skillOrCapability.skillId || skillOrCapability.skillName;
+    const loadedSkill = this.capabilityOrchestrator.getLoadedSkillCapability(skillReference);
+    if (loadedSkill) {
+      this.recordSkillActivation(loadedSkill);
+    }
   }
 
   clearLoadedSkills() {
@@ -167,6 +195,10 @@ export class AgentRuntime {
     return this.capabilityOrchestrator.canRunLoadedSkillScript(skillReference, scriptPath);
   }
 
+  getLoadedSkillCapability(skillReference: string) {
+    return this.capabilityOrchestrator.getLoadedSkillCapability(skillReference);
+  }
+
   async chat(
     userInput: string,
     onUpdate?: (update: RuntimeUpdate) => void,
@@ -175,17 +207,33 @@ export class AgentRuntime {
     if (!options?.sessionId) {
       throw new Error('Session id is required for chat runs.');
     }
+    this.activeSessionId = options.sessionId;
 
     await this.refreshPromptIfNeeded();
-    this.clearLoadedSkills();
+    if (this.reloadRetainedSkills) {
+      const retainedSkills = this.capabilityOrchestrator.getLoadedSkills()
+        .filter((skill) => skill.activationSource !== 'automatic');
+      if (retainedSkills.length > 0) {
+        const refreshedSkills = await this.reloadRetainedSkills(retainedSkills, options.agentId || 'mainAgent');
+        this.capabilityOrchestrator.clearLoadedSkills({ activationSource: 'manual' });
+        for (const skill of refreshedSkills) {
+          this.capabilityOrchestrator.activateSkill(skill);
+        }
+      }
+    }
+    const attachments = Array.isArray(options.attachments) ? options.attachments : [];
+    const attachmentContext = formatAttachmentContext(attachments);
+    const modelUserInput = attachmentContext ? `${attachmentContext}\n\n${userInput}` : userInput;
     const userMessage: ChatMessage = {
       role: 'user',
-      content: userInput,
+      content: modelUserInput,
+      attachments,
       timestamp: Date.now()
     };
     this.history.push(userMessage);
 
     const run = createRun(options.sessionId, options.agentId || 'mainAgent', userInput, userInput);
+    this.activeRunId = run.id;
     this.runControl.start(run.id);
     const planStep = createRunStep(run.id, 'plan', '接收用户输入', {
       status: 'completed',
@@ -205,10 +253,76 @@ export class AgentRuntime {
       stepId: planStep.id
     });
 
+    if (isSkillInventoryQuery(userInput)) {
+      const content = await buildSkillInventoryResponse(options.agentId || 'mainAgent');
+      const assistantMessage: ChatMessage = {
+        role: 'assistant',
+        content,
+        timestamp: Date.now()
+      };
+      this.history.push(assistantMessage);
+
+      const completeStep = createRunStep(run.id, 'complete', '直接返回技能清单', {
+        status: 'completed',
+        output: {
+          content
+        }
+      });
+
+      updateRun(run.id, {
+        status: 'completed',
+        finalResponse: content,
+        error: null,
+        waitingApprovalId: null,
+        completedAt: Date.now()
+      });
+
+      this.persistSnapshot(run.id, {
+        iterations: 0,
+        lastUserInput: userInput,
+        contextSummary: this.buildModelContext(run.id, options.sessionId, {
+          consumeRuntimeSupportSummary: false
+        }).metadata,
+        stepId: completeStep.id
+      });
+
+      this.emitUpdate(onUpdate, {
+        type: 'assistant-response',
+        content,
+        runId: run.id,
+        status: 'completed'
+      });
+
+      return {
+        status: 'completed',
+        runId: run.id,
+        content
+      };
+    }
+
+    this.capabilityOrchestrator.clearLoadedSkills({ activationSource: 'automatic' });
+    let initialSkillsLoaded = false;
+    if (this.resolveInitialSkills) {
+      const initialSkills = await this.resolveInitialSkills(userInput, options.agentId || 'mainAgent');
+      for (const skill of initialSkills) {
+        this.activateLoadedSkill(skill);
+      }
+      initialSkillsLoaded = initialSkills.length > 0;
+    }
+    if (initialSkillsLoaded) {
+      this.persistSnapshot(run.id, {
+        iterations: 0,
+        lastUserInput: userInput,
+        contextSummary: this.buildModelContext(run.id, options.sessionId, {
+          consumeRuntimeSupportSummary: false
+        }).metadata
+      });
+    }
+
     try {
       return await this.executeRun({
         runId: run.id,
-        userInput,
+        userInput: modelUserInput,
         onUpdate,
         options: {
           ...options,
@@ -243,6 +357,8 @@ export class AgentRuntime {
     const { approval, run, snapshot, pendingToolCall } = resumeState;
 
     this.restoreSnapshotState(snapshot);
+    this.activeRunId = run.id;
+    this.activeSessionId = run.sessionId || this.activeSessionId;
     this.runControl.start(run.id);
 
     await resumePendingToolCall({
@@ -394,6 +510,8 @@ export class AgentRuntime {
     }
 
     this.restoreSnapshotState(snapshot);
+    this.activeRunId = run.id;
+    this.activeSessionId = run.sessionId || this.activeSessionId;
     this.runControl.start(run.id);
     updateRun(run.id, {
       status: 'running',
@@ -426,6 +544,8 @@ export class AgentRuntime {
     }
 
     this.restoreSnapshotState(snapshot);
+    this.activeRunId = run.id;
+    this.activeSessionId = run.sessionId || this.activeSessionId;
     this.runControl.start(run.id);
     createRunStep(run.id, 'summary', '从检查点重试执行', {
       status: 'completed',
@@ -471,6 +591,7 @@ export class AgentRuntime {
         tools: this.tools,
         permissionGuard: this.permissionGuard,
         auditLog: this.auditLog,
+        shouldInterrupt: () => this.runControl.consume(runId),
         emitUpdate: (listener, update) => this.emitUpdate(listener, update),
         appendToolMessage: (name, callId, content) => this.appendToolMessage(name, callId, content),
         persistSnapshot: (currentRunId, patch) => this.persistSnapshot(currentRunId, patch),
@@ -524,6 +645,56 @@ export class AgentRuntime {
     if (onUpdate) {
       onUpdate(update);
     }
+  }
+
+  private recordSkillActivation(skill: LoadedSkillCapability) {
+    if (!this.activeRunId) {
+      return;
+    }
+
+    const payload = {
+      skillId: skill.skillId || skill.skillName,
+      skillName: skill.skillName,
+      contentHash: skill.contentHash,
+      source: skill.source,
+      activationSource: skill.activationSource || 'manual',
+      resolverScore: skill.resolverScore,
+      resolverReasons: skill.resolverReasons ?? [],
+      explicitMention: skill.explicitMention,
+      executionMode: skill.executionMode || 'inline',
+      allowedTools: skill.allowedTools,
+      resolvedArguments: skill.resolvedArguments ?? {},
+      resources: skill.resourcePaths ?? [],
+      scripts: skill.scriptPaths ?? []
+    };
+
+    const step = createRunStep(this.activeRunId, 'summary', `激活技能 ${skill.skillName}`, {
+      status: 'completed',
+      output: payload,
+      metadata: {
+        kind: 'skill_activation',
+        skillId: payload.skillId,
+        activationSource: payload.activationSource,
+        contentHash: payload.contentHash
+      }
+    });
+
+    this.auditLog?.({
+      tool: 'skill_activation',
+      args: payload,
+      result: {
+        status: 'loaded'
+      },
+      policyTags: [
+        'policy:skill_used',
+        'tool_category:skill',
+        `skill:${payload.skillId}`,
+        `activation:${payload.activationSource}`
+      ],
+      sessionId: this.activeSessionId || undefined,
+      runId: this.activeRunId,
+      stepId: step.id
+    });
   }
 
   private async refreshPromptIfNeeded() {

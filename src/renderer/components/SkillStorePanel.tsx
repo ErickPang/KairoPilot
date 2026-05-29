@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { IconChevronDown, IconFolder, IconRefresh, IconSkill } from './Icons';
+import { IconChevronDown, IconFolder, IconRefresh, IconSkill, IconTrash } from './Icons';
 import './PluginStorePanel.css';
 import { useTranslation } from '../hooks/useTranslation';
 import type { TranslationKey } from '../i18n';
@@ -76,6 +76,8 @@ export const SkillStorePanel = memo(function SkillStorePanel() {
   const [importArchivePath, setImportArchivePath] = useState('');
   const [importError, setImportError] = useState<string | null>(null);
   const [importLoading, setImportLoading] = useState(false);
+  const [uninstallTarget, setUninstallTarget] = useState<{ skill: SkillSummary; scope: string } | null>(null);
+  const [uninstallLoading, setUninstallLoading] = useState(false);
   const [marketplaceSearchText, setMarketplaceSearchText] = useState('');
   const [marketplacePage, setMarketplacePage] = useState(1);
 
@@ -481,6 +483,47 @@ export const SkillStorePanel = memo(function SkillStorePanel() {
     setSourceModalOpen(true);
   };
 
+  const handleOpenUninstallModal = (skill: SkillSummary, scope: string) => {
+    setError(null);
+    setUninstallLoading(false);
+    setUninstallTarget({ skill, scope });
+  };
+
+  const handleCloseUninstallModal = () => {
+    if (uninstallLoading) {
+      return;
+    }
+    setUninstallTarget(null);
+  };
+
+  const handleConfirmUninstall = async () => {
+    if (!uninstallTarget) {
+      return;
+    }
+
+    setUninstallLoading(true);
+    setError(null);
+    try {
+      const result = await window.kairo.invoke(KAIRO_INVOKE.skillsUninstall, {
+        id: uninstallTarget.skill.id,
+        scope: uninstallTarget.scope
+      }) as { success?: boolean; error?: string } | undefined;
+      if (!result?.success) {
+        throw new Error(result?.error || 'Failed to uninstall skill');
+      }
+      setUninstallTarget(null);
+      await loadBaseData();
+      if (activeTab === 'store' && activeMarketplaceTab) {
+        setLoadedMarketplaceTabIds([]);
+        await loadMarketplaceData(activeMarketplaceTab.id, true);
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to uninstall skill');
+    } finally {
+      setUninstallLoading(false);
+    }
+  };
+
   const handleCloseSourceModal = () => {
     setSourceModalOpen(false);
     setSavingRegistry(false);
@@ -688,7 +731,13 @@ export const SkillStorePanel = memo(function SkillStorePanel() {
               ) : (
                 <div className="skills-grid">
                   {sortedPublicSkills.map(skill => (
-                    <SkillItem key={skill.id} skill={skill} />
+                    <SkillItem
+                      key={skill.id}
+                      skill={skill}
+                      scope="public"
+                      uninstalling={uninstallLoading && uninstallTarget?.skill.id === skill.id && uninstallTarget.scope === 'public'}
+                      onUninstall={handleOpenUninstallModal}
+                    />
                   ))}
                 </div>
               )}
@@ -709,7 +758,13 @@ export const SkillStorePanel = memo(function SkillStorePanel() {
                       <div className="empty-state">{t('skills.noAgent')}</div>
                     ) : (
                       sortedAgentSkills.map(skill => (
-                        <SkillItem key={skill.id} skill={skill} />
+                        <SkillItem
+                          key={skill.id}
+                          skill={skill}
+                          scope={`agent:${agentId}`}
+                          uninstalling={uninstallLoading && uninstallTarget?.skill.id === skill.id && uninstallTarget.scope === `agent:${agentId}`}
+                          onUninstall={handleOpenUninstallModal}
+                        />
                       ))
                     )}
                   </div>
@@ -1001,6 +1056,47 @@ export const SkillStorePanel = memo(function SkillStorePanel() {
         </div>
       )}
 
+      {uninstallTarget && (
+        <div className="modal-overlay">
+          <div className="modal-content skill-install-modal">
+            <div className="skill-install-modal-header">
+              <div>
+                <div className="skill-card-title">{t('skills.uninstallDialogTitle', { skill: uninstallTarget.skill.name })}</div>
+                <div className="config-subtitle skill-install-modal-subtitle">{t('skills.uninstallDialogSubtitle')}</div>
+              </div>
+            </div>
+            <div className="skill-install-modal-body">
+              <div className="skill-install-form-card">
+                <div className="skill-card-detail-label">{t('skills.installScope')}</div>
+                <div className="skill-card-detail-description">{getScopeLabel(uninstallTarget.scope)}</div>
+              </div>
+              <div className="skill-install-form-card">
+                <div className="skill-card-detail-label">{t('skills.description')}</div>
+                <div className="skill-card-detail-description">{uninstallTarget.skill.description}</div>
+              </div>
+              <div className="skill-install-modal-actions">
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={handleCloseUninstallModal}
+                  disabled={uninstallLoading}
+                >
+                  {t('common.cancel')}
+                </button>
+                <button
+                  type="button"
+                  className={`btn btn-danger ${uninstallLoading ? 'is-loading' : ''}`}
+                  onClick={() => { void handleConfirmUninstall(); }}
+                  disabled={uninstallLoading}
+                >
+                  {uninstallLoading ? t('skills.uninstalling') : t('skills.confirmUninstall')}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {reviewSkill && (
         <div className="modal-overlay">
           <div className="modal-content skill-install-modal">
@@ -1176,7 +1272,17 @@ function SkillSectionPanel({
   );
 }
 
-function SkillItem({ skill }: { skill: SkillSummary }) {
+function SkillItem({
+  skill,
+  scope,
+  uninstalling,
+  onUninstall
+}: {
+  skill: SkillSummary;
+  scope: string;
+  uninstalling: boolean;
+  onUninstall: (skill: SkillSummary, scope: string) => void;
+}) {
   const [expanded, setExpanded] = useState(false);
   const { t } = useTranslation();
   const sourceLabel = skill.source === 'public' ? t('skills.publicTag') : t('skills.agentTag');
@@ -1218,7 +1324,7 @@ function SkillItem({ skill }: { skill: SkillSummary }) {
         </span>
       </div>
 
-      <div className="skill-card-footer">
+      <div className="skill-card-footer skill-card-footer-between">
         <button
           type="button"
           className={`skill-card-toggle ${expanded ? 'expanded' : ''}`}
@@ -1227,6 +1333,17 @@ function SkillItem({ skill }: { skill: SkillSummary }) {
           <span>{expanded ? t('skills.hideContent') : t('skills.showContent')}</span>
           <IconChevronDown size={16} />
         </button>
+        {skill.removable && (
+          <button
+            type="button"
+            className={`btn btn-secondary btn-sm btn-danger ${uninstalling ? 'is-loading' : ''}`}
+            onClick={() => onUninstall(skill, scope)}
+            disabled={uninstalling}
+          >
+            {uninstalling ? <IconRefresh size={14} className="spinning" /> : <IconTrash size={14} />}
+            <span className="btn-text-inline">{uninstalling ? t('skills.uninstalling') : t('skills.uninstall')}</span>
+          </button>
+        )}
       </div>
 
       {expanded && (

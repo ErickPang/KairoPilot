@@ -45,5 +45,8 @@ export const DEFAULT_CONFIG: KairoPilotConfig = {
       name: preset.name
     }))
   },
+  appearance: {
+    theme: 'system'
+  },
   webSearch: createDefaultWebSearchConfig()
 };

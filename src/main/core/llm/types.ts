@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { ProviderType } from '../../../shared/contracts';
+import type { ChatAttachment, ProviderType } from '../../../shared/contracts';
 
 export interface LLMUsage {
   prompt_tokens: number;
@@ -17,6 +17,7 @@ export interface ChatMessage {
   timestamp?: number;
   model?: string;
   usage?: LLMUsage;
+  attachments?: ChatAttachment[];
 }
 
 export interface LLMConfig {
@@ -30,7 +31,15 @@ export interface ToolDefinition {
   name: string;
   description: string;
   parameters: z.ZodSchema;
+  parametersJsonSchema?: Record<string, unknown>;
   execute: (args: Record<string, unknown>) => Promise<unknown>;
+  metadata?: {
+    source?: 'builtin' | 'plugin' | 'skill';
+    pluginId?: string;
+    pluginName?: string;
+    pluginScope?: string;
+    riskLevel?: 'low' | 'medium' | 'high' | 'critical';
+  };
 }
 
 export type LLMProviderProtocol = 'openai-compatible' | 'native';
@@ -58,6 +67,7 @@ export interface LLMRequest {
   generationConfig?: LLMGenerationConfig;
   responseFormat?: 'text' | 'json';
   metadata?: Record<string, unknown>;
+  signal?: AbortSignal;
 }
 
 export interface LLMResponse {

@@ -1,173 +1,176 @@
 import { ipcMain } from 'electron';
 import {
-  createSession,
-  getActiveSession,
-  getApprovalRecord,
-  getLatestSessionContextSummary,
-  getLatestRun,
-  getLatestRunSteps,
-  getPendingApproval,
-  getRunById,
-  queryRuns,
-  getRunTrace,
-  getSessionById,
-  updateSessionTitle,
-  deleteSession,
-  clearAllSessions,
-  setActiveSessionId,
-  listSessions,
-  getAgentStats,
-  getTokenUsageDetails
-} from '../../store/chat';
-import { getActiveAgentId } from '../../store/config';
+  clearActiveAgentSessions,
+  createActiveAgentSession,
+  deleteActiveAgentSession,
+  getActiveAgentSession,
+  listActiveAgentSessions,
+  setActiveAgentSession,
+  updateActiveAgentSessionTitle
+} from '../../services/chatService';
+import {
+  getLatestContextSummaryForActiveAgentSession,
+  getLatestRunForActiveAgentSession,
+  getPendingApprovalForActiveAgentSession,
+  getRunStepsForActiveAgentSession,
+  getRunTraceForActiveAgent,
+  queryRunsForActiveAgent
+} from '../../services/chatRunService';
+import {
+  deleteAttachmentForActiveSession,
+  getSessionWithLegacyAttachmentMigration,
+  prepareAttachmentsForActiveAgent,
+  recordPrepareAttachmentsFailure
+} from '../../services/chatAttachmentService';
+import {
+  getMonitoringAgentStats,
+  getMonitoringTokenUsageDetails
+} from '../../services/chatMonitoringService';
 import { KAIRO_INVOKE } from '../../../shared/ipc';
+import { parseIpcInput } from './configValidation';
+import {
+  CreateSessionTitleInputSchema,
+  DeleteAttachmentInputSchema,
+  MonitoringTokenQueryInputSchema,
+  PrepareAttachmentsInputSchema,
+  RunQueryInputSchema,
+  RunTraceInputSchema,
+  SessionIdInputSchema,
+  UpdateSessionTitleInputSchema
+} from './chatSystemValidation';
+import { ipcFailure, ipcSuccess } from './ipcResult';
 
 function registerChatHandlers() {
   ipcMain.handle(KAIRO_INVOKE.chatListSessions, async () => {
-    const agentId = getActiveAgentId();
-    return listSessions(agentId || undefined);
+    return listActiveAgentSessions();
   });
 
   ipcMain.handle(KAIRO_INVOKE.chatCreateSession, async (_, title) => {
-    const sessionTitle = typeof title === 'string' ? title : 'New Chat';
-    const agentId = getActiveAgentId();
-    return createSession(sessionTitle, agentId || undefined);
+    const sessionTitle = parseIpcInput(CreateSessionTitleInputSchema, title, 'session title') || 'New Chat';
+    return createActiveAgentSession(sessionTitle);
   });
 
   ipcMain.handle(KAIRO_INVOKE.chatGetActiveSession, async () => {
-    const agentId = getActiveAgentId();
-    return getActiveSession(agentId || undefined);
+    return getActiveAgentSession();
   });
 
   ipcMain.handle(KAIRO_INVOKE.chatGetSession, async (_, sessionId) => {
-    if (typeof sessionId !== 'string') {
+    const payload = SessionIdInputSchema.safeParse(sessionId);
+    if (!payload.success) {
       return null;
     }
-    const session = getSessionById(sessionId);
-    const agentId = getActiveAgentId();
-    if (session && agentId && session.agentId !== agentId) {
-      return null;
-    }
-    return session;
+    return getSessionWithLegacyAttachmentMigration(payload.data);
   });
 
   ipcMain.handle(KAIRO_INVOKE.chatGetLatestRun, async (_, sessionId) => {
-    if (typeof sessionId !== 'string') {
+    const payload = SessionIdInputSchema.safeParse(sessionId);
+    if (!payload.success) {
       return null;
     }
-    const session = getSessionById(sessionId);
-    const agentId = getActiveAgentId();
-    if (!session || (agentId && session.agentId !== agentId)) {
-      return null;
-    }
-    return getLatestRun(sessionId);
+    return getLatestRunForActiveAgentSession(payload.data);
   });
 
   ipcMain.handle(KAIRO_INVOKE.chatGetLatestContextSummary, async (_, sessionId) => {
-    if (typeof sessionId !== 'string') {
+    const payload = SessionIdInputSchema.safeParse(sessionId);
+    if (!payload.success) {
       return null;
     }
-    const session = getSessionById(sessionId);
-    const agentId = getActiveAgentId();
-    if (!session || (agentId && session.agentId !== agentId)) {
-      return null;
-    }
-    return getLatestSessionContextSummary(sessionId);
+    return getLatestContextSummaryForActiveAgentSession(payload.data);
   });
 
   ipcMain.handle(KAIRO_INVOKE.chatGetSessionRuns, async (_, sessionId) => {
-    if (typeof sessionId !== 'string') {
+    const payload = SessionIdInputSchema.safeParse(sessionId);
+    if (!payload.success) {
       return [];
     }
-    const session = getSessionById(sessionId);
-    const agentId = getActiveAgentId();
-    if (!session || (agentId && session.agentId !== agentId)) {
-      return [];
-    }
-    return getLatestRunSteps(sessionId);
+    return getRunStepsForActiveAgentSession(payload.data);
   });
 
   ipcMain.handle(KAIRO_INVOKE.chatGetPendingApproval, async (_, sessionId) => {
-    if (typeof sessionId === 'string') {
-      const session = getSessionById(sessionId);
-      const agentId = getActiveAgentId();
-      if (!session || (agentId && session.agentId !== agentId)) {
-        return null;
-      }
-      return getPendingApproval(sessionId);
+    const payload = SessionIdInputSchema.safeParse(sessionId);
+    if (payload.success) {
+      return getPendingApprovalForActiveAgentSession(payload.data);
     }
-
-    const approval = getPendingApproval();
-    if (!approval?.id) {
-      return null;
-    }
-    return getApprovalRecord(approval.id);
+    return getPendingApprovalForActiveAgentSession();
   });
 
   ipcMain.handle(KAIRO_INVOKE.chatQueryRuns, async (_, input) => {
-    const agentId = getActiveAgentId();
-    const query = typeof input === 'object' && input ? input : {};
-    return queryRuns({
-      ...(query as Record<string, unknown>),
-      agentId: agentId || undefined
-    });
+    const query = parseIpcInput(RunQueryInputSchema, input, 'run query');
+    return queryRunsForActiveAgent(query);
   });
 
   ipcMain.handle(KAIRO_INVOKE.chatGetRunTrace, async (_, input) => {
-    const runId = typeof input === 'string'
-      ? input
-      : (input && typeof input === 'object' && typeof (input as { runId?: unknown }).runId === 'string'
-        ? (input as { runId: string }).runId
-        : null);
-    if (!runId) {
-      return null;
-    }
-
-    const run = getRunById(runId);
-    if (!run) {
-      return null;
-    }
-
-    const session = getSessionById(run.sessionId);
-    const agentId = getActiveAgentId();
-    if (!session || (agentId && session.agentId !== agentId)) {
-      return null;
-    }
-
-    return getRunTrace(typeof input === 'string' ? runId : input);
+    const query = parseIpcInput(RunTraceInputSchema, input, 'run trace query');
+    return getRunTraceForActiveAgent(query);
   });
 
   ipcMain.handle(KAIRO_INVOKE.chatSetActiveSession, async (_, sessionId) => {
-    const agentId = getActiveAgentId();
-    const session = typeof sessionId === 'string' ? getSessionById(sessionId) : null;
-    if (!session || (agentId && session.agentId !== agentId)) {
-      return { success: false, error: 'Session does not belong to the active agent.' };
+    const resolvedSessionId = parseIpcInput(SessionIdInputSchema, sessionId, 'session id');
+    try {
+      setActiveAgentSession(resolvedSessionId);
+      return ipcSuccess();
+    } catch (error) {
+      return ipcFailure(error);
     }
-    setActiveSessionId(sessionId, agentId || undefined);
-    return { success: true };
   });
 
-  ipcMain.handle(KAIRO_INVOKE.chatUpdateSessionTitle, async (_, { sessionId, title }) => {
-    updateSessionTitle(sessionId, title);
-    return { success: true };
+  ipcMain.handle(KAIRO_INVOKE.chatUpdateSessionTitle, async (_, input) => {
+    const payload = parseIpcInput(UpdateSessionTitleInputSchema, input, 'session title update');
+    try {
+      updateActiveAgentSessionTitle(payload.sessionId, payload.title);
+      return ipcSuccess();
+    } catch (error) {
+      return ipcFailure(error);
+    }
   });
 
   ipcMain.handle(KAIRO_INVOKE.chatDeleteSession, async (_, sessionId) => {
-    deleteSession(sessionId);
-    return { success: true };
+    const resolvedSessionId = parseIpcInput(SessionIdInputSchema, sessionId, 'session id');
+    try {
+      deleteActiveAgentSession(resolvedSessionId);
+      return ipcSuccess();
+    } catch (error) {
+      return ipcFailure(error);
+    }
   });
 
   ipcMain.handle(KAIRO_INVOKE.chatClearAllSessions, async () => {
-    clearAllSessions();
-    return { success: true };
+    clearActiveAgentSessions();
+    return ipcSuccess();
   });
 
   ipcMain.handle(KAIRO_INVOKE.chatGetAgentStats, async () => {
-    return getAgentStats();
+    return getMonitoringAgentStats();
   });
 
   ipcMain.handle(KAIRO_INVOKE.chatGetTokenUsageDetails, async (_, params) => {
-    return getTokenUsageDetails(typeof params === 'object' && params ? params : {});
+    const query = parseIpcInput(MonitoringTokenQueryInputSchema, params, 'token usage query');
+    return getMonitoringTokenUsageDetails(query);
+  });
+
+  ipcMain.handle(KAIRO_INVOKE.chatPrepareAttachments, async (_, input) => {
+    try {
+      const payload = parseIpcInput(PrepareAttachmentsInputSchema, input, 'attachment prepare request');
+      const attachments = await prepareAttachmentsForActiveAgent({
+        sessionId: payload.sessionId,
+        files: payload.files
+      });
+      return ipcSuccess({ attachments });
+    } catch (error) {
+      const result = ipcFailure(error);
+      recordPrepareAttachmentsFailure(result.error);
+      return result;
+    }
+  });
+
+  ipcMain.handle(KAIRO_INVOKE.chatDeleteAttachment, async (_, input) => {
+    try {
+      const payload = parseIpcInput(DeleteAttachmentInputSchema, input, 'attachment delete request');
+      const deleted = await deleteAttachmentForActiveSession(payload);
+      return ipcSuccess({ deleted });
+    } catch (error) {
+      return ipcFailure(error);
+    }
   });
 }
 

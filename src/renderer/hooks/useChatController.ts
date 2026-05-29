@@ -1,12 +1,13 @@
 import { Dispatch, RefObject, SetStateAction, useCallback, useEffect, useRef, useState } from 'react';
-import { AppConfirmationOptions, Message, SessionContextState, SessionContextUpdate, SessionSummary } from '../types';
+import { AppConfirmationOptions, ChatAttachment, Message, SessionContextState, SessionContextUpdate, SessionSummary } from '../types';
 import { I18nContextValue } from '../components/layout/I18nContext';
 import { KAIRO_EVENT, KAIRO_INVOKE } from '../../shared/ipc';
 import type { RuntimeUpdateEvent } from '../types';
-import { createErrorNotice, getErrorMessage, logRendererError } from './errorUtils';
+import { createErrorNotice, getErrorMessage, logRendererError, withActionableErrorHint } from './errorUtils';
 import {
   appendRuntimeMessage,
   applyRuntimeUpdateToSessionContext,
+  upsertAssistantStreamMessage,
   upsertThinkingMessage
 } from './runtimeEventUtils';
 
@@ -44,6 +45,11 @@ export function useChatController(options: UseChatControllerOptions) {
   const [loading, setLoading] = useState(false);
   const activeSessionIdRef = useRef<string | null>(sessionContext.activeSessionId);
   const runStateRefreshTimerRef = useRef<number | null>(null);
+  const bufferedAssistantContentRef = useRef<string | null>(null);
+  const bufferedThinkingContentRef = useRef<string | null>(null);
+  const messageFlushTimerRef = useRef<number | null>(null);
+  const contextFlushTimerRef = useRef<number | null>(null);
+  const pendingProgressUpdateRef = useRef<RuntimeUpdateEvent | null>(null);
 
   useEffect(() => {
     activeSessionIdRef.current = sessionContext.activeSessionId;
@@ -51,9 +57,9 @@ export function useChatController(options: UseChatControllerOptions) {
 
   const reportChatError = useCallback((message: string, source: string) => {
     updateSessionContext({
-      appNotice: createErrorNotice(message, source)
+      appNotice: createErrorNotice(withActionableErrorHint(message, t), source)
     });
-  }, [updateSessionContext]);
+  }, [t, updateSessionContext]);
 
   const clearChatError = useCallback(() => {
     updateSessionContext({ appNotice: null });
@@ -94,16 +100,95 @@ export function useChatController(options: UseChatControllerOptions) {
     }, 250);
   }, [flushRunStateRefresh, loadRunState]);
 
+  const flushBufferedMessages = useCallback(() => {
+    if (messageFlushTimerRef.current !== null) {
+      window.clearTimeout(messageFlushTimerRef.current);
+      messageFlushTimerRef.current = null;
+    }
+
+    const thinkingContent = bufferedThinkingContentRef.current;
+    const assistantContent = bufferedAssistantContentRef.current;
+    bufferedThinkingContentRef.current = null;
+    bufferedAssistantContentRef.current = null;
+
+    if (thinkingContent === null && assistantContent === null) {
+      return;
+    }
+
+    setMessages((prev) => {
+      let next = prev;
+      if (thinkingContent !== null) {
+        next = upsertThinkingMessage(next, thinkingContent);
+      }
+      if (assistantContent !== null) {
+        next = upsertAssistantStreamMessage(next, assistantContent);
+      }
+      return next;
+    });
+  }, [setMessages]);
+
+  const scheduleBufferedMessageFlush = useCallback(() => {
+    if (messageFlushTimerRef.current !== null) {
+      return;
+    }
+
+    messageFlushTimerRef.current = window.setTimeout(() => {
+      messageFlushTimerRef.current = null;
+      flushBufferedMessages();
+    }, 33);
+  }, [flushBufferedMessages]);
+
+  const flushProgressContextUpdate = useCallback(() => {
+    if (contextFlushTimerRef.current !== null) {
+      window.clearTimeout(contextFlushTimerRef.current);
+      contextFlushTimerRef.current = null;
+    }
+
+    const update = pendingProgressUpdateRef.current;
+    pendingProgressUpdateRef.current = null;
+    if (!update) {
+      return;
+    }
+
+    updateSessionContext((current) => applyRuntimeUpdateToSessionContext(current, update));
+  }, [updateSessionContext]);
+
+  const scheduleProgressContextUpdate = useCallback((update: RuntimeUpdateEvent) => {
+    pendingProgressUpdateRef.current = update;
+    if (contextFlushTimerRef.current !== null) {
+      return;
+    }
+
+    contextFlushTimerRef.current = window.setTimeout(() => {
+      contextFlushTimerRef.current = null;
+      flushProgressContextUpdate();
+    }, 250);
+  }, [flushProgressContextUpdate]);
+
   useEffect(() => {
     const removeListener = window.kairo.on(KAIRO_EVENT.agentUpdate, (rawUpdate) => {
       const update = rawUpdate as RuntimeUpdateEvent;
-      updateSessionContext((current) => applyRuntimeUpdateToSessionContext(current, update));
 
       if (update.type === 'thinking') {
-        setMessages((prev) => upsertThinkingMessage(prev, update.content || ''));
+        bufferedThinkingContentRef.current = update.content || '';
+        scheduleBufferedMessageFlush();
+        scheduleProgressContextUpdate(update);
         scheduleRunStateRefresh();
         return;
       }
+
+      if (update.type === 'assistant-delta') {
+        bufferedAssistantContentRef.current = update.content || '';
+        bufferedThinkingContentRef.current = null;
+        scheduleBufferedMessageFlush();
+        scheduleProgressContextUpdate(update);
+        scheduleRunStateRefresh();
+        return;
+      }
+
+      flushBufferedMessages();
+      flushProgressContextUpdate();
+      updateSessionContext((current) => applyRuntimeUpdateToSessionContext(current, update));
 
       if (update.type === 'tool-call') {
         setMessages((prev) => appendRuntimeMessage(prev, {
@@ -136,10 +221,7 @@ export function useChatController(options: UseChatControllerOptions) {
       }
 
       if (update.type === 'assistant-response') {
-        setMessages((prev) => appendRuntimeMessage(prev, {
-          role: 'assistant',
-          content: String(update.content || '')
-        }));
+        setMessages((prev) => upsertAssistantStreamMessage(prev, String(update.content || '')));
         setLoading(false);
         scheduleRunStateRefresh('immediate');
         return;
@@ -163,8 +245,16 @@ export function useChatController(options: UseChatControllerOptions) {
         window.clearTimeout(runStateRefreshTimerRef.current);
         runStateRefreshTimerRef.current = null;
       }
+      if (messageFlushTimerRef.current !== null) {
+        window.clearTimeout(messageFlushTimerRef.current);
+        messageFlushTimerRef.current = null;
+      }
+      if (contextFlushTimerRef.current !== null) {
+        window.clearTimeout(contextFlushTimerRef.current);
+        contextFlushTimerRef.current = null;
+      }
     };
-  }, [scheduleRunStateRefresh, setMessages, t, updateSessionContext]);
+  }, [flushBufferedMessages, flushProgressContextUpdate, scheduleBufferedMessageFlush, scheduleProgressContextUpdate, scheduleRunStateRefresh, setMessages, t, updateSessionContext]);
 
   const handleCreateSession = useCallback(async () => {
     try {
@@ -349,7 +439,7 @@ export function useChatController(options: UseChatControllerOptions) {
       logRendererError('Failed to clear history', error);
       reportChatError(t('app.error.clearHistory', { error: getErrorMessage(error) }), 'clear_history');
     }
-  }, [clearChatError, loadSessions, reportChatError, setMessages, t, updateSessionContext]);
+  }, [clearChatError, loadSessions, reportChatError, requestConfirmation, setMessages, t, updateSessionContext]);
 
   const handlePauseRun = useCallback(async () => {
     const runId = sessionContext.latestRun?.id;
@@ -440,8 +530,8 @@ export function useChatController(options: UseChatControllerOptions) {
     }
   }, [clearChatError, loadRunState, loadSessions, reportChatError, sessionContext.activeSessionId, sessionContext.latestRun?.id, t]);
 
-  const handleSend = useCallback(async () => {
-    if (!input.trim()) {
+  const handleSend = useCallback(async (attachments: ChatAttachment[] = []) => {
+    if (!input.trim() && attachments.length === 0) {
       return;
     }
 
@@ -455,9 +545,9 @@ export function useChatController(options: UseChatControllerOptions) {
       return;
     }
 
-    const pendingInput = input.trim();
+    const pendingInput = input.trim() || 'Please review the attached file(s).';
 
-    const userMessage: Message = { role: 'user', content: pendingInput };
+    const userMessage: Message = { role: 'user', content: pendingInput, attachments };
 
     try {
       clearChatError();
@@ -484,7 +574,10 @@ export function useChatController(options: UseChatControllerOptions) {
       setInput('');
       setLoading(true);
 
-      const result = await window.kairo.invoke(KAIRO_INVOKE.agentChat, pendingInput);
+      const result = await window.kairo.invoke(KAIRO_INVOKE.agentChat, {
+        content: pendingInput,
+        attachments
+      }) as { success: boolean; error?: string };
       if (!result.success) {
         throw new Error(result.error || 'Failed to send message');
       }

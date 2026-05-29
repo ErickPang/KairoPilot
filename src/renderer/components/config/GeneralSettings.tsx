@@ -3,7 +3,8 @@ import { Select } from '../Select';
 import { IconArrowDown, IconArrowUp, IconRefresh } from '../Icons';
 import { useTranslation } from '../../hooks/useTranslation';
 import { KAIRO_INVOKE } from '../../../shared/ipc';
-import type { WebSearchConfig } from '../../types';
+import type { AppearanceConfig, AppearanceTheme, WebSearchConfig } from '../../types';
+import { applyAppearanceTheme, emitAppearanceThemeChanged } from '../../theme';
 
 const DEFAULT_WEB_SEARCH_CONFIG: WebSearchConfig = {
   timeoutMs: 10000,
@@ -28,6 +29,10 @@ const DEFAULT_WEB_SEARCH_CONFIG: WebSearchConfig = {
       enabled: true
     }
   }
+};
+
+const DEFAULT_APPEARANCE_CONFIG: AppearanceConfig = {
+  theme: 'system'
 };
 
 const PROVIDER_ORDER = ['searxng', 'tavily', 'bing', 'duckduckgo', 'baidu'] as const;
@@ -113,7 +118,7 @@ function getProviderStatus(config: WebSearchConfig, providerId: ProviderId): Pro
     if (!config.providers.tavily.baseUrl.trim()) {
       return 'needs_base_url';
     }
-    if (!config.providers.tavily.apiKey.trim()) {
+    if (!config.providers.tavily.apiKey.trim() && !config.providers.tavily.apiKeyStored) {
       return 'needs_api_key';
     }
     return 'ready';
@@ -160,7 +165,7 @@ function createEnabledProviderSnapshot(current: ProviderSnapshot, previous: Prov
       ...snapshot.tavily,
       enabled: snapshot.tavily.enabled
         && snapshot.tavily.baseUrl.trim().length > 0
-        && snapshot.tavily.apiKey.trim().length > 0
+        && (snapshot.tavily.apiKey.trim().length > 0 || Boolean(snapshot.tavily.apiKeyStored))
     },
     bing: {
       enabled: true
@@ -176,6 +181,7 @@ function createEnabledProviderSnapshot(current: ProviderSnapshot, previous: Prov
 
 export const GeneralSettings = memo(function GeneralSettings() {
   const { t, locale, setLocale } = useTranslation();
+  const [appearanceConfig, setAppearanceConfig] = useState<AppearanceConfig>(DEFAULT_APPEARANCE_CONFIG);
   const [webSearchConfig, setWebSearchConfig] = useState<WebSearchConfig>(DEFAULT_WEB_SEARCH_CONFIG);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -188,9 +194,17 @@ export const GeneralSettings = memo(function GeneralSettings() {
 
     const loadWebSearchConfig = async () => {
       try {
-        const config = await window.kairo.invoke(KAIRO_INVOKE.configGetWebSearch);
-        if (!cancelled && config) {
-          setWebSearchConfig(config);
+        const [appearance, webSearch] = await Promise.all([
+          window.kairo.invoke(KAIRO_INVOKE.configGetAppearance),
+          window.kairo.invoke(KAIRO_INVOKE.configGetWebSearch)
+        ]);
+        if (!cancelled) {
+          if (appearance) {
+            setAppearanceConfig(appearance);
+          }
+          if (webSearch) {
+            setWebSearchConfig(webSearch);
+          }
         }
       } catch (error) {
         console.error('Failed to load web search settings:', error);
@@ -208,12 +222,37 @@ export const GeneralSettings = memo(function GeneralSettings() {
     };
   }, []);
 
+  const handleThemeChange = async (theme: AppearanceTheme) => {
+    const nextAppearance: AppearanceConfig = { theme };
+    setAppearanceConfig(nextAppearance);
+    applyAppearanceTheme(theme);
+    emitAppearanceThemeChanged(theme);
+    try {
+      await window.kairo.invoke(KAIRO_INVOKE.configSaveAppearance, nextAppearance);
+    } catch (error) {
+      console.error('Failed to save appearance settings:', error);
+    }
+  };
+
   const handleSave = async () => {
     try {
       setSaving(true);
       setSaveStatus('idle');
       const result = await window.kairo.invoke(KAIRO_INVOKE.configSaveWebSearch, webSearchConfig);
       setSaveStatus(result.success ? 'success' : 'error');
+      if (result.success && webSearchConfig.providers.tavily.apiKey.trim()) {
+        setWebSearchConfig((current) => ({
+          ...current,
+          providers: {
+            ...current.providers,
+            tavily: {
+              ...current.providers.tavily,
+              apiKey: '',
+              apiKeyStored: true
+            }
+          }
+        }));
+      }
     } catch (error) {
       console.error('Failed to save web search settings:', error);
       setSaveStatus('error');
@@ -242,6 +281,45 @@ export const GeneralSettings = memo(function GeneralSettings() {
     <div className="settings-shell">
       <section className="settings-panel settings-panel--span-2 settings-panel--allow-overflow">
         <div className="settings-panel-body">
+          <div className="form-group form-group-tight">
+            <label>{t('settings.theme')}</label>
+            <Select
+              value={appearanceConfig.theme}
+              onChange={(value) => {
+                void handleThemeChange(value as AppearanceTheme);
+              }}
+              className="select-fill"
+              options={[
+                {
+                  value: 'system',
+                  label: t('settings.theme.system'),
+                  description: t('settings.themeHelp.system')
+                },
+                {
+                  value: 'light',
+                  label: t('settings.theme.light'),
+                  description: t('settings.themeHelp.light')
+                },
+                {
+                  value: 'dark',
+                  label: t('settings.theme.dark'),
+                  description: t('settings.themeHelp.dark')
+                },
+                {
+                  value: 'slate',
+                  label: t('settings.theme.slate'),
+                  description: t('settings.themeHelp.slate')
+                },
+                {
+                  value: 'warm',
+                  label: t('settings.theme.warm'),
+                  description: t('settings.themeHelp.warm')
+                }
+              ]}
+            />
+            <div className="form-help">{t('settings.preferencesThemeHelp')}</div>
+          </div>
+
           <div className="form-group form-group-tight">
             <label>{t('general.language')}</label>
             <Select
@@ -486,7 +564,7 @@ export const GeneralSettings = memo(function GeneralSettings() {
                             type="password"
                             value={webSearchConfig.providers.tavily.apiKey}
                             disabled={loading || saving}
-                            placeholder="tvly-..."
+                            placeholder={webSearchConfig.providers.tavily.apiKeyStored ? '••••••••' : 'tvly-...'}
                             onChange={(event) => {
                               const apiKey = event.target.value;
                               setWebSearchConfig((current) => ({

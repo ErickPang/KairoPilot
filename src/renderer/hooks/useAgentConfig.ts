@@ -60,7 +60,11 @@ export function useAgentConfig(options: UseAgentConfigOptions) {
 
     try {
       updateSessionContext({ appNotice: null });
-      await window.kairo.invoke(KAIRO_INVOKE.configDeleteAgent, id);
+      await window.kairo.invoke(KAIRO_INVOKE.configDeleteAgent, {
+        id,
+        deleteWorkspace: true,
+        confirmation: `delete-agent:${id}:workspace`
+      });
       const fullConfig = await refreshConfig();
       if (sessionContext.activeAgentId === id) {
         updateSessionContext({

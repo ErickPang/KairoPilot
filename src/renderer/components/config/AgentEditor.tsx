@@ -3,7 +3,7 @@ import type { AgentConfig, AgentPermissionConfig, ModelConfig } from '../../type
 import { IconArrowLeft, IconFolder, IconShield, IconTerminal, IconBot } from '../Icons';
 import { Select } from '../Select';
 import { useTranslation } from '../../hooks/useTranslation';
-import { applyExecutionProfileConstraints, createDefaultPolicyConfig, DEFAULT_SHELL_COMMANDS } from '../../../shared/contracts';
+import { applyExecutionProfileConstraints, createDefaultPolicyConfig, DEFAULT_SHELL_COMMANDS, PRIVILEGED_SHELL_COMMANDS } from '../../../shared/contracts';
 
 const SHELL_COMMAND_DESCRIPTIONS: Record<string, { zh: string; en: string }> = {
   ls: { zh: '列出目录内容', en: 'List directory contents' },
@@ -77,7 +77,7 @@ export const AgentEditor = memo(function AgentEditor({
         : editingAgent.soulPrompt;
   const permissions = editingAgent.permissions;
   const shellCommands = useMemo(() => {
-    const source = [...DEFAULT_SHELL_COMMANDS, ...permissions.shell.allowedCommands];
+    const source = [...DEFAULT_SHELL_COMMANDS, ...PRIVILEGED_SHELL_COMMANDS, ...permissions.shell.allowedCommands];
     return Array.from(new Set(source.map(item => item.trim()).filter(Boolean)));
   }, [permissions.shell.allowedCommands]);
   const commandDescriptionLocale = locale === 'zh' ? 'zh' : 'en';
@@ -95,6 +95,24 @@ export const AgentEditor = memo(function AgentEditor({
     { value: 'approved_execution', label: t('config.executionProfile.approved_execution') },
     { value: 'trusted_automation', label: t('config.executionProfile.trusted_automation') }
   ]), [t]);
+  const executionProfileDetail = useMemo(() => ({
+    chat_only: {
+      title: t('config.executionProfile.chat_only'),
+      body: t('config.executionProfileDetail.chat_only')
+    },
+    read_only_workspace: {
+      title: t('config.executionProfile.read_only_workspace'),
+      body: t('config.executionProfileDetail.read_only_workspace')
+    },
+    approved_execution: {
+      title: t('config.executionProfile.approved_execution'),
+      body: t('config.executionProfileDetail.approved_execution')
+    },
+    trusted_automation: {
+      title: t('config.executionProfile.trusted_automation'),
+      body: t('config.executionProfileDetail.trusted_automation')
+    }
+  }), [t]);
   const approvalModeOptions = useMemo(() => ([
     { value: 'never', label: t('config.approvalMode.never') },
     { value: 'on_write', label: t('config.approvalMode.on_write') },
@@ -156,11 +174,8 @@ export const AgentEditor = memo(function AgentEditor({
   const enableAllPermissions = () => {
     updatePermissions(current => ({
       ...current,
-      executionProfile: 'trusted_automation',
-      policy: {
-        ...createDefaultPolicyConfig('trusted_automation'),
-        environmentScope: 'workspace'
-      },
+      executionProfile: 'approved_execution',
+      policy: createDefaultPolicyConfig('approved_execution'),
       fileSystem: {
         ...current.fileSystem,
         read: true,
@@ -173,7 +188,7 @@ export const AgentEditor = memo(function AgentEditor({
       shell: {
         ...current.shell,
         enabled: true,
-        allowedCommands: shellCommands
+        allowedCommands: shellCommands.filter(command => DEFAULT_SHELL_COMMANDS.includes(command as typeof DEFAULT_SHELL_COMMANDS[number]))
       }
     }));
     setIsShellCommandsExpanded(true);
@@ -409,6 +424,14 @@ export const AgentEditor = memo(function AgentEditor({
                 options={executionProfileOptions}
                 placeholder={t('config.executionProfile')}
               />
+              <div className="permission-profile-note">
+                <div className="permission-profile-note-title">
+                  {executionProfileDetail[permissions.executionProfile].title}
+                </div>
+                <div className="permission-profile-note-body">
+                  {executionProfileDetail[permissions.executionProfile].body}
+                </div>
+              </div>
             </div>
 
             <div className="shell-command-panel">

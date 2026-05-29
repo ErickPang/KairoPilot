@@ -76,6 +76,14 @@ interface KairoBridge {
     args?: import('./renderer/types').MonitoringTokenQuery
   ): Promise<import('./renderer/types').MonitoringTokenQueryResult>;
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.chatListSessions): Promise<import('./renderer/types').SessionSummary[]>;
+  invoke(
+    channel: typeof import('./shared/ipc').KAIRO_INVOKE.chatPrepareAttachments,
+    args: import('./shared/contracts').PrepareAttachmentsRequest
+  ): Promise<import('./shared/contracts').PrepareAttachmentsResult>;
+  invoke(
+    channel: typeof import('./shared/ipc').KAIRO_INVOKE.chatDeleteAttachment,
+    args: import('./shared/contracts').DeleteAttachmentRequest
+  ): Promise<InvokeSuccess & { deleted?: boolean }>;
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.chatSetActiveSession, sessionId: string): Promise<InvokeSuccess>;
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.chatUpdateSessionTitle, args: { sessionId: string; title: string }): Promise<InvokeSuccess>;
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.configCreateAgentDraft, seed?: Partial<import('./shared/contracts').AgentConfig>): Promise<import('./shared/contracts').AgentConfig>;
@@ -85,10 +93,12 @@ interface KairoBridge {
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.configGetActiveAgentId): Promise<string | null>;
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.configGetAgents): Promise<import('./shared/contracts').AgentConfig[]>;
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.configGetAll): Promise<import('./shared/contracts').KairoPilotConfig>;
+  invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.configGetAppearance): Promise<import('./shared/contracts').AppearanceConfig>;
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.configGetModels): Promise<import('./shared/contracts').ProviderConfig[]>;
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.configGetWebSearch): Promise<import('./shared/contracts').WebSearchConfig>;
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.configSave, config: import('./shared/contracts').LegacyAgentConfig): Promise<InvokeSuccess>;
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.configSaveAgent, agent: import('./shared/contracts').AgentConfig): Promise<InvokeSuccess>;
+  invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.configSaveAppearance, config: import('./shared/contracts').AppearanceConfig): Promise<InvokeSuccess>;
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.configSaveModel, model: import('./shared/contracts').ModelConfig): Promise<InvokeSuccess>;
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.configSaveWebSearch, config: import('./shared/contracts').WebSearchConfig): Promise<InvokeSuccess>;
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.configSetActiveAgent, id: string): Promise<InvokeSuccess>;
@@ -110,6 +120,7 @@ interface KairoBridge {
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.skillsDiscardInstall, args: import('./shared/contracts').SkillInstallArgs): Promise<InvokeSuccess>;
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.skillsImport, args: import('./shared/contracts').SkillImportArgs): Promise<InvokeSuccess>;
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.systemSelectFile, args?: { filters?: { name: string; extensions: string[] }[] }): Promise<string | null>;
+  invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.systemSelectFiles, args?: { filters?: { name: string; extensions: string[] }[] }): Promise<string[]>;
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.systemSelectDirectory): Promise<string | null>;
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.systemStats): Promise<import('./renderer/types').SystemStats | null>;
   on(channel: typeof import('./shared/ipc').KAIRO_EVENT.agentUpdate, listener: (payload: AgentUpdatePayload) => void): () => void;

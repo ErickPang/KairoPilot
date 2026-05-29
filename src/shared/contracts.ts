@@ -9,6 +9,8 @@ export interface ProviderConfig {
   provider: ProviderType
   baseUrl: string
   apiKey: string
+  apiKeyEncrypted?: string
+  apiKeyStored?: boolean
   model: ModelOption[]
 }
 
@@ -18,6 +20,7 @@ export interface ModelConfig {
   provider: ProviderType
   baseUrl: string
   apiKey: string
+  apiKeyStored?: boolean
   model: string
   availableModels?: ModelOption[]
 }
@@ -254,9 +257,61 @@ export interface AgentRuntimeInvokeResult {
   approvalId?: string
 }
 
+export type ChatAttachmentKind = 'image' | 'text' | 'file'
+
+export interface ChatAttachment {
+  id: string
+  sessionId: string
+  name: string
+  mimeType: string
+  size: number
+  kind: ChatAttachmentKind
+  originalPath?: string
+  storedPath: string
+  contentHash: string
+  previewUri?: string
+  extractedText?: string
+  createdAt: number
+}
+
+export interface PrepareAttachmentInput {
+  path: string
+  name?: string
+  mimeType?: string
+}
+
+export interface PrepareAttachmentsRequest {
+  sessionId: string
+  files: PrepareAttachmentInput[]
+}
+
+export interface PrepareAttachmentsResult {
+  success: boolean
+  attachments?: ChatAttachment[]
+  error?: string
+}
+
+export interface DeleteAttachmentRequest {
+  sessionId: string
+  attachment: ChatAttachment
+}
+
+export interface AgentChatRequest {
+  content: string
+  attachments?: ChatAttachment[]
+}
+
 export type RuntimeUpdateEvent =
   | {
       type: 'thinking'
+      content: string
+      runId: string
+      stepId?: string
+      status?: 'running'
+    }
+  | {
+      type: 'assistant-delta'
+      delta: string
       content: string
       runId: string
       stepId?: string
@@ -485,13 +540,25 @@ export interface RunTrace {
 
 export type SkillScope = 'public' | 'agent'
 
+export interface SkillArgumentDefinition {
+  name: string
+  description: string
+  required: boolean
+  defaultValue?: string
+}
+
+export type SkillExecutionMode = 'inline' | 'fork'
+
 export interface SkillMetadata {
   name: string
   description: string
-  metadata: {
-    version?: string
-    allowedTools: string[]
-  }
+  version?: string
+  allowedTools: string[]
+  whenToUse: string
+  arguments: SkillArgumentDefinition[]
+  userInvocable: boolean
+  modelInvocable: boolean
+  executionMode: SkillExecutionMode
 }
 
 export interface SkillRecord {
@@ -511,10 +578,16 @@ export interface SkillSummary {
   description: string
   version?: string
   allowedTools: string[]
+  whenToUse: string
+  arguments: SkillArgumentDefinition[]
+  userInvocable: boolean
+  modelInvocable: boolean
+  executionMode: SkillExecutionMode
   content: string
   source: SkillScope
   skillDir: string
   skillFilePath: string
+  removable?: boolean
 }
 
 export interface SkillStoreResource {
@@ -570,6 +643,11 @@ export interface SkillInstallArgs {
 
 export interface SkillImportArgs {
   sourceFile: string
+  scope: string
+}
+
+export interface SkillUninstallArgs {
+  id: string
   scope: string
 }
 
@@ -668,13 +746,48 @@ export const DEFAULT_SKILL_MARKETPLACE_PRESETS: SkillMarketplacePreset[] = [
   }
 ]
 
-export interface PluginRegistryEntry {
+export interface PluginToolManifest {
+  name: string
+  description: string
+}
+
+export interface PluginPermissionRequirement {
+  fileSystem?: {
+    read?: boolean
+    write?: boolean
+    paths?: string[]
+  }
+  network?: {
+    enabled?: boolean
+    domains?: string[]
+  }
+  shell?: {
+    enabled?: boolean
+    commands?: string[]
+  }
+}
+
+export interface PluginCapabilityDeclaration {
+  id: string
+  label: string
+  description?: string
+  riskLevel: RiskLevel
+  requiredPermissions?: PluginPermissionRequirement
+}
+
+export interface PluginManifest {
   id: string
   name: string
   description: string
   version: string
   author: string
   icon?: string
+  tools: PluginToolManifest[]
+  capabilities: PluginCapabilityDeclaration[]
+  riskLevel: RiskLevel
+}
+
+export interface PluginRegistryEntry extends PluginManifest {
   installedAt: number
   filePath: string
   scope: string
@@ -693,6 +806,8 @@ export interface WebSearchSearxngConfig extends WebSearchProviderToggleConfig {
 export interface WebSearchTavilyConfig extends WebSearchProviderToggleConfig {
   baseUrl: string
   apiKey: string
+  apiKeyEncrypted?: string
+  apiKeyStored?: boolean
 }
 
 export interface WebSearchConfig {
@@ -705,6 +820,12 @@ export interface WebSearchConfig {
     duckduckgo: WebSearchProviderToggleConfig
     baidu: WebSearchProviderToggleConfig
   }
+}
+
+export type AppearanceTheme = 'system' | 'light' | 'dark' | 'slate' | 'warm'
+
+export interface AppearanceConfig {
+  theme: AppearanceTheme
 }
 
 export interface KairoPilotConfig {
@@ -722,12 +843,14 @@ export interface KairoPilotConfig {
   skills: {
     registry: SkillsRegistryEntry[]
   }
+  appearance: AppearanceConfig
   webSearch: WebSearchConfig
 }
 
 export interface LegacyAgentConfig {
   provider: ProviderType
   apiKey: string
+  apiKeyStored?: boolean
   baseUrl: string
   model: string
   workspace: string
@@ -744,10 +867,8 @@ export interface LegacyAgentConfig {
 
 export const DEFAULT_SHELL_COMMANDS = [
   'ls',
-  'cd',
   'pwd',
   'mkdir',
-  'rm',
   'touch',
   'cat',
   'grep',
@@ -756,7 +877,11 @@ export const DEFAULT_SHELL_COMMANDS = [
   'node',
   'git',
   'python',
-  'python3',
+  'python3'
+] as const
+
+export const PRIVILEGED_SHELL_COMMANDS = [
+  'rm',
   'open',
   'curl'
 ] as const

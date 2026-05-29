@@ -76,7 +76,7 @@ export function summarizeRecommendation(findings: SkillReviewFinding[]) {
 export function buildStaticReviewFindings(skill: SkillStoreEntry, materializedSkill: MaterializedSkill) {
   const findings: SkillReviewFinding[] = []
   const parsedSkill = parseSkillFrontmatter(materializedSkill.skillContent, skill.id)
-  const normalizedAllowedTools = parsedSkill.metadata.metadata.allowedTools.map((tool) => normalizeToolCapabilityName(tool))
+  const normalizedAllowedTools = parsedSkill.metadata.allowedTools.map((tool) => normalizeToolCapabilityName(tool))
   const riskyTools = normalizedAllowedTools.filter((tool) => (
     tool === '*'
     || tool.includes('runcommand')

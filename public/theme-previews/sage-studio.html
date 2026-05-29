@@ -1,0 +1,455 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sage Studio Preview</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f4f5f0;
+        --surface: rgba(251, 252, 248, 0.9);
+        --surface-2: #eef1ea;
+        --surface-3: #ffffff;
+        --border: #c9d1c2;
+        --text: #233028;
+        --muted: #667268;
+        --primary: #6f8b78;
+        --primary-strong: #5c7565;
+        --primary-soft: rgba(111, 139, 120, 0.12);
+        --success: #567a61;
+        --warning: #b68a45;
+        --danger: #c66557;
+        --shadow: 0 26px 70px rgba(35, 48, 40, 0.09);
+      }
+
+      * { box-sizing: border-box; }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background:
+          radial-gradient(circle at top left, rgba(137, 162, 145, 0.2), transparent 28rem),
+          radial-gradient(circle at bottom right, rgba(194, 182, 146, 0.16), transparent 30rem),
+          linear-gradient(180deg, #fafaf6 0%, var(--bg) 100%);
+        color: var(--text);
+        font-family: "Avenir Next", "Segoe UI", sans-serif;
+      }
+
+      .shell {
+        display: grid;
+        grid-template-columns: 94px 300px 1fr;
+        gap: 18px;
+        height: 100vh;
+        padding: 20px;
+      }
+
+      .panel {
+        border: 1px solid rgba(255,255,255,0.68);
+        border-radius: 30px;
+        background: var(--surface);
+        box-shadow: var(--shadow);
+        backdrop-filter: blur(18px);
+      }
+
+      .rail {
+        padding: 18px 12px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .brand {
+        width: 54px;
+        height: 54px;
+        border-radius: 18px;
+        display: grid;
+        place-items: center;
+        background: linear-gradient(180deg, rgba(111,139,120,0.18), rgba(111,139,120,0.08));
+        color: var(--primary);
+        font-weight: 900;
+        margin-bottom: 10px;
+      }
+
+      .rail-btn {
+        width: 100%;
+        padding: 12px 8px;
+        border: 0;
+        border-radius: 16px;
+        background: transparent;
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .rail-btn.active {
+        background: linear-gradient(180deg, #809a88 0%, var(--primary) 100%);
+        color: #f8fbf7;
+        box-shadow: 0 16px 24px rgba(111, 139, 120, 0.22);
+      }
+
+      .sidebar {
+        padding: 22px;
+        display: grid;
+        grid-template-rows: auto auto 1fr auto;
+        gap: 16px;
+      }
+
+      .eyebrow {
+        display: inline-flex;
+        padding: 6px 12px;
+        border-radius: 999px;
+        background: var(--primary-soft);
+        color: var(--primary);
+        font-size: 11px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        font-weight: 800;
+      }
+
+      h1 {
+        margin: 10px 0 8px;
+        font-size: 30px;
+        letter-spacing: -0.05em;
+        line-height: 0.96;
+      }
+
+      p {
+        margin: 0;
+        color: var(--muted);
+        line-height: 1.68;
+      }
+
+      .hero-card {
+        padding: 16px;
+        border-radius: 22px;
+        border: 1px solid rgba(201,209,194,0.78);
+        background:
+          linear-gradient(180deg, rgba(111,139,120,0.12), rgba(255,255,255,0.7)),
+          rgba(255,255,255,0.54);
+      }
+
+      .sessions {
+        display: grid;
+        gap: 10px;
+        align-content: start;
+      }
+
+      .session {
+        padding: 14px;
+        border-radius: 18px;
+        background: rgba(255,255,255,0.5);
+        border: 1px solid transparent;
+      }
+
+      .session.active {
+        background: linear-gradient(180deg, rgba(111,139,120,0.14), rgba(255,255,255,0.92));
+        border-color: rgba(111,139,120,0.18);
+      }
+
+      .session-title {
+        display: block;
+        font-weight: 700;
+      }
+
+      .session-meta {
+        display: block;
+        margin-top: 4px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .compare {
+        padding: 14px 16px;
+        border-radius: 18px;
+        border: 1px dashed rgba(111,139,120,0.28);
+        color: var(--primary-strong);
+        background: rgba(111,139,120,0.08);
+        font-weight: 700;
+      }
+
+      .main {
+        display: grid;
+        grid-template-rows: auto 1fr auto;
+        overflow: hidden;
+      }
+
+      .header {
+        padding: 22px 28px 18px;
+        border-bottom: 1px solid rgba(201,209,194,0.62);
+        background:
+          radial-gradient(circle at top right, rgba(111,139,120,0.12), transparent 22rem),
+          linear-gradient(180deg, rgba(255,255,255,0.76), rgba(250,252,247,0.86));
+      }
+
+      .header-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: end;
+        gap: 18px;
+      }
+
+      .title {
+        margin: 8px 0 6px;
+        font-size: 34px;
+        letter-spacing: -0.05em;
+      }
+
+      .status {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 12px;
+        border-radius: 999px;
+        color: var(--primary);
+        background: var(--primary-soft);
+        font-size: 13px;
+        font-weight: 700;
+      }
+
+      .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--primary);
+      }
+
+      .palette-strip {
+        margin-top: 18px;
+        display: grid;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .swatch {
+        padding: 14px;
+        min-height: 84px;
+        border-radius: 18px;
+        border: 1px solid rgba(255,255,255,0.45);
+        display: flex;
+        align-items: end;
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .content {
+        overflow: auto;
+        padding: 20px 28px;
+        display: grid;
+        gap: 18px;
+      }
+
+      .layout {
+        display: grid;
+        grid-template-columns: 1fr 320px;
+        gap: 18px;
+      }
+
+      .chat-card,
+      .side-card {
+        padding: 18px;
+        border-radius: 22px;
+        border: 1px solid rgba(201,209,194,0.78);
+        background: rgba(255,255,255,0.68);
+      }
+
+      .chat-card h3,
+      .side-card h3 {
+        margin: 0 0 12px;
+        font-size: 18px;
+        letter-spacing: -0.03em;
+      }
+
+      .message {
+        display: grid;
+        gap: 12px;
+      }
+
+      .bubble {
+        padding: 16px 18px;
+        border-radius: 22px;
+        border: 1px solid rgba(201,209,194,0.78);
+        background: var(--surface-3);
+        line-height: 1.7;
+      }
+
+      .bubble.user {
+        justify-self: end;
+        max-width: 76%;
+        border: 0;
+        color: #f8fbf7;
+        background: linear-gradient(180deg, #829c8a 0%, var(--primary) 100%);
+        box-shadow: 0 18px 28px rgba(111,139,120,0.2);
+      }
+
+      .list {
+        display: grid;
+        gap: 10px;
+      }
+
+      .row {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 12px 14px;
+        border-radius: 16px;
+        background: var(--surface-2);
+      }
+
+      .badge {
+        padding: 4px 10px;
+        border-radius: 999px;
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .ok { color: var(--success); background: rgba(86,122,97,0.14); }
+      .warn { color: var(--warning); background: rgba(182,138,69,0.14); }
+      .bad { color: var(--danger); background: rgba(198,101,87,0.12); }
+
+      .composer {
+        padding: 0 28px 24px;
+      }
+
+      .composer-box {
+        display: grid;
+        gap: 14px;
+        padding: 18px;
+        border-radius: 22px;
+        border: 1px solid rgba(111,139,120,0.18);
+        background: rgba(255,255,255,0.8);
+      }
+
+      .actions {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+
+      .ghost {
+        padding: 10px 12px;
+        border-radius: 14px;
+        border: 1px solid rgba(201,209,194,0.92);
+        background: var(--surface-3);
+        color: var(--muted);
+      }
+
+      .send {
+        width: 50px;
+        height: 50px;
+        border: 0;
+        border-radius: 16px;
+        background: linear-gradient(180deg, #829c8a, var(--primary));
+        color: #f8fbf7;
+        box-shadow: 0 16px 24px rgba(111,139,120,0.22);
+      }
+
+      @media (max-width: 1180px) {
+        .palette-strip,
+        .layout {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      @media (max-width: 920px) {
+        .shell {
+          grid-template-columns: 1fr;
+          height: auto;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <aside class="rail panel">
+        <div class="brand">K</div>
+        <button class="rail-btn active">Chat</button>
+        <button class="rail-btn">Dash</button>
+        <button class="rail-btn">Store</button>
+        <button class="rail-btn">Audit</button>
+        <button class="rail-btn">Prefs</button>
+      </aside>
+
+      <aside class="sidebar panel">
+        <div>
+          <span class="eyebrow">Sage Studio</span>
+          <h1>Calm, Not Cold</h1>
+          <p>这套颜色比蓝色更柔和，既能做出 AI 产品感，也有一点自然气息。</p>
+        </div>
+        <div class="hero-card">
+          <p>适合希望界面有辨识度，但又不想走复古暖色路线的情况。</p>
+        </div>
+        <div class="sessions">
+          <div class="session active">
+            <span class="session-title">Color Direction Review</span>
+            <span class="session-meta">Current preview</span>
+          </div>
+          <div class="session">
+            <span class="session-title">Plugin Marketplace Hierarchy</span>
+            <span class="session-meta">Needs validation</span>
+          </div>
+          <div class="session">
+            <span class="session-title">Dashboard Contrast Tuning</span>
+            <span class="session-meta">Scheduled</span>
+          </div>
+        </div>
+        <div class="compare">Compare with Warm Editorial</div>
+      </aside>
+
+      <section class="main panel">
+        <header class="header">
+          <div class="header-row">
+            <div>
+              <span class="eyebrow">Live Preview</span>
+              <h2 class="title">A Softer AI Workspace</h2>
+              <p>相比工具灰和品牌蓝，这套更安静，也更容易形成自己的调性。</p>
+            </div>
+            <div class="status"><span class="dot"></span> Theme Active</div>
+          </div>
+
+          <div class="palette-strip">
+            <div class="swatch" style="background:#f4f5f0;">Background</div>
+            <div class="swatch" style="background:#fbfcf8;">Surface</div>
+            <div class="swatch" style="background:#6f8b78; color:#f8fbf7;">Primary</div>
+            <div class="swatch" style="background:#d8e3d9;">Soft Accent</div>
+            <div class="swatch" style="background:#233028; color:#f8fbf7;">Text</div>
+          </div>
+        </header>
+
+        <div class="content">
+          <div class="layout">
+            <section class="chat-card">
+              <h3>Conversation Area</h3>
+              <div class="message">
+                <div class="bubble">Sage Studio 的风险点不是俗，而是如果绿色太多，会显得偏旧或偏生活方式产品。</div>
+                <div class="bubble user">所以它更适合把绿色作为点缀，而不是整块铺色。</div>
+                <div class="bubble">对。让背景保持近白，绿色只出现在选中态、按钮和状态信息，效果会更稳。</div>
+              </div>
+            </section>
+
+            <aside class="side-card">
+              <h3>Review Checklist</h3>
+              <div class="list">
+                <div class="row"><span>Button emphasis</span><span class="badge ok">Clear</span></div>
+                <div class="row"><span>Message separation</span><span class="badge ok">Good</span></div>
+                <div class="row"><span>Theme uniqueness</span><span class="badge warn">High</span></div>
+                <div class="row"><span>Risk of over-green</span><span class="badge bad">Watch</span></div>
+              </div>
+            </aside>
+          </div>
+        </div>
+
+        <footer class="composer">
+          <div class="composer-box">
+            <div style="color:var(--muted);">Summarize where Sage Studio feels more differentiated than Slate Precision.</div>
+            <div class="actions">
+              <button class="ghost">Agent: Design Review</button>
+              <button class="send">↑</button>
+            </div>
+          </div>
+        </footer>
+      </section>
+    </main>
+  </body>
+</html>
