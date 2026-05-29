@@ -6,6 +6,7 @@ import { KAIRO_INVOKE } from '../../shared/ipc';
 import { Select } from './Select';
 import { getErrorMessage, logRendererError } from '../hooks/errorUtils';
 import { useSystemStats } from '../hooks/useSystemStats';
+import './Dashboard.css';
 
 interface DashboardProps {
   agents: AgentConfig[];
@@ -168,7 +169,10 @@ export const Dashboard = memo(function Dashboard({ agents, isActive, onReportErr
       meta: undefined,
       accent: 'accent',
       icon: <IconCpu size={22} />,
-      iconStyle: { background: 'linear-gradient(135deg, #dbeafe 0%, #93c5fd 100%)', color: '#1d4ed8' }
+      iconStyle: {
+        background: 'var(--surface-muted)',
+        color: 'var(--info)'
+      }
     },
     {
       label: t('dashboard.totalMessages'),
@@ -176,7 +180,10 @@ export const Dashboard = memo(function Dashboard({ agents, isActive, onReportErr
       meta: undefined,
       accent: '',
       icon: <IconChat size={22} />,
-      iconStyle: { background: 'linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%)', color: '#047857' }
+      iconStyle: {
+        background: 'var(--surface-muted)',
+        color: 'var(--success)'
+      }
     },
     {
       label: t('dashboard.totalSessions'),
@@ -184,7 +191,10 @@ export const Dashboard = memo(function Dashboard({ agents, isActive, onReportErr
       meta: undefined,
       accent: '',
       icon: <IconBot size={22} />,
-      iconStyle: { background: 'linear-gradient(135deg, #fef3c7 0%, #fde68a 100%)', color: '#b45309' }
+      iconStyle: {
+        background: 'var(--surface-muted)',
+        color: 'var(--warning)'
+      }
     },
     {
       label: t('dashboard.totalRuns'),
@@ -192,7 +202,10 @@ export const Dashboard = memo(function Dashboard({ agents, isActive, onReportErr
       meta: undefined,
       accent: 'accent',
       icon: <IconRefresh size={22} />,
-      iconStyle: { background: 'linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%)', color: '#1d4ed8' }
+      iconStyle: {
+        background: 'var(--surface-muted)',
+        color: 'var(--primary)'
+      }
     },
     {
       label: t('dashboard.runCompletionRate'),
@@ -222,455 +235,6 @@ export const Dashboard = memo(function Dashboard({ agents, isActive, onReportErr
 
   return (
     <div className="dashboard-container">
-      <style>{`
-        .dashboard-container {
-          padding: 1.7rem 2rem 1.8rem;
-          height: 100%;
-          overflow-y: auto;
-          background: transparent;
-          color: var(--foreground);
-        }
-        .dashboard-hero {
-          display: flex;
-          align-items: flex-start;
-          justify-content: space-between;
-          gap: 1.25rem;
-          margin-bottom: 1.5rem;
-          padding: 1.4rem 1.45rem;
-          border: 1px solid rgba(148, 163, 184, 0.16);
-          border-radius: 1.6rem;
-          background:
-            radial-gradient(circle at top right, rgba(37, 99, 235, 0.1), transparent 28%),
-            linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(246, 249, 253, 0.9));
-          box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.96);
-        }
-        .dashboard-hero-copy {
-          min-width: 0;
-          flex: 1;
-        }
-        .dashboard-eyebrow {
-          display: inline-flex;
-          align-items: center;
-          padding: 0.34rem 0.72rem;
-          border-radius: 999px;
-          background: rgba(37, 99, 235, 0.08);
-          color: var(--primary);
-          font-size: 0.78rem;
-          font-weight: 700;
-          letter-spacing: 0.05em;
-          text-transform: uppercase;
-        }
-        .dashboard-title-row {
-          display: flex;
-          align-items: center;
-          gap: 0.75rem;
-          margin: 0.95rem 0 0.5rem;
-        }
-        .dashboard-title {
-          margin: 0;
-          font-size: 2rem;
-          font-weight: 700;
-          letter-spacing: -0.03em;
-        }
-        .dashboard-subtitle {
-          margin: 0;
-          max-width: 42rem;
-          color: var(--muted-fg);
-          font-size: 0.96rem;
-          line-height: 1.65;
-        }
-        .dashboard-hero-meta {
-          display: grid;
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-          gap: 0.75rem;
-          min-width: 18rem;
-        }
-        .dashboard-hero-chip {
-          display: flex;
-          flex-direction: column;
-          gap: 0.22rem;
-          padding: 0.9rem 1rem;
-          border: 1px solid rgba(148, 163, 184, 0.14);
-          border-radius: 1.1rem;
-          background: rgba(255, 255, 255, 0.72);
-        }
-        .dashboard-hero-chip-label,
-        .dashboard-stat-label {
-          color: var(--muted-fg);
-          font-size: 0.77rem;
-          font-weight: 700;
-          text-transform: uppercase;
-          letter-spacing: 0.05em;
-        }
-        .dashboard-hero-chip-value {
-          color: var(--foreground);
-          font-size: 1.05rem;
-          font-weight: 700;
-        }
-        .dashboard-summary-grid,
-        .dashboard-resource-grid {
-          display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-          gap: 1rem;
-        }
-        .dashboard-summary-grid {
-          margin-bottom: 1.7rem;
-        }
-        .dashboard-resource-grid {
-          margin-top: 1rem;
-        }
-        .dashboard-section {
-          margin-bottom: 1.7rem;
-        }
-        .dashboard-section:last-child {
-          margin-bottom: 0;
-        }
-        .dashboard-section-title {
-          margin: 0 0 0.95rem;
-          font-size: 1.1rem;
-          font-weight: 700;
-          letter-spacing: -0.02em;
-        }
-        .stat-card {
-          background: linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(246, 249, 253, 0.9));
-          padding: 1.15rem 1.2rem;
-          border-radius: 1.35rem;
-          border: 1px solid rgba(148, 163, 184, 0.14);
-          box-shadow: none;
-          transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
-          display: flex;
-          flex-direction: column;
-          gap: 0.55rem;
-          position: relative;
-          overflow: hidden;
-        }
-        .stat-card::before {
-          content: "";
-          position: absolute;
-          inset: 0;
-          background: linear-gradient(135deg, rgba(255,255,255,0.42) 0%, rgba(255,255,255,0) 100%);
-          pointer-events: none;
-        }
-        .stat-card > * {
-          position: relative;
-          z-index: 1;
-        }
-        .stat-card:hover {
-          transform: translateY(-1px);
-          box-shadow: 0 14px 28px rgba(15, 23, 42, 0.06);
-          border-color: rgba(37, 99, 235, 0.14);
-        }
-        .dashboard-stat-header {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 0.75rem;
-        }
-        .stat-icon-wrapper {
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          width: 44px;
-          height: 44px;
-          border-radius: 12px;
-          box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85);
-        }
-        .dashboard-stat-value {
-          font-size: 2.3rem;
-          font-weight: 800;
-          letter-spacing: -0.04em;
-          color: var(--foreground);
-          line-height: 1;
-        }
-        .dashboard-stat-value.is-accent {
-          color: var(--primary);
-        }
-        .dashboard-stat-meta {
-          color: var(--muted-fg);
-          font-size: 0.84rem;
-          line-height: 1.5;
-        }
-        .progress-bar-bg {
-          height: 8px;
-          background: rgba(226, 232, 240, 0.72);
-          border-radius: 4px;
-          overflow: hidden;
-          margin-top: 0.5rem;
-          width: 100%;
-          box-shadow: inset 0 1px 2px rgba(0,0,0,0.05);
-        }
-        .progress-bar-fill {
-          height: 100%;
-          border-radius: 4px;
-          transition: width 1s cubic-bezier(0.4, 0, 0.2, 1);
-          background-image: linear-gradient(90deg, rgba(255,255,255,0.15) 25%, transparent 25%, transparent 50%, rgba(255,255,255,0.15) 50%, rgba(255,255,255,0.15) 75%, transparent 75%, transparent);
-          background-size: 1rem 1rem;
-        }
-        @keyframes pulse-dot {
-          0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.35); }
-          70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(37, 99, 235, 0); }
-          100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(37, 99, 235, 0); }
-        }
-        .live-dot {
-          width: 8px;
-          height: 8px;
-          background-color: var(--primary);
-          border-radius: 50%;
-          display: inline-block;
-          animation: pulse-dot 2s infinite;
-        }
-        .agent-token-trigger {
-          border: none;
-          background: transparent;
-          padding: 0;
-          color: var(--primary);
-          font: inherit;
-          font-weight: 700;
-          cursor: pointer;
-          transition: transform 0.2s ease, opacity 0.2s ease;
-        }
-        .agent-token-trigger:hover {
-          transform: translateY(-1px);
-          opacity: 0.9;
-        }
-        .agent-token-trigger:focus-visible {
-          outline: 2px solid var(--ring);
-          outline-offset: 4px;
-          border-radius: 8px;
-        }
-        .token-detail-toolbar {
-          display: flex;
-          justify-content: space-between;
-          align-items: flex-start;
-          gap: 1rem;
-          margin-bottom: 1.5rem;
-          flex-wrap: wrap;
-        }
-        .dashboard-detail-header {
-          display: flex;
-          align-items: center;
-          gap: 0.75rem;
-          margin: 1rem 0 0;
-        }
-        .dashboard-detail-title {
-          margin: 0;
-          font-size: 1.8rem;
-          font-weight: 700;
-          letter-spacing: -0.03em;
-        }
-        .token-detail-subtitle,
-        .token-pagination-info {
-          color: var(--muted-fg);
-          font-size: 0.9rem;
-        }
-        .token-badge {
-          display: inline-flex;
-          align-items: center;
-          padding: 0.25rem 0.55rem;
-          border-radius: 999px;
-          background: rgba(37, 99, 235, 0.1);
-          color: var(--primary);
-          font-size: 0.75rem;
-          font-weight: 700;
-          letter-spacing: 0.02em;
-        }
-        .token-model-chip {
-          display: inline-flex;
-          align-items: center;
-          max-width: 220px;
-          padding: 0.35rem 0.6rem;
-          border-radius: 999px;
-          background: rgba(15, 23, 42, 0.06);
-          color: var(--foreground);
-          font-size: 0.8rem;
-          font-weight: 600;
-          white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
-        }
-        .token-pagination {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          gap: 1rem;
-          margin-top: 1.1rem;
-          flex-wrap: wrap;
-        }
-        .token-pagination-actions {
-          display: flex;
-          gap: 0.75rem;
-          align-items: center;
-        }
-        .token-filter-panel {
-          display: grid;
-          grid-template-columns: minmax(220px, 1fr) repeat(2, minmax(160px, 220px)) auto;
-          gap: 0.75rem;
-          align-items: center;
-          margin-bottom: 1rem;
-        }
-        .token-filter-group {
-          min-width: 0;
-        }
-        .token-aggregation-grid {
-          display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-          gap: 1rem;
-          margin-bottom: 1rem;
-        }
-        .token-aggregation-card {
-          background: rgba(255, 255, 255, 0.8);
-          border: 1px solid rgba(148, 163, 184, 0.14);
-          border-radius: 1.2rem;
-          padding: 1rem 1.1rem;
-        }
-        .token-aggregation-title {
-          font-size: 0.85rem;
-          font-weight: 700;
-          color: var(--muted-fg);
-          text-transform: uppercase;
-          letter-spacing: 0.05em;
-          margin-bottom: 0.85rem;
-        }
-        .token-aggregation-list {
-          display: flex;
-          flex-direction: column;
-          gap: 0.7rem;
-        }
-        .token-aggregation-item {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 1rem;
-        }
-        .token-aggregation-item-label {
-          display: flex;
-          flex-direction: column;
-          gap: 0.15rem;
-          min-width: 0;
-        }
-        .token-aggregation-item-name {
-          font-weight: 700;
-          color: var(--foreground);
-          white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
-        }
-        .token-aggregation-item-meta {
-          font-size: 0.82rem;
-          color: var(--muted-fg);
-        }
-        .token-aggregation-item-value {
-          font-weight: 800;
-          color: var(--primary);
-          white-space: nowrap;
-        }
-        .dashboard-empty-state {
-          padding: 3.5rem 1.25rem;
-          text-align: center;
-          color: var(--muted-fg);
-        }
-        .dashboard-empty-title {
-          font-weight: 600;
-          color: var(--foreground);
-        }
-        .dashboard-empty-description {
-          margin-top: 0.5rem;
-          font-size: 0.9rem;
-          opacity: 0.8;
-        }
-        .dashboard-empty-icon {
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          width: 5rem;
-          height: 5rem;
-          margin-bottom: 1rem;
-          border-radius: 1.5rem;
-          background: rgba(37, 99, 235, 0.08);
-          color: var(--primary);
-        }
-        .dashboard-agent-cell {
-          display: flex;
-          align-items: center;
-          gap: 0.75rem;
-        }
-        .dashboard-agent-icon {
-          background: linear-gradient(180deg, rgba(241, 245, 255, 0.96), rgba(248, 250, 252, 0.96));
-          padding: 0.5rem;
-          border-radius: 0.8rem;
-          display: flex;
-          box-shadow: inset 0 1px 0 #fff;
-        }
-        .dashboard-uptime-value {
-          display: flex;
-          align-items: baseline;
-          gap: 0.35rem;
-          font-size: 2rem;
-          font-weight: 700;
-          color: var(--foreground);
-        }
-        .dashboard-uptime-unit {
-          font-size: 0.98rem;
-          color: var(--muted-fg);
-          font-weight: 600;
-        }
-        .dashboard-table-timestamp {
-          white-space: nowrap;
-          color: var(--muted-fg);
-        }
-        .dashboard-table-number-muted {
-          color: var(--muted-fg);
-          font-weight: 600;
-        }
-        .dashboard-table-number-strong {
-          font-weight: 700;
-          color: var(--primary);
-        }
-        .dashboard-table-number-subtle {
-          color: var(--muted-fg);
-        }
-        .dashboard-table-cell-strong {
-          font-weight: 600;
-        }
-        .dashboard-table-cell-medium {
-          font-weight: 500;
-        }
-        .dashboard-resource-value {
-          font-size: 1.1rem;
-          font-weight: 700;
-        }
-        .dashboard-resource-meta {
-          margin-top: 0.75rem;
-          text-align: right;
-          font-size: 0.8rem;
-          font-weight: 500;
-          color: var(--muted-fg);
-        }
-        .dashboard-stat-card-center {
-          justify-content: center;
-        }
-        @media (max-width: 960px) {
-          .dashboard-container {
-            padding: 1.2rem 1rem 1.3rem;
-          }
-          .dashboard-hero {
-            flex-direction: column;
-          }
-          .dashboard-hero-meta {
-            width: 100%;
-            min-width: 0;
-          }
-          .token-filter-panel {
-            grid-template-columns: 1fr;
-          }
-        }
-        @media (max-width: 720px) {
-          .dashboard-hero-meta {
-            grid-template-columns: 1fr;
-          }
-        }
-      `}</style>
-
       {view === 'tokenDetails' ? (
         <>
           <div className="token-detail-toolbar animate-stagger-1">
@@ -990,7 +554,10 @@ export const Dashboard = memo(function Dashboard({ agents, isActive, onReportErr
                     <div className="dashboard-resource-value">{systemStats.cpuUsage}%</div>
                   </div>
                   <div className="progress-bar-bg">
-                    <div className="progress-bar-fill" style={{ width: `${Math.min(systemStats.cpuUsage, 100)}%`, backgroundColor: systemStats.cpuUsage > 80 ? '#ef4444' : '#3b82f6' }} />
+                    <div
+                      className="progress-bar-fill"
+                      style={{ width: `${Math.min(systemStats.cpuUsage, 100)}%`, backgroundColor: systemStats.cpuUsage > 80 ? 'var(--danger)' : 'var(--primary)' }}
+                    />
                   </div>
                 </div>
 
@@ -1000,7 +567,10 @@ export const Dashboard = memo(function Dashboard({ agents, isActive, onReportErr
                     <div className="dashboard-resource-value">{systemStats.memoryUsage}%</div>
                   </div>
                   <div className="progress-bar-bg">
-                    <div className="progress-bar-fill" style={{ width: `${Math.min(systemStats.memoryUsage, 100)}%`, backgroundColor: systemStats.memoryUsage > 80 ? '#ef4444' : '#10b981' }} />
+                    <div
+                      className="progress-bar-fill"
+                      style={{ width: `${Math.min(systemStats.memoryUsage, 100)}%`, backgroundColor: systemStats.memoryUsage > 80 ? 'var(--danger)' : 'var(--success)' }}
+                    />
                   </div>
                   <div className="dashboard-resource-meta">
                     {t('dashboard.totalGb', { total: systemStats.totalMemory })}

@@ -1,5 +1,5 @@
 import { toSearchDiagnostic } from './diagnostics';
-import type { SearchDiagnostic, SearchProvider, SearchProviderKind, SearchRouterResult } from './types';
+import type { SearchDiagnostic, SearchProvider, SearchRouterResult } from './types';
 import type { WebSearchProviderId } from '../../../../shared/contracts';
 
 function hasChineseLanguageHint(languageHint: string) {
@@ -17,7 +17,7 @@ export function prioritizeSearchProviders(
   preferredProviderIds: WebSearchProviderId[] = []
 ) {
   const fallbackPreference = hasChineseLanguageHint(languageHint) || containsCjkCharacters(query)
-    ? ['baidu', 'bing', 'duckduckgo']
+    ? ['bing', 'baidu', 'duckduckgo']
     : ['bing', 'duckduckgo', 'baidu'];
   const normalizedPreference = [...preferredProviderIds, ...fallbackPreference]
     .filter((id, index, values) => values.indexOf(id) === index);
@@ -61,7 +61,6 @@ export async function runSearchRouter(input: SearchRouterInput): Promise<SearchR
     input.preferredProviderIds
   );
   const diagnostics: SearchDiagnostic[] = [];
-  let lastSuccessfulAttempt: { source: string; provider: string; providerKind: SearchProviderKind; searchUrl: string } | null = null;
 
   for (const provider of eligibleProviders) {
     const result = await provider.search({
@@ -72,50 +71,18 @@ export async function runSearchRouter(input: SearchRouterInput): Promise<SearchR
     });
 
     if (result.ok) {
-      lastSuccessfulAttempt = {
+      return {
+        ok: true,
+        results: result.results,
         source: result.providerId,
         provider: result.providerLabel,
         providerKind: result.providerKind,
-        searchUrl: result.searchUrl
+        searchUrl: result.searchUrl,
+        diagnostics
       };
-
-      if (result.results.length > 0) {
-        return {
-          ok: true,
-          results: result.results,
-          source: result.providerId,
-          provider: result.providerLabel,
-          providerKind: result.providerKind,
-          searchUrl: result.searchUrl,
-          diagnostics
-        };
-      }
-
-      diagnostics.push({
-        source: provider.id,
-        provider: provider.label,
-        providerKind: provider.kind,
-        url: result.searchUrl,
-        reason: `${provider.label} returned a page but no parsable results were found.`,
-        category: 'empty' as const,
-        retryable: true
-      });
-      continue;
     }
 
     diagnostics.push(toSearchDiagnostic(provider, result));
-  }
-
-  if (lastSuccessfulAttempt) {
-    return {
-      ok: true,
-      results: [],
-      source: lastSuccessfulAttempt.source,
-      provider: lastSuccessfulAttempt.provider,
-      providerKind: lastSuccessfulAttempt.providerKind,
-      searchUrl: lastSuccessfulAttempt.searchUrl,
-      diagnostics
-    };
   }
 
   return {

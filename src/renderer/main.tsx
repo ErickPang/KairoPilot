@@ -7,6 +7,7 @@ import { KAIRO_INVOKE } from '../shared/ipc'
 
 // Mock bridge for browser preview
 if (!window.kairo) {
+  const mockAppearance: import('./types').AppearanceConfig = { theme: 'system' }
   const mockWebSearch = {
     timeoutMs: 10000,
     preferredProviders: ['searxng', 'tavily', 'bing', 'duckduckgo', 'baidu'],
@@ -20,7 +21,18 @@ if (!window.kairo) {
   }
   window.kairo = {
     invoke: (async (channel: string, ..._args: unknown[]) => {
-      if (channel === KAIRO_INVOKE.configGetAll) return { models: { providers: {} }, agents: { activeAgentId: 'mainAgent', list: [] }, plugins: { registry: [] }, skills: { registry: [] }, webSearch: mockWebSearch };
+      if (channel === KAIRO_INVOKE.configGetAll) return { version: '3.1.0', models: { providers: {} }, agents: { activeAgentId: 'mainAgent', list: [] }, plugins: { registry: [] }, skills: { registry: [] }, appearance: mockAppearance, webSearch: mockWebSearch };
+      if (channel === KAIRO_INVOKE.configGetAppearance) return mockAppearance;
+      if (channel === KAIRO_INVOKE.configSaveAppearance) {
+        const nextAppearance = _args[0];
+        if (nextAppearance && typeof nextAppearance === 'object' && 'theme' in (nextAppearance as Record<string, unknown>)) {
+          const nextTheme = String((nextAppearance as { theme: string }).theme);
+          if (nextTheme === 'system' || nextTheme === 'light' || nextTheme === 'dark' || nextTheme === 'slate' || nextTheme === 'warm') {
+            mockAppearance.theme = nextTheme;
+          }
+        }
+        return { success: true };
+      }
       if (channel === KAIRO_INVOKE.configGetWebSearch) return mockWebSearch;
       if (channel === KAIRO_INVOKE.configSaveWebSearch) return { success: true };
       if (channel === KAIRO_INVOKE.agentChat) return { success: true, status: 'completed', content: 'Mock response' };
@@ -65,9 +77,30 @@ if (!window.kairo) {
         { id: 'issue-triage', name: 'Issue Triage', description: 'Mock issue triage workflow', version: '1.0.0', author: 'KairoPilot', icon: '🛠️', tags: ['debug'], marketplace: 'KairoPilot Curated', installedScopes: [], source: { type: 'inline', content: 'mock' } }
       ];
       if (channel === KAIRO_INVOKE.skillsInstall) return { success: true };
+      if (channel === KAIRO_INVOKE.skillsUninstall) return { success: true };
       if (channel === KAIRO_INVOKE.pluginsGetStore) return [
-        { id: 'kairo-weather-plugin', name: 'Weather Forecaster', description: 'Mock Weather', version: '1.0', author: 'Kairo', icon: '🌤️' },
-        { id: 'kairo-crypto-plugin', name: 'Crypto Tracker', description: 'Mock Crypto', version: '1.0', author: 'Kairo', icon: '₿' }
+        {
+          id: 'kairo-weather-plugin',
+          name: 'Weather Forecaster',
+          description: 'Mock Weather',
+          version: '1.0',
+          author: 'Kairo',
+          icon: '🌤️',
+          riskLevel: 'low',
+          tools: [{ name: 'get_weather_forecast', description: 'Mock weather tool' }],
+          capabilities: [{ id: 'demo-data', label: 'Demo data', riskLevel: 'low' }]
+        },
+        {
+          id: 'kairo-crypto-plugin',
+          name: 'Crypto Tracker',
+          description: 'Mock Crypto',
+          version: '1.0',
+          author: 'Kairo',
+          icon: '₿',
+          riskLevel: 'low',
+          tools: [{ name: 'get_crypto_snapshot', description: 'Mock crypto tool' }],
+          capabilities: [{ id: 'demo-data', label: 'Demo data', riskLevel: 'low' }]
+        }
       ];
       if (channel === KAIRO_INVOKE.pluginsGetInstalled) return [];
       if (channel === KAIRO_INVOKE.pluginsInstall) return { success: true };

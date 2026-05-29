@@ -67,7 +67,7 @@ export const PermissionSchema = z.object({
   }),
   network: z.object({
     enabled: z.boolean().default(false),
-    allowedDomains: z.array(z.string()).optional(), // Empty means all if enabled
+    allowedDomains: z.array(z.string()).optional(),
   }),
   shell: z.object({
     enabled: z.boolean().default(false),
@@ -206,7 +206,7 @@ export class PermissionGuard {
       return 'medium';
     }
 
-    if (toolName === 'read_file' || toolName === 'list_directory' || toolName === 'system_info') {
+    if (toolName === 'read_file' || toolName === 'read_attachment' || toolName === 'list_directory' || toolName === 'system_info') {
       return this.getDataClass() === 'sensitive' ? 'medium' : 'low';
     }
 
@@ -337,6 +337,9 @@ export class PermissionGuard {
     if (!normalizedAllowedTarget) {
       return false;
     }
+    if (normalizedAllowedTarget === '*') {
+      return true;
+    }
 
     try {
       const allowedUrl = new URL(normalizedAllowedTarget);
@@ -355,10 +358,8 @@ export class PermissionGuard {
   checkNetwork(url: string): boolean {
     if (!this.config.network.enabled) return false;
     
-    // If allowedDomains is undefined or empty, allow all (if network enabled)
-    // But for stricter security, you might want to default to block.
     if (!this.config.network.allowedDomains || this.config.network.allowedDomains.length === 0) {
-      return true; 
+      return false;
     }
 
     try {

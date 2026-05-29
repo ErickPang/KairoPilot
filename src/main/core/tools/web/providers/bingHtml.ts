@@ -2,7 +2,7 @@ import { createHtmlSearchProvider, cleanHtmlText, normalizeSearchResultUrl } fro
 
 export function parseBingHtmlResults(html: string, limit: number) {
   const results: Array<{ title: string; url: string; snippet: string }> = [];
-  const regex = /<li class="b_algo"[\s\S]*?<h2><a[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a><\/h2>[\s\S]*?(?:<div class="b_caption"[^>]*><p[^>]*>([\s\S]*?)<\/p>|<p class="b_lineclamp\d+"[^>]*>([\s\S]*?)<\/p>)/gi;
+  const regex = /<li class="b_algo"[\s\S]*?<h2[^>]*>\s*<a[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>\s*<\/h2>[\s\S]*?(?:<div class="b_caption"[^>]*>[\s\S]*?<p[^>]*>([\s\S]*?)<\/p>|<p class="b_lineclamp\d+"[^>]*>([\s\S]*?)<\/p>)/gi;
   let match: RegExpExecArray | null;
 
   while ((match = regex.exec(html)) !== null && results.length < limit) {

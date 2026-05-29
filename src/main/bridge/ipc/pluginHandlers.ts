@@ -1,35 +1,47 @@
 import { ipcMain } from 'electron';
-import { pluginManager } from '../../core/plugins/manager';
+import {
+  getInstalledPlugins,
+  getStorePlugins,
+  installPluginWithAudit,
+  recordPluginInstallFailure,
+  recordPluginUninstallFailure,
+  uninstallPluginWithAudit
+} from '../../services/pluginService';
 import { KAIRO_INVOKE } from '../../../shared/ipc';
+import { parseIpcInput } from './configValidation';
+import { PluginActionInputSchema } from './skillPluginValidation';
+import { ipcFailure, ipcSuccess } from './ipcResult';
 
 function registerPluginHandlers() {
   ipcMain.handle(KAIRO_INVOKE.pluginsGetStore, async () => {
-    return pluginManager.getStorePlugins();
+    return getStorePlugins();
   });
 
   ipcMain.handle(KAIRO_INVOKE.pluginsGetInstalled, async () => {
-    return pluginManager.getInstalledPlugins();
+    return getInstalledPlugins();
   });
 
   ipcMain.handle(KAIRO_INVOKE.pluginsInstall, async (_, args) => {
     try {
-      const id = typeof args === 'string' ? args : args.id;
-      const scope = typeof args === 'string' ? 'public' : (args.scope || 'public');
-      await pluginManager.installPlugin(id, scope);
-      return { success: true };
+      const payload = parseIpcInput(PluginActionInputSchema, args, 'plugin install request');
+      await installPluginWithAudit(payload);
+      return ipcSuccess();
     } catch (e) {
-      return { success: false, error: e instanceof Error ? e.message : 'Unknown error' };
+      const result = ipcFailure(e);
+      recordPluginInstallFailure(result.error);
+      return result;
     }
   });
 
   ipcMain.handle(KAIRO_INVOKE.pluginsUninstall, async (_, args) => {
     try {
-      const id = typeof args === 'string' ? args : args.id;
-      const scope = typeof args === 'string' ? 'public' : (args.scope || 'public');
-      await pluginManager.uninstallPlugin(id, scope);
-      return { success: true };
+      const payload = parseIpcInput(PluginActionInputSchema, args, 'plugin uninstall request');
+      await uninstallPluginWithAudit(payload);
+      return ipcSuccess();
     } catch (e) {
-      return { success: false, error: e instanceof Error ? e.message : 'Unknown error' };
+      const result = ipcFailure(e);
+      recordPluginUninstallFailure(result.error);
+      return result;
     }
   });
 }

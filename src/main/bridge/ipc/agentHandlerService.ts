@@ -5,7 +5,8 @@ import { getActiveAgentId } from '../../store/config';
 import { ensureActiveSession, getApprovalRecord, getRunById, updateSessionMessages } from '../../store/chat';
 import type { ChatMessage } from '../../core/llm/types';
 import type { RuntimeExecutionResult, RuntimeUpdate } from '../../core/agent/runEngine';
-import type { AgentRuntimeInvokeResult } from '../../../shared/contracts';
+import type { AgentChatRequest, AgentRuntimeInvokeResult, ChatAttachment } from '../../../shared/contracts';
+import { ipcFailure } from './ipcResult';
 
 const DEFAULT_INIT_ERROR = 'Agent not initialized. Please configure settings first.';
 
@@ -91,7 +92,37 @@ export function mapUnknownError(error: unknown, fallback = 'Unknown error') {
   return error instanceof Error ? error.message : fallback;
 }
 
-export async function runActiveAgentChat(message: string, sender: WebContents) {
+export function mapRuntimeHandlerFailure(error: unknown) {
+  return ipcFailure(mapUnknownError(error));
+}
+
+function normalizeAgentChatRequest(input: unknown): AgentChatRequest {
+  if (typeof input === 'string') {
+    return { content: input };
+  }
+
+  if (!input || typeof input !== 'object') {
+    return { content: '' };
+  }
+
+  const payload = input as Record<string, unknown>;
+  const content = typeof payload.content === 'string' ? payload.content : '';
+  const attachments = Array.isArray(payload.attachments)
+    ? payload.attachments.filter((item): item is ChatAttachment => {
+        if (!item || typeof item !== 'object') {
+          return false;
+        }
+        const attachment = item as Record<string, unknown>;
+        return typeof attachment.id === 'string'
+          && typeof attachment.sessionId === 'string'
+          && typeof attachment.storedPath === 'string';
+      })
+    : undefined;
+  return { content, attachments };
+}
+
+export async function runActiveAgentChat(input: unknown, sender: WebContents) {
+  const request = normalizeAgentChatRequest(input);
   const { activeAgentId, agent } = await ensureActiveAgentRuntime(sender);
   const session = ensureActiveSession(activeAgentId);
 
@@ -102,9 +133,9 @@ export async function runActiveAgentChat(message: string, sender: WebContents) {
   agent.setHistory(session.messages);
   try {
     const response = await agent.chat(
-      message,
+      request.content,
       createRuntimeUpdateForwarder(sender, session.id),
-      { sessionId: session.id, agentId: activeAgentId }
+      { sessionId: session.id, agentId: activeAgentId, attachments: request.attachments }
     );
 
     return mapRuntimeExecutionResult(response);

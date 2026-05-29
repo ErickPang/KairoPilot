@@ -33,6 +33,7 @@ export function serializeComparableMessage(message: ChatMessage): string {
     name: message.name || null,
     tool_call_id: message.tool_call_id || null,
     tool_calls: message.tool_calls || null,
+    attachments: message.attachments || null,
     usage: message.usage || null,
     model: message.model || null
   });

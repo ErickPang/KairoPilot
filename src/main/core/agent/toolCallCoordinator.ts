@@ -21,6 +21,7 @@ import {
   checkPermission,
   executeApprovedTool,
   getPolicyTags,
+  getToolMetadataPolicyTags,
   recordToolFailure
 } from './toolPipeline';
 
@@ -41,6 +42,7 @@ interface AuditLogEntry {
 
 interface ToolCallExecutionHooks {
   auditLog?: (entry: AuditLogEntry) => void;
+  shouldInterrupt?: () => { kind: 'pause' | 'cancel'; reason?: string } | null;
   emitUpdate: (listener: ((update: RuntimeUpdate) => void) | undefined, update: RuntimeUpdate) => void;
   appendToolMessage: (toolName: string, callId: string, content: string) => void;
   persistSnapshot: (runId: string, patch: RuntimeSnapshotPatch) => void;
@@ -78,6 +80,7 @@ export async function handleToolCall(params: HandleToolCallParams): Promise<Runt
     tools,
     permissionGuard,
     auditLog,
+    shouldInterrupt,
     emitUpdate,
     appendToolMessage,
     persistSnapshot,
@@ -94,6 +97,7 @@ export async function handleToolCall(params: HandleToolCallParams): Promise<Runt
   const toolName = call.function.name;
   const tool = tools.get(toolName);
   const parsedArgs = parseToolArgs(toolName, call.function.arguments);
+  const toolMetadataTags = getToolMetadataPolicyTags(tool);
 
   if (!parsedArgs.success) {
     await recordToolFailure({
@@ -104,7 +108,7 @@ export async function handleToolCall(params: HandleToolCallParams): Promise<Runt
       callId: call.id,
       args: {},
       errorMessage: parsedArgs.error,
-      policyTags: [`tool:${toolName}`, 'decision:error'],
+      policyTags: [`tool:${toolName}`, ...toolMetadataTags, 'decision:error'],
       auditLog,
       emitUpdate,
       appendToolMessage
@@ -162,7 +166,7 @@ export async function handleToolCall(params: HandleToolCallParams): Promise<Runt
   });
   const toolRecordId = createToolCallRecord(runId, toolStep.id, toolName, args);
   const permissionDecision = checkPermission(permissionGuard, toolName, args);
-  const policyTags = getPolicyTags(toolName, args, permissionGuard);
+  const policyTags = [...getPolicyTags(toolName, args, permissionGuard), ...toolMetadataTags];
 
   if (permissionDecision.kind === 'deny') {
     await recordToolFailure({
@@ -222,6 +226,7 @@ export async function handleToolCall(params: HandleToolCallParams): Promise<Runt
     toolRecordId,
     policyTags,
     auditLog,
+    shouldInterrupt,
     emitUpdate,
     appendToolMessage
   });
@@ -239,6 +244,7 @@ export async function resumePendingToolCall(params: ResumePendingToolCallParams)
   const {
     tools,
     auditLog,
+    shouldInterrupt,
     emitUpdate,
     appendToolMessage,
     run,
@@ -250,7 +256,10 @@ export async function resumePendingToolCall(params: ResumePendingToolCallParams)
   } = params;
 
   const tool = tools.get(pendingToolCall.toolName);
-  const policyTags = getPolicyTags(pendingToolCall.toolName, approvalArgs, permissionGuard);
+  const policyTags = [
+    ...getPolicyTags(pendingToolCall.toolName, approvalArgs, permissionGuard),
+    ...getToolMetadataPolicyTags(tool)
+  ];
 
   if (!approved || !tool) {
     const errorMessage = !approved
@@ -288,6 +297,7 @@ export async function resumePendingToolCall(params: ResumePendingToolCallParams)
     toolRecordId: pendingToolCall.toolRecordId,
     policyTags,
     auditLog,
+    shouldInterrupt,
     emitUpdate,
     appendToolMessage
   });

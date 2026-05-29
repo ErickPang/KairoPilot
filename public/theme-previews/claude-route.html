@@ -1,0 +1,467 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Claude Route Preview</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f7f2ea;
+        --surface: rgba(255, 251, 245, 0.92);
+        --surface-2: #f2e8dc;
+        --surface-3: #fffdf9;
+        --border: #dbcbbb;
+        --border-strong: #ceb8a3;
+        --text: #2d241f;
+        --muted: #74675e;
+        --primary: #b06f4f;
+        --primary-hover: #9a5f43;
+        --primary-soft: rgba(176, 111, 79, 0.12);
+        --primary-soft-2: rgba(205, 146, 110, 0.16);
+        --success: #5e7d67;
+        --warning: #bf8c3f;
+        --danger: #c76857;
+        --shadow: 0 24px 66px rgba(45, 36, 31, 0.1);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: "Avenir Next", "Segoe UI", sans-serif;
+        color: var(--text);
+        background:
+          radial-gradient(circle at top left, rgba(214, 168, 138, 0.18), transparent 28rem),
+          radial-gradient(circle at bottom right, rgba(184, 149, 120, 0.12), transparent 26rem),
+          linear-gradient(180deg, #fbf7f0 0%, var(--bg) 100%);
+      }
+
+      .shell {
+        display: grid;
+        grid-template-columns: 96px 304px 1fr;
+        gap: 18px;
+        height: 100vh;
+        padding: 20px;
+      }
+
+      .panel {
+        border: 1px solid rgba(255, 255, 255, 0.74);
+        border-radius: 30px;
+        background: var(--surface);
+        box-shadow: var(--shadow);
+        backdrop-filter: blur(18px);
+      }
+
+      .rail {
+        padding: 18px 12px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .brand {
+        width: 56px;
+        height: 56px;
+        border-radius: 18px;
+        display: grid;
+        place-items: center;
+        background: linear-gradient(180deg, rgba(176, 111, 79, 0.18), rgba(176, 111, 79, 0.08));
+        color: var(--primary);
+        font-weight: 900;
+        margin-bottom: 10px;
+      }
+
+      .rail-btn {
+        width: 100%;
+        padding: 12px 8px;
+        border: 0;
+        border-radius: 16px;
+        background: transparent;
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .rail-btn.active {
+        background: linear-gradient(180deg, #c27d58 0%, var(--primary) 100%);
+        color: #fff9f4;
+        box-shadow: 0 16px 24px rgba(176, 111, 79, 0.22);
+      }
+
+      .sidebar {
+        padding: 22px;
+        display: grid;
+        grid-template-rows: auto auto 1fr auto;
+        gap: 16px;
+      }
+
+      .eyebrow {
+        display: inline-flex;
+        padding: 6px 12px;
+        border-radius: 999px;
+        background: var(--primary-soft);
+        color: var(--primary);
+        font-size: 11px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        font-weight: 800;
+      }
+
+      h1 {
+        margin: 10px 0 8px;
+        font-size: 30px;
+        line-height: 0.95;
+        letter-spacing: -0.05em;
+        font-family: "Iowan Old Style", "Palatino Linotype", serif;
+      }
+
+      p {
+        margin: 0;
+        color: var(--muted);
+        line-height: 1.72;
+      }
+
+      .hero-note {
+        padding: 18px;
+        border-radius: 22px;
+        border: 1px solid var(--border);
+        background:
+          linear-gradient(180deg, rgba(176, 111, 79, 0.1), rgba(255, 255, 255, 0.62)),
+          rgba(255, 255, 255, 0.5);
+      }
+
+      .sessions {
+        display: grid;
+        gap: 10px;
+        align-content: start;
+      }
+
+      .session {
+        padding: 14px;
+        border-radius: 18px;
+        background: rgba(255, 255, 255, 0.56);
+        border: 1px solid transparent;
+      }
+
+      .session.active {
+        background: linear-gradient(180deg, rgba(176, 111, 79, 0.12), rgba(255, 255, 255, 0.94));
+        border-color: rgba(176, 111, 79, 0.18);
+      }
+
+      .session-title {
+        display: block;
+        font-weight: 700;
+      }
+
+      .session-meta {
+        display: block;
+        margin-top: 4px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .sidebar-foot {
+        padding: 14px 16px;
+        border-radius: 18px;
+        background: var(--surface-2);
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.6;
+      }
+
+      .main {
+        display: grid;
+        grid-template-rows: auto 1fr auto;
+        overflow: hidden;
+      }
+
+      .header {
+        padding: 22px 28px 18px;
+        border-bottom: 1px solid rgba(219, 203, 187, 0.62);
+        background:
+          radial-gradient(circle at top right, rgba(176, 111, 79, 0.12), transparent 22rem),
+          linear-gradient(180deg, rgba(255, 253, 249, 0.78), rgba(248, 241, 232, 0.88));
+      }
+
+      .header-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: end;
+        gap: 16px;
+      }
+
+      .title {
+        margin: 8px 0 6px;
+        font-size: 34px;
+        letter-spacing: -0.05em;
+      }
+
+      .status {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 12px;
+        border-radius: 999px;
+        background: var(--primary-soft);
+        color: var(--primary);
+        font-size: 13px;
+        font-weight: 700;
+      }
+
+      .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--primary);
+      }
+
+      .palette-grid {
+        margin-top: 18px;
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .palette-card {
+        padding: 14px 16px;
+        border-radius: 18px;
+        border: 1px solid var(--border);
+        background: rgba(255, 255, 255, 0.64);
+      }
+
+      .palette-card-label {
+        color: var(--muted);
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+      }
+
+      .palette-card-value {
+        margin-top: 10px;
+        font-size: 26px;
+        font-weight: 800;
+        letter-spacing: -0.04em;
+      }
+
+      .content {
+        overflow: auto;
+        padding: 20px 28px 24px;
+        display: grid;
+        gap: 18px;
+      }
+
+      .layout {
+        display: grid;
+        grid-template-columns: 1.1fr 0.9fr;
+        gap: 18px;
+      }
+
+      .module {
+        padding: 18px;
+        border-radius: 22px;
+        border: 1px solid var(--border);
+        background: rgba(255, 255, 255, 0.68);
+      }
+
+      .module h3 {
+        margin: 0 0 12px;
+        font-size: 18px;
+        letter-spacing: -0.03em;
+      }
+
+      .conversation {
+        display: grid;
+        gap: 12px;
+      }
+
+      .bubble {
+        padding: 16px 18px;
+        border-radius: 22px;
+        border: 1px solid var(--border);
+        background: var(--surface-3);
+        line-height: 1.74;
+      }
+
+      .bubble.user {
+        justify-self: end;
+        max-width: 76%;
+        border: 0;
+        background: linear-gradient(180deg, #c37f5a 0%, var(--primary) 100%);
+        color: #fff8f2;
+        box-shadow: 0 18px 28px rgba(176, 111, 79, 0.22);
+      }
+
+      .split {
+        display: grid;
+        gap: 10px;
+      }
+
+      .row {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 12px 14px;
+        border-radius: 16px;
+        background: var(--surface-2);
+      }
+
+      .status-pill {
+        padding: 4px 10px;
+        border-radius: 999px;
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .ok { color: var(--success); background: rgba(94, 125, 103, 0.14); }
+      .warn { color: var(--warning); background: rgba(191, 140, 63, 0.14); }
+      .bad { color: var(--danger); background: rgba(199, 104, 87, 0.12); }
+
+      .composer {
+        padding: 0 28px 24px;
+      }
+
+      .composer-box {
+        display: grid;
+        gap: 14px;
+        padding: 18px;
+        border-radius: 22px;
+        border: 1px solid var(--border-strong);
+        background: rgba(255, 255, 255, 0.8);
+      }
+
+      .composer-actions {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+
+      .ghost {
+        padding: 10px 12px;
+        border-radius: 14px;
+        border: 1px solid var(--border);
+        background: var(--surface-3);
+        color: var(--muted);
+      }
+
+      .send {
+        width: 50px;
+        height: 50px;
+        border: 0;
+        border-radius: 16px;
+        background: linear-gradient(180deg, #c57f5a, var(--primary));
+        color: #fff8f2;
+        box-shadow: 0 16px 24px rgba(176, 111, 79, 0.22);
+      }
+
+      @media (max-width: 1180px) {
+        .palette-grid,
+        .layout {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      @media (max-width: 920px) {
+        .shell {
+          grid-template-columns: 1fr;
+          height: auto;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <aside class="rail panel">
+        <div class="brand">K</div>
+        <button class="rail-btn active">Chat</button>
+        <button class="rail-btn">Dash</button>
+        <button class="rail-btn">Store</button>
+        <button class="rail-btn">Audit</button>
+        <button class="rail-btn">Config</button>
+      </aside>
+
+      <aside class="sidebar panel">
+        <div>
+          <span class="eyebrow">Claude Route</span>
+          <h1>Quiet Paper Interface</h1>
+          <p>重点不是“品牌色存在感”，而是纸感底色、深墨文本和柔和的局部强调，让界面显得平静。</p>
+        </div>
+        <div class="hero-note">
+          <p>这种路径很适合 AI 助手产品，因为它更像认真阅读和思考的工作区。</p>
+        </div>
+        <div class="sessions">
+          <div class="session active">
+            <span class="session-title">Claude-like Theme Review</span>
+            <span class="session-meta">Selected · Current preview</span>
+          </div>
+          <div class="session">
+            <span class="session-title">Prompt Workspace Tone</span>
+            <span class="session-meta">Pending · Today</span>
+          </div>
+          <div class="session">
+            <span class="session-title">Agent Narrative Layer</span>
+            <span class="session-meta">Queued · Next</span>
+          </div>
+        </div>
+        <div class="sidebar-foot">如果想避开科技蓝，同时保留现代感，这条路线通常比“高饱和品牌色”更耐看。</div>
+      </aside>
+
+      <section class="main panel">
+        <header class="header">
+          <div class="header-row">
+            <div>
+              <span class="eyebrow">Product Tone</span>
+              <h2 class="title">An AI Workspace With Less Noise</h2>
+              <p>暖白底不是为了复古，而是为了让界面更像思考空间。强调色只用于关键动作和局部状态。</p>
+            </div>
+            <div class="status"><span class="dot"></span> Agent Active</div>
+          </div>
+
+          <div class="palette-grid">
+            <div class="palette-card"><div class="palette-card-label">Primary Surface</div><div class="palette-card-value">#FFFBF5</div></div>
+            <div class="palette-card"><div class="palette-card-label">Accent</div><div class="palette-card-value">#B06F4F</div></div>
+            <div class="palette-card"><div class="palette-card-label">Text</div><div class="palette-card-value">#2D241F</div></div>
+            <div class="palette-card"><div class="palette-card-label">Border</div><div class="palette-card-value">#DBCBBB</div></div>
+          </div>
+        </header>
+
+        <div class="content">
+          <div class="layout">
+            <section class="module">
+              <h3>Conversation Area</h3>
+              <div class="conversation">
+                <div class="bubble">Claude 路线的关键不是“更暖”，而是让暖色只存在于底层氛围和局部强调里，而不是铺满整个界面。</div>
+                <div class="bubble user">所以看起来更像安静的写作/思考空间，而不是强科技感面板。</div>
+                <div class="bubble">对。深文本、柔和边框、少量陶土高亮，会让产品更沉稳，也更像 AI 助手而不是传统 IDE。</div>
+              </div>
+            </section>
+
+            <section class="module">
+              <h3>Review Checklist</h3>
+              <div class="split">
+                <div class="row"><span>Reading comfort</span><span class="status-pill ok">High</span></div>
+                <div class="row"><span>Brand subtlety</span><span class="status-pill ok">Strong</span></div>
+                <div class="row"><span>Tool-like sharpness</span><span class="status-pill warn">Medium</span></div>
+                <div class="row"><span>Risk of over-warmth</span><span class="status-pill bad">Watch</span></div>
+              </div>
+            </section>
+          </div>
+        </div>
+
+        <footer class="composer">
+          <div class="composer-box">
+            <div style="color:var(--muted);">Compare this route with the Cursor / Linear route and explain which one feels more like a premium AI assistant product.</div>
+            <div class="composer-actions">
+              <button class="ghost">Model: Claude-style review</button>
+              <button class="send">↑</button>
+            </div>
+          </div>
+        </footer>
+      </section>
+    </main>
+  </body>
+</html>

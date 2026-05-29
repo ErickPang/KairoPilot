@@ -17,8 +17,24 @@ export function upsertThinkingMessage(previous: Message[], content: string): Mes
   return [...previous, { role: 'thinking' as const, content }];
 }
 
+export function upsertAssistantStreamMessage(previous: Message[], content: string): Message[] {
+  const withoutTrailingThinking = previous[previous.length - 1]?.role === 'thinking'
+    ? previous.slice(0, -1)
+    : previous;
+  const lastMessage = withoutTrailingThinking[withoutTrailingThinking.length - 1];
+  if (lastMessage?.role === 'assistant') {
+    return [...withoutTrailingThinking.slice(0, -1), {
+      ...lastMessage,
+      content
+    }];
+  }
+
+  return [...withoutTrailingThinking, { role: 'assistant' as const, content }];
+}
+
 function isProgressUpdate(update: RuntimeUpdateEvent) {
   return update.type === 'thinking'
+    || update.type === 'assistant-delta'
     || update.type === 'tool-call'
     || update.type === 'tool-result'
     || update.type === 'tool-error';
@@ -111,7 +127,7 @@ function patchRunSteps(currentSteps: RunStep[], update: RuntimeUpdateEvent): Run
       };
     }
 
-    if (update.type === 'thinking' || update.type === 'tool-call') {
+    if (update.type === 'thinking' || update.type === 'assistant-delta' || update.type === 'tool-call') {
       return {
         ...step,
         status: 'running',

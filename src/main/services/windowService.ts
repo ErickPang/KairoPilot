@@ -29,7 +29,7 @@ export function createMainWindow(options: {
     height: 700,
     icon: path.join(options.publicPath, 'icon.png'),
     titleBarStyle: 'hidden',
-    trafficLightPosition: { x: 28, y: 28 },
+    trafficLightPosition: { x: 18, y: 12 },
     webPreferences: {
       preload: options.preloadPath,
       contextIsolation: true,

@@ -1,5 +1,6 @@
 import { OpenAI } from 'openai';
 import { z } from 'zod';
+import fs from 'node:fs/promises';
 import type { ProviderCapabilitySnapshot, ProviderType } from '../../../shared/contracts';
 import type {
   ChatMessage,
@@ -55,7 +56,7 @@ function createOpenAICompatibleCapabilities(): LLMProviderCapabilities {
     toolCalling: true,
     modelListing: true,
     structuredOutput: false,
-    multimodalInput: false,
+    multimodalInput: true,
     protocol: 'openai-compatible'
   };
 }
@@ -79,7 +80,7 @@ function createAnthropicCapabilities(): LLMProviderCapabilities {
     toolCalling: true,
     modelListing: true,
     structuredOutput: false,
-    multimodalInput: false,
+    multimodalInput: true,
     protocol: 'native'
   };
 }
@@ -152,6 +153,11 @@ function normalizeOpenAICompatibleError(provider: ProviderType, action: 'chat' |
   }
 
   return new Error(`${provider} ${action === 'models' ? '获取模型列表' : '请求'}失败：${message}`);
+}
+
+function shouldRetryOpenAIStreamWithoutUsageOptions(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error || '');
+  return /stream_options|include_usage|unsupported|unrecognized|unknown parameter|invalid parameter/i.test(message);
 }
 
 function buildProviderNotesFromDescriptor(config: LLMConfig, descriptor: LLMProviderAdapterDescriptor): string | undefined {
@@ -244,9 +250,10 @@ export class OpenAICompatibleProvider implements LLMProvider {
 
   async complete(request: LLMRequest): Promise<LLMResponse> {
     try {
+      const messages = await this.formatMessages(request.messages);
       const response = await this.client.chat.completions.create({
         model: this.model,
-        messages: this.formatMessages(request.messages) as unknown as Parameters<typeof this.client.chat.completions.create>[0]['messages'],
+        messages: messages as unknown as Parameters<typeof this.client.chat.completions.create>[0]['messages'],
         tools: this.formatTools(request.tools),
         temperature: request.generationConfig?.temperature,
         top_p: request.generationConfig?.topP,
@@ -295,16 +302,42 @@ export class OpenAICompatibleProvider implements LLMProvider {
 
   async stream(request: LLMRequest, onEvent: (event: LLMStreamEvent) => void): Promise<void> {
     try {
-      const response = await this.client.chat.completions.create({
+      const messages = await this.formatMessages(request.messages);
+      const basePayload = {
         model: this.model,
-        messages: this.formatMessages(request.messages) as unknown as Parameters<typeof this.client.chat.completions.create>[0]['messages'],
+        messages: messages as unknown as Parameters<typeof this.client.chat.completions.create>[0]['messages'],
         tools: this.formatTools(request.tools),
         temperature: request.generationConfig?.temperature,
         top_p: request.generationConfig?.topP,
         stop: request.generationConfig?.stop,
         max_tokens: request.generationConfig?.maxOutputTokens,
         stream: true
-      });
+      };
+      const requestOptions = {
+        signal: request.signal
+      };
+      let response: AsyncIterable<{
+        choices: Array<{ delta?: { content?: unknown; tool_calls?: unknown } }>;
+        usage?: {
+          prompt_tokens: number;
+          completion_tokens: number;
+          total_tokens: number;
+        } | null;
+      }>;
+
+      try {
+        response = await this.client.chat.completions.create({
+          ...basePayload,
+          stream_options: {
+            include_usage: true
+          }
+        }, requestOptions) as typeof response;
+      } catch (error) {
+        if (!shouldRetryOpenAIStreamWithoutUsageOptions(error)) {
+          throw error;
+        }
+        response = await this.client.chat.completions.create(basePayload, requestOptions) as typeof response;
+      }
 
       for await (const chunk of response) {
         const delta = chunk.choices[0]?.delta;
@@ -368,13 +401,15 @@ export class OpenAICompatibleProvider implements LLMProvider {
     }
   }
 
-  private formatMessages(messages: ChatMessage[]) {
+  private async formatMessages(messages: ChatMessage[]) {
     let lastToolCalls: Record<string, unknown>[] = [];
+    const formattedMessages: Array<ChatMessage | Record<string, unknown>> = [];
 
-    return messages.map((message) => {
+    for (const message of messages) {
       if (message.role === 'assistant' && message.tool_calls) {
         lastToolCalls = message.tool_calls;
-        return message;
+        formattedMessages.push(message);
+        continue;
       }
 
       if (message.role === 'tool') {
@@ -390,15 +425,43 @@ export class OpenAICompatibleProvider implements LLMProvider {
               : undefined;
         }
 
-        return {
+        formattedMessages.push({
           role: message.role,
           content: message.content,
           tool_call_id: callId || `call_${Math.random().toString(36).slice(2)}`
-        };
+        });
+        continue;
       }
 
-      return message;
-    });
+      if (message.role === 'user' && Array.isArray(message.attachments) && message.attachments.some((attachment) => attachment.kind === 'image')) {
+        const content: Array<Record<string, unknown>> = [];
+        if (message.content) {
+          content.push({ type: 'text', text: message.content });
+        }
+        for (const attachment of message.attachments.filter((item) => item.kind === 'image')) {
+          try {
+            const data = (await fs.readFile(attachment.storedPath)).toString('base64');
+            content.push({
+              type: 'image_url',
+              image_url: {
+                url: `data:${attachment.mimeType || 'image/png'};base64,${data}`
+              }
+            });
+          } catch {
+            continue;
+          }
+        }
+        formattedMessages.push({
+          role: 'user',
+          content
+        });
+        continue;
+      }
+
+      formattedMessages.push(message);
+    }
+
+    return formattedMessages;
   }
 
   private formatTools(tools?: ToolDefinition[]) {
@@ -411,23 +474,30 @@ export class OpenAICompatibleProvider implements LLMProvider {
       function: {
         name: tool.name,
         description: tool.description,
-        parameters: this.toJsonSchema(tool.parameters)
+        parameters: this.toJsonSchema(tool)
       }
     }));
   }
 
-  private toJsonSchema(parameters: ToolDefinition['parameters']): Record<string, unknown> {
+  private toJsonSchema(tool: ToolDefinition): Record<string, unknown> {
+    if (tool.parametersJsonSchema) {
+      return this.normalizeJsonSchema(tool.parametersJsonSchema);
+    }
+
     try {
-      const schema = z.toJSONSchema(parameters) as Record<string, unknown>;
-      const jsonSchema = { ...schema };
-      delete jsonSchema.$schema;
-      if (typeof jsonSchema.type !== 'string') {
-        return { type: 'object', properties: {}, additionalProperties: true };
-      }
-      return jsonSchema;
+      return this.normalizeJsonSchema(z.toJSONSchema(tool.parameters) as Record<string, unknown>);
     } catch {
       return { type: 'object', properties: {}, additionalProperties: true };
     }
+  }
+
+  private normalizeJsonSchema(schema: Record<string, unknown>): Record<string, unknown> {
+    const jsonSchema = { ...schema };
+    delete jsonSchema.$schema;
+    if (typeof jsonSchema.type !== 'string') {
+      return { type: 'object', properties: {}, additionalProperties: true };
+    }
+    return jsonSchema;
   }
 }
 
@@ -459,7 +529,7 @@ export class AnthropicNativeProvider implements LLMProvider {
   async complete(request: LLMRequest): Promise<LLMResponse> {
     const response = await this.requestJson<AnthropicMessageResponse>('/messages', {
       method: 'POST',
-      body: JSON.stringify(this.buildAnthropicRequestBody(request))
+      body: JSON.stringify(await this.buildAnthropicRequestBody(request))
     });
 
     const normalizedMessage = this.normalizeAnthropicResponseMessage(response);
@@ -485,8 +555,9 @@ export class AnthropicNativeProvider implements LLMProvider {
     const response = await fetch(`${this.baseUrl}/messages`, {
       method: 'POST',
       headers: this.createHeaders(),
+      signal: request.signal,
       body: JSON.stringify({
-        ...this.buildAnthropicRequestBody(request),
+        ...(await this.buildAnthropicRequestBody(request)),
         stream: true
       })
     });
@@ -505,8 +576,101 @@ export class AnthropicNativeProvider implements LLMProvider {
 
     const decoder = new TextDecoder();
     let buffer = '';
+    let promptTokens = 0;
+    let completionTokens = 0;
+    const toolBlocks = new Map<number, { id: string; name: string }>();
 
     const reader = response.body.getReader();
+    const processSsePart = (part: string) => {
+      const parsedEvent = this.parseSseEvent(part);
+      if (!parsedEvent?.data) {
+        return;
+      }
+      const payload = JSON.parse(parsedEvent.data) as Record<string, unknown>;
+
+      if (parsedEvent.event === 'message_start') {
+        const message = payload.message as Record<string, unknown> | undefined;
+        const usage = message?.usage as Record<string, unknown> | undefined;
+        promptTokens = typeof usage?.input_tokens === 'number' ? usage.input_tokens : promptTokens;
+        completionTokens = typeof usage?.output_tokens === 'number' ? usage.output_tokens : completionTokens;
+        onEvent({
+          type: 'usage_delta',
+          usage: {
+            prompt_tokens: promptTokens,
+            completion_tokens: completionTokens,
+            total_tokens: promptTokens + completionTokens
+          },
+          provider: this.config.provider,
+          model: this.model
+        });
+      }
+
+      if (parsedEvent.event === 'content_block_start') {
+        const index = typeof payload.index === 'number' ? payload.index : 0;
+        const contentBlock = payload.content_block as Record<string, unknown> | undefined;
+        if (contentBlock?.type === 'tool_use') {
+          toolBlocks.set(index, {
+            id: typeof contentBlock.id === 'string' ? contentBlock.id : `tool_${index}`,
+            name: typeof contentBlock.name === 'string' ? contentBlock.name : 'unknown'
+          });
+        }
+      }
+
+      if (parsedEvent.event === 'content_block_delta') {
+        const delta = payload.delta as Record<string, unknown> | undefined;
+        if (typeof delta?.text === 'string' && delta.text.length > 0) {
+          onEvent({
+            type: 'assistant_delta',
+            delta: delta.text,
+            provider: this.config.provider,
+            model: this.model
+          });
+        }
+        if (delta?.type === 'input_json_delta' && typeof delta.partial_json === 'string') {
+          const index = typeof payload.index === 'number' ? payload.index : 0;
+          const toolBlock = toolBlocks.get(index);
+          onEvent({
+            type: 'tool_call_delta',
+            delta: [{
+              id: toolBlock?.id || `tool_${index}`,
+              type: 'function',
+              function: {
+                name: toolBlock?.name || 'unknown',
+                arguments: delta.partial_json
+              }
+            }],
+            provider: this.config.provider,
+            model: this.model
+          });
+        }
+      }
+
+      if (parsedEvent.event === 'message_delta') {
+        const usage = payload.usage as Record<string, unknown> | undefined;
+        if (usage) {
+          promptTokens = typeof usage.input_tokens === 'number' ? usage.input_tokens : promptTokens;
+          completionTokens = typeof usage.output_tokens === 'number' ? usage.output_tokens : completionTokens;
+          onEvent({
+            type: 'usage_delta',
+            usage: {
+              prompt_tokens: promptTokens,
+              completion_tokens: completionTokens,
+              total_tokens: promptTokens + completionTokens
+            },
+            provider: this.config.provider,
+            model: this.model
+          });
+        }
+      }
+
+      if (parsedEvent.event === 'message_stop') {
+        onEvent({
+          type: 'completed',
+          provider: this.config.provider,
+          model: this.model
+        });
+      }
+    };
 
     try {
       let done = false;
@@ -523,69 +687,12 @@ export class AnthropicNativeProvider implements LLMProvider {
         buffer = parts.pop() || '';
 
         for (const part of parts) {
-          const parsedEvent = this.parseSseEvent(part);
-          if (!parsedEvent?.data) {
-            continue;
-          }
-          const payload = JSON.parse(parsedEvent.data) as Record<string, unknown>;
-
-          if (parsedEvent.event === 'content_block_delta') {
-            const delta = payload.delta as Record<string, unknown> | undefined;
-            if (typeof delta?.text === 'string' && delta.text.length > 0) {
-              onEvent({
-                type: 'assistant_delta',
-                delta: delta.text,
-                provider: this.config.provider,
-                model: this.model
-              });
-            }
-            if (delta?.type === 'input_json_delta' && typeof delta.partial_json === 'string') {
-              const index = typeof payload.index === 'number' ? payload.index : 0;
-              const contentBlock = payload.content_block as Record<string, unknown> | undefined;
-              const toolId = typeof contentBlock?.id === 'string' ? contentBlock.id : `tool_${index}`;
-              const toolName = typeof contentBlock?.name === 'string' ? contentBlock.name : 'unknown';
-              onEvent({
-                type: 'tool_call_delta',
-                delta: [{
-                  id: toolId,
-                  type: 'function',
-                  function: {
-                    name: toolName,
-                    arguments: delta.partial_json
-                  }
-                }],
-                provider: this.config.provider,
-                model: this.model
-              });
-            }
-          }
-
-          if (parsedEvent.event === 'message_delta') {
-            const usage = payload.usage as Record<string, unknown> | undefined;
-            if (usage) {
-              const promptTokens = typeof usage.input_tokens === 'number' ? usage.input_tokens : 0;
-              const completionTokens = typeof usage.output_tokens === 'number' ? usage.output_tokens : 0;
-              onEvent({
-                type: 'usage_delta',
-                usage: {
-                  prompt_tokens: promptTokens,
-                  completion_tokens: completionTokens,
-                  total_tokens: promptTokens + completionTokens
-                },
-                provider: this.config.provider,
-                model: this.model
-              });
-            }
-          }
-
-          if (parsedEvent.event === 'message_stop') {
-            onEvent({
-              type: 'completed',
-              provider: this.config.provider,
-              model: this.model
-            });
-          }
+          processSsePart(part);
         }
+      }
+
+      if (buffer.trim()) {
+        processSsePart(buffer);
       }
     } catch (error) {
       onEvent({
@@ -612,13 +719,13 @@ export class AnthropicNativeProvider implements LLMProvider {
     }
   }
 
-  private buildAnthropicRequestBody(request: LLMRequest) {
+  private async buildAnthropicRequestBody(request: LLMRequest) {
     const systemPrompt = request.messages
       .filter((message) => message.role === 'system' && message.content.trim().length > 0)
       .map((message) => message.content.trim())
       .join('\n\n');
 
-    const messages = this.normalizeAnthropicMessages(request.messages);
+    const messages = await this.normalizeAnthropicMessages(request.messages);
     return {
       model: this.model,
       max_tokens: request.generationConfig?.maxOutputTokens ?? 4096,
@@ -631,7 +738,7 @@ export class AnthropicNativeProvider implements LLMProvider {
     };
   }
 
-  private normalizeAnthropicMessages(messages: ChatMessage[]): AnthropicRequestMessage[] {
+  private async normalizeAnthropicMessages(messages: ChatMessage[]): Promise<AnthropicRequestMessage[]> {
     const normalizedMessages: AnthropicRequestMessage[] = [];
     let lastAssistantToolCalls: Record<string, unknown>[] = [];
 
@@ -688,6 +795,35 @@ export class AnthropicNativeProvider implements LLMProvider {
         continue;
       }
 
+      if (Array.isArray(message.attachments) && message.attachments.some((attachment) => attachment.kind === 'image')) {
+        const contentBlocks: Array<Record<string, unknown>> = [];
+        for (const attachment of message.attachments.filter((item) => item.kind === 'image')) {
+          try {
+            contentBlocks.push({
+              type: 'image',
+              source: {
+                type: 'base64',
+                media_type: attachment.mimeType || 'image/png',
+                data: (await fs.readFile(attachment.storedPath)).toString('base64')
+              }
+            });
+          } catch {
+            continue;
+          }
+        }
+        if (message.content) {
+          contentBlocks.push({
+            type: 'text',
+            text: message.content
+          });
+        }
+        normalizedMessages.push({
+          role: 'user',
+          content: contentBlocks.length > 0 ? contentBlocks : message.content
+        });
+        continue;
+      }
+
       normalizedMessages.push({
         role: 'user',
         content: message.content
@@ -737,7 +873,7 @@ export class AnthropicNativeProvider implements LLMProvider {
     return tools.map((tool) => ({
       name: tool.name,
       description: tool.description,
-      input_schema: this.toJsonSchema(tool.parameters)
+      input_schema: this.toJsonSchema(tool)
     }));
   }
 
@@ -792,18 +928,25 @@ export class AnthropicNativeProvider implements LLMProvider {
     };
   }
 
-  private toJsonSchema(parameters: ToolDefinition['parameters']): Record<string, unknown> {
+  private toJsonSchema(tool: ToolDefinition): Record<string, unknown> {
+    if (tool.parametersJsonSchema) {
+      return this.normalizeJsonSchema(tool.parametersJsonSchema);
+    }
+
     try {
-      const schema = z.toJSONSchema(parameters) as Record<string, unknown>;
-      const jsonSchema = { ...schema };
-      delete jsonSchema.$schema;
-      if (typeof jsonSchema.type !== 'string') {
-        return { type: 'object', properties: {}, additionalProperties: true };
-      }
-      return jsonSchema;
+      return this.normalizeJsonSchema(z.toJSONSchema(tool.parameters) as Record<string, unknown>);
     } catch {
       return { type: 'object', properties: {}, additionalProperties: true };
     }
+  }
+
+  private normalizeJsonSchema(schema: Record<string, unknown>): Record<string, unknown> {
+    const jsonSchema = { ...schema };
+    delete jsonSchema.$schema;
+    if (typeof jsonSchema.type !== 'string') {
+      return { type: 'object', properties: {}, additionalProperties: true };
+    }
+    return jsonSchema;
   }
 }
 

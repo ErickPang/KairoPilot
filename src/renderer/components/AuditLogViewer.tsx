@@ -10,7 +10,7 @@ import { getErrorMessage, logRendererError } from '../hooks/errorUtils';
 
 const RUN_PAGE_SIZE = 12;
 const AUDIT_PAGE_SIZE = 20;
-const TRACE_PAGE_SIZE = 100;
+const TRACE_PAGE_SIZE = 50;
 
 type TraceDetailFilter = 'all' | 'io' | 'tools' | 'approvals' | 'audits' | 'summary';
 
@@ -151,6 +151,29 @@ const AuditLogViewer = memo(function AuditLogViewer({
         return t('chat.runStatus.pending');
       default:
         return t('chat.runStatus.running');
+    }
+  }, [t]);
+
+  const getStepTypeLabel = useCallback((type: RunStep['type']) => {
+    switch (type) {
+      case 'plan':
+        return t('chat.runStepType.plan');
+      case 'model_call':
+        return t('chat.runStepType.modelCall');
+      case 'tool_call':
+        return t('chat.runStepType.toolCall');
+      case 'approval_wait':
+        return t('chat.runStepType.approvalWait');
+      case 'tool_result':
+        return t('chat.runStepType.toolResult');
+      case 'summary':
+        return t('chat.runStepType.summary');
+      case 'complete':
+        return t('chat.runStepType.complete');
+      case 'failed':
+        return t('chat.runStepType.failed');
+      default:
+        return type;
     }
   }, [t]);
 
@@ -767,6 +790,10 @@ const AuditLogViewer = memo(function AuditLogViewer({
                             {t('chat.runTraceStepLabel', { step: step.stepIndex + 1 })}
                           </div>
                           <div className="audit-step-item-title">{step.title}</div>
+                          <div className="audit-step-item-meta">
+                            <span>{getStepTypeLabel(step.type)}</span>
+                            <span>{formatDateTime(step.updatedAt)}</span>
+                          </div>
                         </div>
                         <div className="audit-step-item-side">
                           <span className={`badge audit-log-badge is-${getStatusTone(step.status)}`}>
@@ -796,6 +823,15 @@ const AuditLogViewer = memo(function AuditLogViewer({
                           <div className="audit-log-section-title">{t('audit.focusedStep')}</div>
                           <div className="audit-detail-summary-title">
                             {t('chat.runTraceStepLabel', { step: selectedStep.stepIndex + 1 })} · {selectedStep.title}
+                          </div>
+                          <div className="audit-step-detail-meta-row">
+                            <span className={`badge audit-log-badge is-${getStatusTone(selectedStep.status)}`}>
+                              {getStepStatusLabel(selectedStep.status)}
+                            </span>
+                            <span className="audit-step-detail-chip">{getStepTypeLabel(selectedStep.type)}</span>
+                            <span className="audit-step-detail-chip">
+                              {t('chat.runTraceUpdatedAt', { time: formatDateTime(selectedStep.updatedAt) })}
+                            </span>
                           </div>
                           <div className="audit-log-reference">
                             <span>{t('audit.stepReference', { id: selectedStep.id })}</span>

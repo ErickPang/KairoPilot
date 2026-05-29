@@ -314,7 +314,7 @@ export const ModelEditor = memo(function ModelEditor({
             type="password" 
             value={editingModel.apiKey} 
             onChange={e => setEditingModel({...editingModel, apiKey: e.target.value})}
-            placeholder={t('config.placeholder.apiKey')} 
+            placeholder={editingModel.apiKeyStored ? '••••••••' : t('config.placeholder.apiKey')}
           />
           <div className="form-help">{t('config.apiKeyHelp')}</div>
         </div>

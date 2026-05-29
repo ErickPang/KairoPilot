@@ -68,7 +68,7 @@ export function Select({
 
   return (
     <div 
-      className={`custom-select ${className}`} 
+      className={`custom-select ${isOpen ? 'is-open' : ''} ${className}`} 
       style={style}
       ref={containerRef}
     >

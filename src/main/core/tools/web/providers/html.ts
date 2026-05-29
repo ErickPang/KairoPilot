@@ -35,6 +35,23 @@ type HtmlSearchProviderConfig = {
   parseResults: (html: string, limit: number) => SearchResultItem[];
 };
 
+function detectHtmlChallengePage(html: string) {
+  const normalizedHtml = html.toLowerCase();
+  if (
+    normalizedHtml.includes('百度安全验证')
+    || normalizedHtml.includes('安全验证')
+    || normalizedHtml.includes('captcha')
+    || normalizedHtml.includes('verify you are human')
+    || normalizedHtml.includes('access denied')
+    || normalizedHtml.includes('robot check')
+    || normalizedHtml.includes('unusual traffic')
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
 export function createHtmlSearchProvider(config: HtmlSearchProviderConfig): SearchProvider {
   return {
     id: config.id,
@@ -49,6 +66,19 @@ export function createHtmlSearchProvider(config: HtmlSearchProviderConfig): Sear
       for (const searchUrl of candidateSearchUrls) {
         try {
           const html = await fetchHtml(searchUrl, input.timeoutMs);
+          if (detectHtmlChallengePage(html)) {
+            lastFailure = {
+              ok: false,
+              providerId: config.id,
+              providerLabel: config.label,
+              providerKind: 'html',
+              searchUrl,
+              reason: `${config.label} returned a challenge or verification page instead of search results.`,
+              category: 'parse',
+              retryable: true
+            };
+            continue;
+          }
           const results = config.parseResults(html, input.maxResults);
 
           if (results.length > 0) {
@@ -80,12 +110,14 @@ export function createHtmlSearchProvider(config: HtmlSearchProviderConfig): Sear
 
       if (lastSuccessfulSearchUrl) {
         return {
-          ok: true,
+          ok: false,
           providerId: config.id,
           providerLabel: config.label,
           providerKind: 'html',
-          results: [],
-          searchUrl: lastSuccessfulSearchUrl
+          searchUrl: lastSuccessfulSearchUrl,
+          reason: `${config.label} returned a page but no parsable results were found.`,
+          category: 'empty',
+          retryable: true
         };
       }
 

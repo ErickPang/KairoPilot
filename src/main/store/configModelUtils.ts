@@ -1,5 +1,6 @@
 import type { KairoPilotConfig, ProviderConfig, ProviderType } from '../../shared/contracts';
 import { resolveDefaultBaseUrl } from '../core/llm/provider';
+import { resolveConfigSecret } from './configSecrets';
 
 const PROVIDER_TYPES: ProviderType[] = ['openai', 'openrouter', 'ollama', 'anthropic', 'deepseek', 'zhipu', 'kimi', 'qianwen', 'custom'];
 
@@ -33,10 +34,13 @@ export function normalizeProvider(provider: Partial<ProviderConfig> & { model?: 
     }));
   const finalModelList = modelList.length > 0 ? modelList : [{ id: 'gpt-4o', name: 'gpt-4o' }];
 
+  const resolvedApiKey = resolveConfigSecret(provider.apiKey, provider.apiKeyEncrypted);
   return {
     provider: resolvedProviderType,
     baseUrl: provider.baseUrl || resolveDefaultBaseUrl(resolvedProviderType) || 'https://api.openai.com/v1',
-    apiKey: provider.apiKey || '',
+    apiKey: resolvedApiKey,
+    apiKeyEncrypted: provider.apiKeyEncrypted,
+    apiKeyStored: Boolean(resolvedApiKey),
     model: finalModelList
   };
 }

@@ -1,13 +1,29 @@
 import type { ToolDefinition } from '../llm/types';
 import { PermissionGuard } from '../security/permissions';
+import type { SkillArgumentDefinition, SkillExecutionMode } from '../../../shared/contracts';
 import { matchesAllowedToolName, resolveAllowedToolToRegisteredNames } from '../skills/skillStoreUtils';
 
 export interface LoadedSkillCapability {
   skillName: string;
   skillId?: string;
+  contentHash?: string;
+  source?: string;
   aliases?: string[];
   allowedTools: string[];
   loadedAt: number;
+  scopeRevision?: string;
+  description?: string;
+  whenToUse?: string;
+  instructions?: string;
+  arguments?: SkillArgumentDefinition[];
+  userInvocable?: boolean;
+  modelInvocable?: boolean;
+  executionMode?: SkillExecutionMode;
+  activationSource?: 'manual' | 'automatic';
+  resolvedArguments?: Record<string, string>;
+  resolverScore?: number;
+  resolverReasons?: string[];
+  explicitMention?: boolean;
   resourcePaths?: string[];
   scriptPaths?: string[];
 }
@@ -59,8 +75,18 @@ export class CapabilityOrchestrator {
     this.tools.set(tool.name, tool);
   }
 
-  clearLoadedSkills() {
-    this.loadedSkills.clear();
+  clearLoadedSkills(options?: { activationSource?: 'manual' | 'automatic' }) {
+    const activationSource = options?.activationSource;
+    if (!activationSource) {
+      this.loadedSkills.clear();
+      return;
+    }
+
+    for (const [key, skill] of this.loadedSkills.entries()) {
+      if (skill.activationSource === activationSource) {
+        this.loadedSkills.delete(key);
+      }
+    }
   }
 
   setLoadedSkills(skills: LoadedSkillCapability[]) {
@@ -102,9 +128,24 @@ export class CapabilityOrchestrator {
     this.loadedSkills.set(capabilityKey, {
       skillName: normalizedSkillName,
       skillId,
+      contentHash: typeof capability.contentHash === 'string' ? capability.contentHash : undefined,
+      source: typeof capability.source === 'string' ? capability.source : undefined,
       aliases,
       allowedTools: Array.from(new Set(capability.allowedTools.map((toolName) => toolName.trim()).filter(Boolean))),
       loadedAt: capability.loadedAt ?? loadedAt,
+      scopeRevision: typeof capability.scopeRevision === 'string' ? capability.scopeRevision : undefined,
+      description: typeof capability.description === 'string' ? capability.description.trim() : undefined,
+      whenToUse: typeof capability.whenToUse === 'string' ? capability.whenToUse.trim() : undefined,
+      instructions: typeof capability.instructions === 'string' ? capability.instructions.trim() : undefined,
+      arguments: Array.isArray(capability.arguments) ? capability.arguments.map((argument) => ({ ...argument })) : undefined,
+      userInvocable: capability.userInvocable !== false,
+      modelInvocable: capability.modelInvocable !== false,
+      executionMode: capability.executionMode === 'fork' ? 'fork' : 'inline',
+      activationSource: capability.activationSource === 'automatic' ? 'automatic' : 'manual',
+      resolvedArguments: capability.resolvedArguments ? { ...capability.resolvedArguments } : undefined,
+      resolverScore: typeof capability.resolverScore === 'number' ? capability.resolverScore : undefined,
+      resolverReasons: Array.isArray(capability.resolverReasons) ? [...capability.resolverReasons] : undefined,
+      explicitMention: typeof capability.explicitMention === 'boolean' ? capability.explicitMention : undefined,
       resourcePaths,
       scriptPaths
     });
@@ -114,9 +155,24 @@ export class CapabilityOrchestrator {
     return Array.from(this.loadedSkills.values()).map((skill) => ({
       skillName: skill.skillName,
       skillId: skill.skillId,
+      contentHash: skill.contentHash,
+      source: skill.source,
       aliases: skill.aliases ? [...skill.aliases] : undefined,
       allowedTools: [...skill.allowedTools],
       loadedAt: skill.loadedAt,
+      scopeRevision: skill.scopeRevision,
+      description: skill.description,
+      whenToUse: skill.whenToUse,
+      instructions: skill.instructions,
+      arguments: skill.arguments ? skill.arguments.map((argument) => ({ ...argument })) : undefined,
+      userInvocable: skill.userInvocable,
+      modelInvocable: skill.modelInvocable,
+      executionMode: skill.executionMode,
+      activationSource: skill.activationSource,
+      resolvedArguments: skill.resolvedArguments ? { ...skill.resolvedArguments } : undefined,
+      resolverScore: skill.resolverScore,
+      resolverReasons: skill.resolverReasons ? [...skill.resolverReasons] : undefined,
+      explicitMention: skill.explicitMention,
       resourcePaths: skill.resourcePaths ? [...skill.resourcePaths] : undefined,
       scriptPaths: skill.scriptPaths ? [...skill.scriptPaths] : undefined
     }));
@@ -165,26 +221,46 @@ export class CapabilityOrchestrator {
       return permissionEligibleTools.filter((tool) => !SKILL_SESSION_TOOL_NAMES.has(tool.name));
     }
 
-    if (activeSkills.some((skill) => skill.allowedTools.some((toolName) => matchesAllowedToolName(toolName, '*')))) {
-      return permissionEligibleTools;
-    }
-
-    const registeredToolNames = permissionEligibleTools.map((tool) => tool.name);
-    const allowedToolNames = new Set<string>();
-
-    for (const skill of activeSkills) {
-      for (const allowedToolName of skill.allowedTools) {
-        for (const resolvedToolName of resolveAllowedToolToRegisteredNames(allowedToolName, registeredToolNames)) {
-          allowedToolNames.add(resolvedToolName);
-        }
-      }
-    }
-
     return permissionEligibleTools.filter((tool) => (
       ALWAYS_EXPOSED_TOOL_NAMES.has(tool.name)
       || ACTIVE_SKILL_EXPOSED_TOOL_NAMES.has(tool.name)
-      || allowedToolNames.has(tool.name)
+      || !SKILL_SESSION_TOOL_NAMES.has(tool.name)
+      || (tool.name === 'run_skill_script' && this.canUseToolViaLoadedSkills('run_skill_script'))
     ));
+  }
+
+  canUseToolViaLoadedSkills(toolName: string) {
+    const activeSkills = this.getLoadedSkills();
+    if (activeSkills.length === 0) {
+      return false;
+    }
+
+    const registeredToolNames = this.getRegisteredTools().map((tool) => tool.name);
+    const resolvedToolNames = new Set(resolveAllowedToolToRegisteredNames(toolName, registeredToolNames));
+    resolvedToolNames.add(toolName);
+
+    return activeSkills.some((skill) => (
+      skill.allowedTools.some((allowedToolName) => (
+        Array.from(resolvedToolNames).some((resolvedToolName) => matchesAllowedToolName(allowedToolName, resolvedToolName))
+      ))
+    ));
+  }
+
+  getLoadedSkillCapability(skillReference: string) {
+    const skill = this.getLoadedSkill(skillReference);
+    if (!skill) {
+      return null;
+    }
+
+    return {
+      ...skill,
+      aliases: skill.aliases ? [...skill.aliases] : undefined,
+      allowedTools: [...skill.allowedTools],
+      arguments: skill.arguments ? skill.arguments.map((argument) => ({ ...argument })) : undefined,
+      resolvedArguments: skill.resolvedArguments ? { ...skill.resolvedArguments } : undefined,
+      resourcePaths: skill.resourcePaths ? [...skill.resourcePaths] : undefined,
+      scriptPaths: skill.scriptPaths ? [...skill.scriptPaths] : undefined
+    } satisfies LoadedSkillCapability;
   }
 
   private isToolEnabledByPermissions(toolName: string) {
