@@ -1631,3 +1631,318 @@
 .store-card-actions {
   margin-top: 0.15rem;
 }
+
+/* Store panels: align plugin and skill management with the dense product shell. */
+.plugin-panel-header,
+.skill-store-header {
+  gap: 10px;
+}
+
+.plugin-panel-title-icon,
+.skill-store-title-icon {
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-muted);
+  color: var(--primary);
+  box-shadow: none;
+}
+
+.store-tabs {
+  gap: 4px;
+  margin-top: 4px;
+  padding: 3px;
+  width: auto;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-muted);
+}
+
+.store-tab {
+  min-height: 30px;
+  padding: 5px 10px;
+  border-radius: 6px;
+  color: var(--muted-fg);
+  font-size: 13px;
+  font-weight: 600;
+  transition: background-color 0.16s ease, color 0.16s ease;
+}
+
+.store-tab:hover {
+  background: var(--background);
+  color: var(--foreground);
+}
+
+.store-tab.active {
+  background: var(--background);
+  color: var(--foreground);
+  box-shadow: none;
+}
+
+.store-section-title {
+  margin: 0 0 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border-soft);
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.plugin-grid,
+.skills-grid {
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 10px;
+}
+
+.plugin-card,
+.skill-card,
+.skill-list-item,
+.skill-section-panel,
+.skill-overview-card,
+.skill-installed-toolbar,
+.skill-marketplace-source-card,
+.skill-source-preset-card,
+.skill-marketplace-toolbar,
+.skill-source-form-card,
+.plugin-install-review {
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  background: var(--background);
+  box-shadow: none;
+}
+
+.plugin-card,
+.skill-card {
+  gap: 10px;
+  padding: 12px;
+}
+
+.skill-list-item {
+  padding: 10px 12px;
+  transition: border-color 0.16s ease, background-color 0.16s ease;
+}
+
+.skill-list-item:hover {
+  transform: none;
+  border-color: var(--border-muted);
+  box-shadow: none;
+}
+
+.plugin-card-icon,
+.skill-card-icon,
+.plugin-empty-icon,
+.skill-marketplace-empty-icon {
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-muted);
+  color: var(--primary);
+  box-shadow: none;
+  font-size: 1.1rem;
+}
+
+.plugin-card-title,
+.skill-card-title {
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.plugin-card-description,
+.skill-card-description,
+.plugin-card-meta,
+.skill-meta,
+.skill-marketplace-results-info,
+.skill-marketplace-pagination-info,
+.skill-marketplace-empty-description,
+.plugin-empty-description {
+  color: var(--muted-fg);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.plugin-risk-badge,
+.plugin-chip,
+.skill-badge,
+.skill-meta-chip,
+.skill-section-count,
+.skill-marketplace-status-badge {
+  min-height: 22px;
+  padding: 3px 7px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: var(--surface-muted);
+  color: var(--foreground);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.plugin-capability-item {
+  border-radius: 8px;
+  background: var(--surface-muted);
+}
+
+.skill-overview-value {
+  color: var(--foreground);
+  font-size: 22px;
+}
+
+.skill-installed-toolbar {
+  padding: 10px 12px;
+}
+
+.skill-marketplace-tab-bar {
+  margin-bottom: 10px;
+  padding-top: 0;
+}
+
+.skill-marketplace-tab-bar::after {
+  border-bottom-color: var(--border-soft);
+}
+
+.skill-marketplace-tab-item {
+  border-radius: 8px 8px 0 0;
+  background: transparent;
+}
+
+.skill-marketplace-tab-item.active {
+  border-color: var(--border-soft);
+  background: var(--background);
+  box-shadow: none;
+  transform: none;
+}
+
+.skill-marketplace-tab {
+  min-height: 34px;
+  padding: 7px 10px;
+  font-size: 13px;
+}
+
+.skill-marketplace-tab.active::after {
+  left: 10px;
+  right: 10px;
+  bottom: 0;
+  background: var(--primary);
+}
+
+.skill-marketplace-tab-item.add-source {
+  min-width: 38px;
+  border-color: var(--border-soft);
+  background: var(--surface-muted);
+}
+
+.skill-marketplace-tab-add {
+  min-height: 34px;
+  padding: 6px 10px;
+}
+
+.skill-marketplace-toolbar {
+  margin-bottom: 10px;
+  padding: 10px 12px;
+}
+
+.skill-marketplace-inline-loading {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-muted);
+}
+
+.skill-marketplace-empty,
+.plugin-empty-state,
+.skill-store-loading {
+  margin-top: 12px;
+  border: 1px dashed var(--border-muted);
+  border-radius: 10px;
+  background: var(--surface-muted);
+}
+
+.skill-source-preset-card.selected {
+  border-color: rgba(var(--primary-rgb), 0.34);
+  background: var(--primary-muted);
+  box-shadow: none;
+}
+
+.skill-section-summary {
+  padding: 9px 12px;
+}
+
+.skill-section-title::before {
+  color: var(--muted-fg);
+}
+
+.skill-section-body {
+  padding: 0 12px 12px;
+}
+
+.plugin-modal-title {
+  font-size: 16px;
+  font-weight: 650;
+}
+
+.plugin-modal-section-label {
+  font-size: 12px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+:root[data-theme='dark'] .store-tab.active,
+:root[data-theme='dark'] .plugin-card,
+:root[data-theme='dark'] .skill-card,
+:root[data-theme='dark'] .skill-list-item,
+:root[data-theme='dark'] .skill-section-panel,
+:root[data-theme='dark'] .skill-overview-card,
+:root[data-theme='dark'] .skill-installed-toolbar,
+:root[data-theme='dark'] .skill-marketplace-source-card,
+:root[data-theme='dark'] .skill-source-preset-card,
+:root[data-theme='dark'] .skill-marketplace-toolbar,
+:root[data-theme='dark'] .skill-source-form-card,
+:root[data-theme='dark'] .plugin-install-review {
+  border-color: var(--border);
+  background: var(--background);
+}
+
+/* Product convergence: keep store surfaces quiet and predictable. */
+.store-tab,
+.skill-list-item,
+.skill-source-preset-card,
+.skill-marketplace-tab-item,
+.skill-marketplace-source-card,
+.skill-marketplace-toolbar,
+.skill-source-form-card,
+.skill-section-panel,
+.plugin-card,
+.skill-card,
+.plugin-install-review {
+  box-shadow: none;
+  transition: background-color 0.16s ease, border-color 0.16s ease, color 0.16s ease;
+}
+
+.store-tab.active,
+.skill-list-item:hover,
+.skill-source-preset-card:hover,
+.skill-marketplace-tab-item:hover,
+.skill-marketplace-source-card:hover,
+.skill-section-panel:hover,
+.plugin-card:hover,
+.skill-card:hover {
+  transform: none;
+  box-shadow: none;
+}
+
+.store-tab.active {
+  border-color: rgba(var(--primary-rgb), 0.24);
+  background: var(--primary-muted);
+  color: var(--foreground);
+}
+
+.skill-list-item,
+.skill-source-preset-card,
+.skill-marketplace-source-card,
+.skill-marketplace-toolbar,
+.skill-source-form-card,
+.skill-section-panel,
+.plugin-card,
+.skill-card {
+  border-radius: var(--radius-lg);
+  background: var(--background);
+}

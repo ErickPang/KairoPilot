@@ -45,6 +45,11 @@ export function useChatController(options: UseChatControllerOptions) {
   const [loading, setLoading] = useState(false);
   const activeSessionIdRef = useRef<string | null>(sessionContext.activeSessionId);
   const runStateRefreshTimerRef = useRef<number | null>(null);
+  const bufferedAssistantContentRef = useRef<string | null>(null);
+  const bufferedThinkingContentRef = useRef<string | null>(null);
+  const messageFlushTimerRef = useRef<number | null>(null);
+  const contextFlushTimerRef = useRef<number | null>(null);
+  const pendingProgressUpdateRef = useRef<RuntimeUpdateEvent | null>(null);
 
   useEffect(() => {
     activeSessionIdRef.current = sessionContext.activeSessionId;
@@ -95,22 +100,95 @@ export function useChatController(options: UseChatControllerOptions) {
     }, 250);
   }, [flushRunStateRefresh, loadRunState]);
 
+  const flushBufferedMessages = useCallback(() => {
+    if (messageFlushTimerRef.current !== null) {
+      window.clearTimeout(messageFlushTimerRef.current);
+      messageFlushTimerRef.current = null;
+    }
+
+    const thinkingContent = bufferedThinkingContentRef.current;
+    const assistantContent = bufferedAssistantContentRef.current;
+    bufferedThinkingContentRef.current = null;
+    bufferedAssistantContentRef.current = null;
+
+    if (thinkingContent === null && assistantContent === null) {
+      return;
+    }
+
+    setMessages((prev) => {
+      let next = prev;
+      if (thinkingContent !== null) {
+        next = upsertThinkingMessage(next, thinkingContent);
+      }
+      if (assistantContent !== null) {
+        next = upsertAssistantStreamMessage(next, assistantContent);
+      }
+      return next;
+    });
+  }, [setMessages]);
+
+  const scheduleBufferedMessageFlush = useCallback(() => {
+    if (messageFlushTimerRef.current !== null) {
+      return;
+    }
+
+    messageFlushTimerRef.current = window.setTimeout(() => {
+      messageFlushTimerRef.current = null;
+      flushBufferedMessages();
+    }, 33);
+  }, [flushBufferedMessages]);
+
+  const flushProgressContextUpdate = useCallback(() => {
+    if (contextFlushTimerRef.current !== null) {
+      window.clearTimeout(contextFlushTimerRef.current);
+      contextFlushTimerRef.current = null;
+    }
+
+    const update = pendingProgressUpdateRef.current;
+    pendingProgressUpdateRef.current = null;
+    if (!update) {
+      return;
+    }
+
+    updateSessionContext((current) => applyRuntimeUpdateToSessionContext(current, update));
+  }, [updateSessionContext]);
+
+  const scheduleProgressContextUpdate = useCallback((update: RuntimeUpdateEvent) => {
+    pendingProgressUpdateRef.current = update;
+    if (contextFlushTimerRef.current !== null) {
+      return;
+    }
+
+    contextFlushTimerRef.current = window.setTimeout(() => {
+      contextFlushTimerRef.current = null;
+      flushProgressContextUpdate();
+    }, 250);
+  }, [flushProgressContextUpdate]);
+
   useEffect(() => {
     const removeListener = window.kairo.on(KAIRO_EVENT.agentUpdate, (rawUpdate) => {
       const update = rawUpdate as RuntimeUpdateEvent;
-      updateSessionContext((current) => applyRuntimeUpdateToSessionContext(current, update));
 
       if (update.type === 'thinking') {
-        setMessages((prev) => upsertThinkingMessage(prev, update.content || ''));
+        bufferedThinkingContentRef.current = update.content || '';
+        scheduleBufferedMessageFlush();
+        scheduleProgressContextUpdate(update);
         scheduleRunStateRefresh();
         return;
       }
 
       if (update.type === 'assistant-delta') {
-        setMessages((prev) => upsertAssistantStreamMessage(prev, update.content || ''));
+        bufferedAssistantContentRef.current = update.content || '';
+        bufferedThinkingContentRef.current = null;
+        scheduleBufferedMessageFlush();
+        scheduleProgressContextUpdate(update);
         scheduleRunStateRefresh();
         return;
       }
+
+      flushBufferedMessages();
+      flushProgressContextUpdate();
+      updateSessionContext((current) => applyRuntimeUpdateToSessionContext(current, update));
 
       if (update.type === 'tool-call') {
         setMessages((prev) => appendRuntimeMessage(prev, {
@@ -167,8 +245,16 @@ export function useChatController(options: UseChatControllerOptions) {
         window.clearTimeout(runStateRefreshTimerRef.current);
         runStateRefreshTimerRef.current = null;
       }
+      if (messageFlushTimerRef.current !== null) {
+        window.clearTimeout(messageFlushTimerRef.current);
+        messageFlushTimerRef.current = null;
+      }
+      if (contextFlushTimerRef.current !== null) {
+        window.clearTimeout(contextFlushTimerRef.current);
+        contextFlushTimerRef.current = null;
+      }
     };
-  }, [scheduleRunStateRefresh, setMessages, t, updateSessionContext]);
+  }, [flushBufferedMessages, flushProgressContextUpdate, scheduleBufferedMessageFlush, scheduleProgressContextUpdate, scheduleRunStateRefresh, setMessages, t, updateSessionContext]);
 
   const handleCreateSession = useCallback(async () => {
     try {

@@ -187,8 +187,6 @@ function App() {
   return (
     <div className="app-container">
       <div className="window-drag-strip" aria-hidden="true" />
-      <div className="app-gradient-orb app-gradient-orb-left" aria-hidden="true" />
-      <div className="app-gradient-orb app-gradient-orb-right" aria-hidden="true" />
 
       <div className="nav-rail">
         <div className="nav-brand">

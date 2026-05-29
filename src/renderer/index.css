@@ -16,11 +16,10 @@ a {
   font-weight: 600;
   color: var(--primary);
   text-decoration: none;
-  transition: all 0.2s ease;
+  transition: color 0.16s ease;
 }
 a:hover {
   color: var(--primary-hover);
-  text-shadow: 0 0 8px rgba(var(--primary-rgb), 0.24);
 }
 
 body {
@@ -39,29 +38,27 @@ h1 {
 }
 
 button {
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   border: 1px solid var(--border-soft);
-  padding: 0.7em 1.4em;
+  padding: 0.55em 0.9em;
   font-size: 0.95em;
   font-weight: 600;
   font-family: inherit;
   background-color: var(--surface-panel);
   color: var(--foreground);
   cursor: pointer;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  box-shadow: var(--shadow-sm), var(--shine-strong);
+  transition: background-color 0.16s ease, border-color 0.16s ease, color 0.16s ease, box-shadow 0.16s ease;
+  box-shadow: none;
 }
 button:hover {
   background-color: var(--surface-panel-strong);
-  transform: translateY(-2px);
-  box-shadow: var(--shadow-soft), var(--shine-strong);
+  border-color: var(--border-muted);
 }
 button:active {
-  transform: translateY(1px) scale(0.97);
-  box-shadow: var(--shadow-sm);
+  background-color: var(--surface-muted);
 }
 button:focus,
 button:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 3px rgba(var(--primary-rgb), 0.22), var(--shine-strong);
+  box-shadow: 0 0 0 3px var(--ring);
 }

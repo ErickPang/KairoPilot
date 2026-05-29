@@ -1,4 +1,4 @@
-import React, { useEffect, useLayoutEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { AgentConfig, ChatAttachment, Message, ModelConfig } from '../types';
@@ -86,6 +86,81 @@ type PendingAttachmentFile = { path: string; name?: string; mimeType?: string };
 
 const MARKDOWN_REMARK_PLUGINS = [remarkGfm];
 
+interface MessageBodyProps {
+  markdownComponents: React.ComponentProps<typeof ReactMarkdown>['components'];
+  msg: Message;
+  renderPlainAssistant?: boolean;
+  t: I18nContextValue['t'];
+  toRenderableMarkdown: (content?: string) => string;
+}
+
+const MessageBody = React.memo(function MessageBody({
+  markdownComponents,
+  msg,
+  renderPlainAssistant = false,
+  t,
+  toRenderableMarkdown
+}: MessageBodyProps) {
+  const shouldRenderPrewrap = msg.role === 'user' || msg.role === 'tool' || renderPlainAssistant;
+
+  if (shouldRenderPrewrap) {
+    return (
+      <div className="message-prewrap">
+        {msg.content}
+        <AttachmentList attachments={msg.attachments} compact />
+        {msg.details && (
+          <details className="message-details">
+            <summary className="message-summary">{t('chat.details')}</summary>
+            <pre className="message-pre">{JSON.stringify(msg.details, null, 2)}</pre>
+          </details>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="markdown-body">
+      <ReactMarkdown remarkPlugins={MARKDOWN_REMARK_PLUGINS} components={markdownComponents}>
+        {toRenderableMarkdown(msg.content)}
+      </ReactMarkdown>
+    </div>
+  );
+});
+
+interface MessageRowProps extends MessageBodyProps {
+  className?: string;
+  showAvatar?: boolean;
+}
+
+const MessageRow = React.memo(function MessageRow({
+  className = '',
+  markdownComponents,
+  msg,
+  renderPlainAssistant,
+  showAvatar = true,
+  t,
+  toRenderableMarkdown
+}: MessageRowProps) {
+  return (
+    <div className={`message ${msg.role} ${className}`}>
+      {showAvatar && (
+        <div className="avatar">
+          {msg.role === 'user' ? <IconUser size={18} /> : msg.role === 'tool' ? <IconTool size={18} /> : <IconBot size={18} />}
+        </div>
+      )}
+      <div className={`message-content ${showAvatar ? '' : 'process-message-content'}`}>
+        <MessageBody
+          markdownComponents={markdownComponents}
+          msg={msg}
+          renderPlainAssistant={renderPlainAssistant}
+          t={t}
+          toRenderableMarkdown={toRenderableMarkdown}
+        />
+      </div>
+    </div>
+  );
+});
+
 const ChatMessagesPanel = React.memo(function ChatMessagesPanel({
   activeAgentName,
   containerRef,
@@ -140,28 +215,16 @@ const ChatMessagesPanel = React.memo(function ChatMessagesPanel({
                   <summary className="process-steps-summary">{t('chat.viewProcess', { count: group.messages.length })}</summary>
                   <div className="process-steps-list">
                     {group.messages.map((msg, i) => (
-                      <div key={`process-${groupIdx}-${i}`} className={`message ${msg.role} ${i > 0 ? 'process-message-offset' : ''}`}>
-                        <div className="message-content process-message-content">
-                          {msg.role === 'tool' || msg.role === 'thinking' ? (
-                            <div className="message-prewrap">
-                              {msg.content}
-                              <AttachmentList attachments={msg.attachments} compact />
-                              {msg.details && (
-                                <details className="message-details">
-                                  <summary className="message-summary">{t('chat.details')}</summary>
-                                  <pre className="message-pre">{JSON.stringify(msg.details, null, 2)}</pre>
-                                </details>
-                              )}
-                            </div>
-                          ) : (
-                            <div className="markdown-body">
-                              <ReactMarkdown remarkPlugins={MARKDOWN_REMARK_PLUGINS} components={markdownComponents}>
-                                {toRenderableMarkdown(msg.content)}
-                              </ReactMarkdown>
-                            </div>
-                          )}
-                        </div>
-                      </div>
+                      <MessageRow
+                        key={`process-${groupIdx}-${i}`}
+                        className={i > 0 ? 'process-message-offset' : ''}
+                        markdownComponents={markdownComponents}
+                        msg={msg}
+                        renderPlainAssistant={msg.role === 'thinking' || msg.role === 'tool'}
+                        showAvatar={false}
+                        t={t}
+                        toRenderableMarkdown={toRenderableMarkdown}
+                      />
                     ))}
                   </div>
                 </details>
@@ -170,33 +233,22 @@ const ChatMessagesPanel = React.memo(function ChatMessagesPanel({
           );
         }
 
-        return group.messages.map((msg, i) => (
-          <div key={`msg-${groupIdx}-${i}`} className={`message ${msg.role}`}>
-            <div className="avatar">
-              {msg.role === 'user' ? <IconUser size={18} /> : msg.role === 'tool' ? <IconTool size={18} /> : <IconBot size={18} />}
-            </div>
-            <div className="message-content">
-              {msg.role === 'user' || msg.role === 'tool' ? (
-                <div className="message-prewrap">
-                  {msg.content}
-                  <AttachmentList attachments={msg.attachments} compact />
-                  {msg.details && (
-                    <details className="message-details">
-                      <summary className="message-summary">{t('chat.details')}</summary>
-                      <pre className="message-pre">{JSON.stringify(msg.details, null, 2)}</pre>
-                    </details>
-                  )}
-                </div>
-              ) : (
-                <div className="markdown-body">
-                  <ReactMarkdown remarkPlugins={MARKDOWN_REMARK_PLUGINS} components={markdownComponents}>
-                    {toRenderableMarkdown(msg.content)}
-                  </ReactMarkdown>
-                </div>
-              )}
-            </div>
-          </div>
-        ));
+        return group.messages.map((msg, i) => {
+          const isLatestGroup = groupIdx === groupedMessages.length - 1;
+          const isLatestMessage = i === group.messages.length - 1;
+          const renderStreamingText = loading && isLatestGroup && isLatestMessage && msg.role === 'assistant';
+
+          return (
+            <MessageRow
+              key={`msg-${groupIdx}-${i}`}
+              markdownComponents={markdownComponents}
+              msg={msg}
+              renderPlainAssistant={renderStreamingText}
+              t={t}
+              toRenderableMarkdown={toRenderableMarkdown}
+            />
+          );
+        });
       })}
       {loading && messages.length > 0 && <div className="messages-loading-spacer" />}
       <div ref={messagesEndRef} />
@@ -235,6 +287,9 @@ export const ChatInterface = React.memo(function ChatInterface({
   const modelTriggerRef = React.useRef<HTMLButtonElement>(null);
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
   const shouldAutoScrollRef = React.useRef(true);
+  const autoScrollFrameRef = React.useRef<number | null>(null);
+  const autoScrollTimeoutRef = React.useRef<number | null>(null);
+  const lastAutoScrollAtRef = React.useRef(0);
   const activeProfile = activeAgent?.permissions.executionProfile;
   const setupSteps = React.useMemo<SetupStep[]>(() => {
     const hasModel = models.length > 0 && Boolean(activeModelId);
@@ -585,22 +640,48 @@ export const ChatInterface = React.memo(function ChatInterface({
     };
   }, [updateAutoScrollState]);
 
-  useLayoutEffect(() => {
+  useEffect(() => {
     if (messages.length > 0 && !shouldAutoScrollRef.current) {
       return;
     }
 
-    const frameId = window.requestAnimationFrame(() => {
-      messagesEndRef.current?.scrollIntoView({
-        behavior: 'auto',
-        block: 'end'
-      });
-    });
+    if (autoScrollTimeoutRef.current !== null || autoScrollFrameRef.current !== null) {
+      return;
+    }
 
-    return () => {
-      window.cancelAnimationFrame(frameId);
-    };
+    if (autoScrollFrameRef.current !== null) {
+      window.cancelAnimationFrame(autoScrollFrameRef.current);
+    }
+
+    const now = window.performance.now();
+    const waitMs = Math.max(0, 80 - (now - lastAutoScrollAtRef.current));
+    autoScrollTimeoutRef.current = window.setTimeout(() => {
+      autoScrollTimeoutRef.current = null;
+      autoScrollFrameRef.current = window.requestAnimationFrame(() => {
+        const container = messagesContainerRef.current;
+        if (container) {
+          container.scrollTop = container.scrollHeight;
+        } else {
+          messagesEndRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' });
+        }
+        lastAutoScrollAtRef.current = window.performance.now();
+        autoScrollFrameRef.current = null;
+      });
+    }, waitMs);
   }, [loading, messages, messagesEndRef]);
+
+  useEffect(() => {
+    return () => {
+      if (autoScrollTimeoutRef.current !== null) {
+        window.clearTimeout(autoScrollTimeoutRef.current);
+        autoScrollTimeoutRef.current = null;
+      }
+      if (autoScrollFrameRef.current !== null) {
+        window.cancelAnimationFrame(autoScrollFrameRef.current);
+        autoScrollFrameRef.current = null;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (!previewImageSrc) {

@@ -58,7 +58,7 @@
   background: rgba(var(--surface-rgb), 0.74);
   border-color: rgba(var(--border-rgb), 0.56);
   color: var(--foreground);
-  transform: translateY(-1px);
+  transform: none;
 }
 
 .settings-menu-item.active {
