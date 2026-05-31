@@ -21,6 +21,7 @@ import {
   SkillMarketplaceQueryInputSchema,
   SkillPrepareInstallInputSchema,
   SkillRequestInputSchema,
+  SkillRollbackInputSchema,
   SkillsRegistryInputSchema,
   SkillUninstallInputSchema
 } from './skillPluginValidation';
@@ -266,6 +267,19 @@ function registerAgentHandlers() {
     try {
       const payload = parseIpcInput(SkillUninstallInputSchema, args, 'skill uninstall request');
       await skillsManager.uninstallSkill({
+        id: payload.id,
+        scope: payload.scope
+      });
+      return ipcSuccess();
+    } catch (error) {
+      return ipcFailure(error);
+    }
+  });
+
+  ipcMain.handle(KAIRO_INVOKE.skillsRollback, async (_, args) => {
+    try {
+      const payload = parseIpcInput(SkillRollbackInputSchema, args, 'skill rollback request');
+      await skillsManager.rollbackSkill({
         id: payload.id,
         scope: payload.scope
       });

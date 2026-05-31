@@ -48,6 +48,8 @@ export const SkillUninstallInputSchema = z.object({
   scope: ScopeSchema.default('public')
 });
 
+export const SkillRollbackInputSchema = SkillUninstallInputSchema;
+
 const PluginActionObjectInputSchema = z.object({
   id: NonEmptyStringSchema.max(160),
   scope: ScopeSchema.default('public')
@@ -57,3 +59,26 @@ export const PluginActionInputSchema = z.union([
   NonEmptyStringSchema.max(160).transform((id) => ({ id, scope: 'public' })),
   PluginActionObjectInputSchema
 ]);
+
+export const PluginSetEnabledInputSchema = PluginActionObjectInputSchema.extend({
+  enabled: z.boolean()
+});
+
+export const PluginRegistryUrlInputSchema = HttpsUrlSchema;
+
+export const PluginPrepareInstallInputSchema = z.object({
+  id: NonEmptyStringSchema.max(160),
+  scope: ScopeSchema.default('public'),
+  registryUrl: HttpsUrlSchema.optional()
+});
+
+export const PluginPrepareImportInputSchema = z.object({
+  sourceFile: NonEmptyStringSchema.max(2000),
+  scope: ScopeSchema.default('public')
+});
+
+export const PluginRequestInputSchema = z.object({
+  requestId: NonEmptyStringSchema.max(200)
+});
+
+export const PluginRollbackInputSchema = PluginActionObjectInputSchema;
