@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { parseIpcInput } from './configValidation';
 import {
   PluginActionInputSchema,
+  PluginSetEnabledInputSchema,
   SkillPrepareInstallInputSchema,
   SkillRequestInputSchema,
   SkillsRegistryInputSchema
@@ -32,5 +33,22 @@ describe('skillPluginValidation', () => {
       id: 'kairo-weather-plugin',
       scope: 'public'
     });
+  });
+
+  it('requires explicit boolean plugin enabled state', () => {
+    expect(parseIpcInput(PluginSetEnabledInputSchema, {
+      id: 'kairo-weather-plugin',
+      scope: 'public',
+      enabled: false
+    }, 'plugin enablement request')).toEqual({
+      id: 'kairo-weather-plugin',
+      scope: 'public',
+      enabled: false
+    });
+
+    expect(() => parseIpcInput(PluginSetEnabledInputSchema, {
+      id: 'kairo-weather-plugin',
+      scope: 'public'
+    }, 'plugin enablement request')).toThrow('Invalid plugin enablement request');
   });
 });

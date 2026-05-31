@@ -328,6 +328,26 @@ async function resolveInitialSkillsForRun(userInput: string, agentId: string): P
     || candidate.score >= 26
     || index === 0
   ));
+  addAuditLog({
+    tool: 'skill_resolver',
+    args: {
+      agentId,
+      inputPreview: userInput.slice(0, 240),
+      candidateCount: candidates.length,
+      selectedCount: selectedCandidates.length
+    },
+    result: {
+      candidates: candidates.map((candidate) => ({
+        skillId: candidate.skill.id,
+        skillName: candidate.skill.name,
+        score: candidate.score,
+        explicitMention: candidate.explicitMention,
+        reasons: candidate.reasons
+      })),
+      selectedSkillIds: selectedCandidates.map((candidate) => candidate.skill.id)
+    },
+    policyTags: ['skill:resolver']
+  });
 
   const loadedSkills: LoadedSkillCapability[] = []
   for (const candidate of selectedCandidates) {

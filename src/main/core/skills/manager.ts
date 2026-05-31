@@ -1,8 +1,8 @@
 import { app } from 'electron'
-import { realpathSync, watch, type FSWatcher } from 'fs'
+import { existsSync, readFileSync, realpathSync, watch, type FSWatcher } from 'fs'
 import fs from 'fs/promises'
 import path from 'path'
-import { randomUUID } from 'crypto'
+import { createHash, randomUUID } from 'crypto'
 import { createLLMProvider } from '../llm/provider'
 import { getAgent, getAgents, getModelForAgent, readKairoPilotConfig, saveKairoPilotConfig } from '../../store/config'
 import {
@@ -15,6 +15,7 @@ import {
   SkillInstallReviewArgs,
   SkillMarketplaceQuery,
   SkillUninstallArgs,
+  SkillRollbackArgs,
   SkillSummary,
   SkillRecord,
   SkillReviewFinding,
@@ -63,7 +64,17 @@ interface PreparedSkillInstall {
   tempSkillDir: string
   targetSkillDir: string
   review: SkillInstallReview
+  existingSkill?: SkillRecord
 }
+
+interface SkillRollbackMetadata {
+  version?: string
+  contentHash?: string
+  backupDir: string
+  backedUpAt: number
+}
+
+const SKILL_ROLLBACK_FILE = '_kairopilot_rollback.json'
 
 export interface SkillCatalogEntrySnapshot {
   id: string
@@ -400,6 +411,12 @@ export class SkillsManager {
       ? this.publicSkillsDir
       : this.getAgentSkillsDirectoryPath(target.agentId)
     const targetSkillDir = path.join(targetBaseDir, skillId)
+    const existingSkill = await readSkillRecord(
+      targetSkillDir,
+      target.type === 'agent' ? 'agent' : 'public',
+      skillId,
+      target.type === 'agent' ? target.agentId : undefined
+    )
     const requestId = randomUUID()
     const tempSkillDir = path.join(this.pendingInstallsDir, requestId, skillId)
 
@@ -410,7 +427,8 @@ export class SkillsManager {
       requestId,
       skill: storeSkill,
       scope,
-      materializedSkill
+      materializedSkill,
+      existingSkill
     })
 
     const previousPreparedInstall = this.pendingInstalls.get(requestId)
@@ -424,7 +442,8 @@ export class SkillsManager {
       scope,
       tempSkillDir,
       targetSkillDir,
-      review
+      review,
+      existingSkill: existingSkill ?? undefined
     })
 
     return review
@@ -442,8 +461,23 @@ export class SkillsManager {
     }
 
     await fs.mkdir(path.dirname(preparedInstall.targetSkillDir), { recursive: true })
+    let rollbackMetadata: SkillRollbackMetadata | null = null
+    if (preparedInstall.existingSkill) {
+      const backupDir = path.join(this.pendingInstallsDir, 'skill-backups', `${preparedInstall.skillId}-${Date.now()}`)
+      await fs.mkdir(path.dirname(backupDir), { recursive: true })
+      await fs.cp(preparedInstall.existingSkill.skillDir, backupDir, { recursive: true })
+      rollbackMetadata = {
+        version: preparedInstall.existingSkill.metadata.version,
+        contentHash: preparedInstall.existingSkill.contentHash,
+        backupDir,
+        backedUpAt: Date.now()
+      }
+    }
     await fs.rm(preparedInstall.targetSkillDir, { recursive: true, force: true })
     await fs.rename(preparedInstall.tempSkillDir, preparedInstall.targetSkillDir)
+    if (rollbackMetadata) {
+      await fs.writeFile(path.join(preparedInstall.targetSkillDir, SKILL_ROLLBACK_FILE), JSON.stringify(rollbackMetadata, null, 2), 'utf-8')
+    }
     await fs.rm(path.dirname(preparedInstall.tempSkillDir), { recursive: true, force: true })
     this.pendingInstalls.delete(requestId)
 
@@ -574,6 +608,33 @@ export class SkillsManager {
     }
 
     throw new Error(`Unsupported uninstall scope: ${scope}`)
+  }
+
+  async rollbackSkill(args: SkillRollbackArgs) {
+    const skillId = normalizeSkillFolderId(args.id)
+    if (!skillId) {
+      throw new Error('Invalid skill id.')
+    }
+    const scope = typeof args.scope === 'string' && args.scope.trim() ? args.scope.trim() : 'public'
+    const target = this.resolveInstallScope(scope)
+    const targetBaseDir = target.type === 'public'
+      ? this.publicSkillsDir
+      : this.getAgentSkillsDirectoryPath(target.agentId)
+    const targetSkillDir = path.join(targetBaseDir, skillId)
+    const rollbackMetadata = this.readSkillRollbackMetadata(targetSkillDir)
+    if (!rollbackMetadata) {
+      throw new Error(`Skill ${skillId} has no rollback snapshot.`)
+    }
+    await fs.rm(targetSkillDir, { recursive: true, force: true })
+    await fs.cp(rollbackMetadata.backupDir, targetSkillDir, { recursive: true })
+    await fs.rm(path.join(targetSkillDir, SKILL_ROLLBACK_FILE), { force: true })
+    if (target.type === 'public') {
+      this.invalidatePublicSkills()
+      await this.loadAllSkills({ force: true })
+      return
+    }
+    this.invalidateAgentSkills(target.agentId)
+    await this.loadAgentSkills(target.agentId, { force: true })
   }
 
   async getSkillRecord(skillName: string, agentId?: string) {
@@ -740,10 +801,34 @@ export class SkillsManager {
   }
 
   private toManagedSkillSummary(skill: SkillRecord): SkillSummary {
+    const rollbackMetadata = this.readSkillRollbackMetadata(skill.skillDir)
     return {
       ...toSkillSummary(skill),
-      removable: this.isSkillRecordRemovable(skill)
+      removable: this.isSkillRecordRemovable(skill),
+      rollbackAvailable: Boolean(rollbackMetadata),
+      previousVersion: rollbackMetadata?.version
     }
+  }
+
+  private readSkillRollbackMetadata(skillDir: string): SkillRollbackMetadata | null {
+    const metadataPath = path.join(skillDir, SKILL_ROLLBACK_FILE)
+    if (!existsSync(metadataPath)) {
+      return null
+    }
+    try {
+      const payload = JSON.parse(readFileSync(metadataPath, 'utf-8')) as Partial<SkillRollbackMetadata>
+      if (typeof payload.backupDir === 'string' && payload.backupDir.trim()) {
+        return {
+          backupDir: payload.backupDir,
+          version: typeof payload.version === 'string' ? payload.version : undefined,
+          contentHash: typeof payload.contentHash === 'string' ? payload.contentHash : undefined,
+          backedUpAt: typeof payload.backedUpAt === 'number' ? payload.backedUpAt : 0
+        }
+      }
+    } catch {
+      return null
+    }
+    return null
   }
 
   private isSkillRecordRemovable(skill: SkillRecord) {
@@ -928,16 +1013,28 @@ export class SkillsManager {
     skill: SkillStoreEntry
     scope: string
     materializedSkill: MaterializedSkill
+    existingSkill?: SkillRecord | null
   }): Promise<SkillInstallReview> {
     const staticFindings = buildStaticReviewFindings(params.skill, params.materializedSkill)
     const skillVetterReport = await this.runSkillVetterAudit(params.skill, params.scope, params.materializedSkill, staticFindings)
-    return buildSkillInstallReview({
+    const review = buildSkillInstallReview({
       requestId: params.requestId,
       skill: params.skill,
       scope: params.scope,
       materializedSkill: params.materializedSkill,
       skillVetterReport
     })
+    if (params.existingSkill) {
+      review.versionDiff = {
+        fromVersion: params.existingSkill.metadata.version,
+        toVersion: review.version,
+        fromHash: params.existingSkill.contentHash,
+        toHash: params.materializedSkill.skillContent
+          ? createHash('sha256').update(params.materializedSkill.skillContent).digest('hex')
+          : undefined
+      }
+    }
+    return review
   }
 
   private resolveInstallScope(scope: string) {

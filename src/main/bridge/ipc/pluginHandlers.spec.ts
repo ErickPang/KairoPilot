@@ -12,6 +12,7 @@ const pluginManagerMocks = vi.hoisted(() => ({
   getStorePlugins: vi.fn(async () => []),
   getInstalledPlugins: vi.fn(async () => []),
   installPlugin: vi.fn(async () => true),
+  setPluginEnabled: vi.fn(async () => true),
   uninstallPlugin: vi.fn(async () => true)
 }));
 
@@ -43,12 +44,14 @@ describe('pluginHandlers', () => {
     pluginManagerMocks.getStorePlugins.mockReset();
     pluginManagerMocks.getInstalledPlugins.mockReset();
     pluginManagerMocks.installPlugin.mockReset();
+    pluginManagerMocks.setPluginEnabled.mockReset();
     pluginManagerMocks.uninstallPlugin.mockReset();
     auditMocks.addAuditLog.mockReset();
 
     pluginManagerMocks.getStorePlugins.mockResolvedValue([]);
     pluginManagerMocks.getInstalledPlugins.mockResolvedValue([]);
     pluginManagerMocks.installPlugin.mockResolvedValue(true);
+    pluginManagerMocks.setPluginEnabled.mockResolvedValue(true);
     pluginManagerMocks.uninstallPlugin.mockResolvedValue(true);
 
     registerPluginHandlers();
@@ -89,6 +92,28 @@ describe('pluginHandlers', () => {
       args: {},
       error: 'uninstall failed',
       policyTags: ['plugin:uninstall', 'decision:error']
+    });
+  });
+
+  it('records plugin enablement audit entries', async () => {
+    const handler = registeredHandlers.get(KAIRO_INVOKE.pluginsSetEnabled);
+    const result = await handler?.({}, {
+      id: 'kairo-weather-plugin',
+      scope: 'public',
+      enabled: false
+    });
+
+    expect(result).toEqual({ success: true });
+    expect(pluginManagerMocks.setPluginEnabled).toHaveBeenCalledWith('kairo-weather-plugin', 'public', false);
+    expect(auditMocks.addAuditLog).toHaveBeenCalledWith({
+      tool: 'plugin_set_enabled',
+      args: {
+        id: 'kairo-weather-plugin',
+        scope: 'public',
+        enabled: false
+      },
+      result: { success: true },
+      policyTags: ['plugin:configure', 'plugin:disable']
     });
   });
 });

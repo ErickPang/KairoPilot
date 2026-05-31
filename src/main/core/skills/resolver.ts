@@ -186,3 +186,43 @@ export function resolveRelevantSkills(
     })
     .slice(0, maxResults)
 }
+
+export interface SkillResolverEvalCase {
+  input: string
+  expectedSkillIds: string[]
+}
+
+export function evaluateSkillResolver(
+  cases: SkillResolverEvalCase[],
+  skills: SkillSummary[],
+  options?: {
+    maxResults?: number
+    autoLoadThreshold?: number
+  }
+) {
+  const results = cases.map((testCase) => {
+    const resolved = resolveRelevantSkills(testCase.input, skills, options)
+    const resolvedSkillIds = resolved.map((candidate) => candidate.skill.id)
+    const expected = new Set(testCase.expectedSkillIds)
+    const matched = resolvedSkillIds.filter((skillId) => expected.has(skillId))
+    const missed = testCase.expectedSkillIds.filter((skillId) => !resolvedSkillIds.includes(skillId))
+    const unexpected = resolvedSkillIds.filter((skillId) => !expected.has(skillId))
+    return {
+      input: testCase.input,
+      expectedSkillIds: [...testCase.expectedSkillIds],
+      resolvedSkillIds,
+      matched,
+      missed,
+      unexpected,
+      pass: missed.length === 0 && unexpected.length === 0
+    }
+  })
+  const passed = results.filter((result) => result.pass).length
+  return {
+    total: results.length,
+    passed,
+    failed: results.length - passed,
+    accuracy: results.length === 0 ? 1 : passed / results.length,
+    results
+  }
+}

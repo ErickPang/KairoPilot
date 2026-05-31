@@ -7,8 +7,10 @@ import type {
   AppConfirmationOptions,
   AppNotice,
   PluginCapabilityDeclaration,
+  PluginInstallReview,
   PluginManifest,
-  PluginRegistryEntry
+  PluginRegistryEntry,
+  PluginStoreEntry
 } from '../types';
 import { KAIRO_INVOKE } from '../../shared/ipc';
 import { createErrorNotice } from '../hooks/errorUtils';
@@ -23,13 +25,17 @@ interface PluginStorePanelProps {
 
 export const PluginStorePanel = memo(function PluginStorePanel({ onClearNotice, onReportNotice, onRequestConfirmation }: PluginStorePanelProps) {
   const { t } = useTranslation();
-  const [storePlugins, setStorePlugins] = useState<PluginManifest[]>([]);
+  const [storePlugins, setStorePlugins] = useState<PluginStoreEntry[]>([]);
   const [installedPlugins, setInstalledPlugins] = useState<InstalledPlugin[]>([]);
   const [agents, setAgents] = useState<AgentConfig[]>([]);
   const [loading, setLoading] = useState(true);
+  const [registryUrl, setRegistryUrl] = useState('');
+  const [registryLoading, setRegistryLoading] = useState(false);
   const [actionInProgress, setActionInProgress] = useState<string | null>(null);
   const [installModalOpen, setInstallModalOpen] = useState(false);
   const [selectedPluginId, setSelectedPluginId] = useState<string | null>(null);
+  const [review, setReview] = useState<PluginInstallReview | null>(null);
+  const [reviewLoading, setReviewLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<'installed' | 'store'>('installed');
 
   const handleInstallClick = (id: string) => {
@@ -39,7 +45,7 @@ export const PluginStorePanel = memo(function PluginStorePanel({ onClearNotice, 
 
   const handleConfirmInstall = (scope: string) => {
     if (selectedPluginId) {
-      handleInstall(selectedPluginId, scope);
+      void handlePrepareInstall(selectedPluginId, scope);
     }
     setInstallModalOpen(false);
     setSelectedPluginId(null);
@@ -115,7 +121,7 @@ export const PluginStorePanel = memo(function PluginStorePanel({ onClearNotice, 
         }
       ];
       
-      setStorePlugins(store as unknown as PluginManifest[]);
+      setStorePlugins(store as unknown as PluginStoreEntry[]);
       setInstalledPlugins([...nativeTools, ...(installed as unknown as InstalledPlugin[])]);
       setAgents(fetchedAgents as AgentConfig[]);
     } catch (e) {
@@ -129,19 +135,139 @@ export const PluginStorePanel = memo(function PluginStorePanel({ onClearNotice, 
     void loadPlugins();
   }, [loadPlugins]);
 
-  const handleInstall = async (id: string, scope: string = 'public') => {
-    setActionInProgress(id);
+  const handleLoadRegistry = async () => {
+    const url = registryUrl.trim();
+    if (!url) {
+      return;
+    }
+    setRegistryLoading(true);
     onClearNotice();
     try {
-      const result = await window.kairo.invoke(KAIRO_INVOKE.pluginsInstall, { id, scope });
-      if (result.success) {
-        await loadPlugins();
-        setActiveTab('installed');
-      } else {
-        onReportNotice(createErrorNotice(t('plugins.error.install', { error: result.error || 'Unknown error' }), 'install_plugin'));
-      }
+      const remotePlugins = await window.kairo.invoke(KAIRO_INVOKE.pluginsGetStoreByRegistry, url) as PluginStoreEntry[];
+      setStorePlugins((currentValue) => {
+        const merged = new Map(currentValue.map((plugin) => [plugin.id, plugin]));
+        for (const plugin of remotePlugins) {
+          merged.set(plugin.id, plugin);
+        }
+        return Array.from(merged.values()).sort((a, b) => a.name.localeCompare(b.name));
+      });
     } catch (e) {
-      onReportNotice(createErrorNotice(t('plugins.error.install', { error: e instanceof Error ? e.message : 'Unknown error' }), 'install_plugin'));
+      onReportNotice(createErrorNotice(t('plugins.error.load', { error: e instanceof Error ? e.message : 'Unknown error' }), 'load_plugin_registry'));
+    } finally {
+      setRegistryLoading(false);
+    }
+  };
+
+  const handlePrepareInstall = async (id: string, scope: string) => {
+    const storePlugin = storePlugins.find((plugin) => plugin.id === id);
+    setActionInProgress(`${id}-${scope}-review`);
+    setReviewLoading(true);
+    onClearNotice();
+    try {
+      const preparedReview = await window.kairo.invoke(KAIRO_INVOKE.pluginsPrepareInstall, {
+        id,
+        scope,
+        registryUrl: storePlugin?.registryUrl
+      }) as PluginInstallReview | { success?: false; error?: string };
+      if ('success' in preparedReview && preparedReview.success === false) {
+        throw new Error(preparedReview.error || 'Failed to review plugin');
+      }
+      setReview(preparedReview as PluginInstallReview);
+    } catch (e) {
+      onReportNotice(createErrorNotice(t('plugins.error.install', { error: e instanceof Error ? e.message : 'Unknown error' }), 'review_plugin_install'));
+    } finally {
+      setReviewLoading(false);
+      setActionInProgress(null);
+    }
+  };
+
+  const handlePrepareUpdate = async (plugin: InstalledPlugin) => {
+    setActionInProgress(`${plugin.id}-${plugin.scope}-update`);
+    setReviewLoading(true);
+    onClearNotice();
+    try {
+      const preparedReview = await window.kairo.invoke(KAIRO_INVOKE.pluginsPrepareUpdate, {
+        id: plugin.id,
+        scope: plugin.scope,
+        registryUrl: plugin.source?.type === 'registry' ? plugin.source.url : undefined
+      }) as PluginInstallReview | { success?: false; error?: string };
+      if ('success' in preparedReview && preparedReview.success === false) {
+        throw new Error(preparedReview.error || 'Failed to review plugin update');
+      }
+      setReview(preparedReview as PluginInstallReview);
+    } catch (e) {
+      onReportNotice(createErrorNotice(t('plugins.error.update', { error: e instanceof Error ? e.message : 'Unknown error' }), 'review_plugin_update'));
+    } finally {
+      setReviewLoading(false);
+      setActionInProgress(null);
+    }
+  };
+
+  const handleImportPlugin = async () => {
+    onClearNotice();
+    try {
+      const selectedFile = await window.kairo.invoke(KAIRO_INVOKE.systemSelectFile, {
+        filters: [{ name: 'ZIP', extensions: ['zip'] }]
+      });
+      if (typeof selectedFile !== 'string' || !selectedFile.trim()) {
+        return;
+      }
+      const preparedReview = await window.kairo.invoke(KAIRO_INVOKE.pluginsPrepareImport, {
+        sourceFile: selectedFile,
+        scope: 'public'
+      }) as PluginInstallReview | { success?: false; error?: string };
+      if ('success' in preparedReview && preparedReview.success === false) {
+        throw new Error(preparedReview.error || 'Failed to review plugin import');
+      }
+      setReview(preparedReview as PluginInstallReview);
+    } catch (e) {
+      onReportNotice(createErrorNotice(t('plugins.error.import', { error: e instanceof Error ? e.message : 'Unknown error' }), 'import_plugin'));
+    }
+  };
+
+  const handleConfirmReviewedInstall = async () => {
+    if (!review) {
+      return;
+    }
+    setReviewLoading(true);
+    onClearNotice();
+    try {
+      const result = await window.kairo.invoke(KAIRO_INVOKE.pluginsInstallReviewed, { requestId: review.requestId }) as { success?: boolean; error?: string };
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to install reviewed plugin');
+      }
+      setReview(null);
+      await loadPlugins();
+      setActiveTab('installed');
+    } catch (e) {
+      onReportNotice(createErrorNotice(t('plugins.error.install', { error: e instanceof Error ? e.message : 'Unknown error' }), 'install_reviewed_plugin'));
+    } finally {
+      setReviewLoading(false);
+    }
+  };
+
+  const handleCancelReview = async () => {
+    const requestId = review?.requestId;
+    setReview(null);
+    if (requestId) {
+      await window.kairo.invoke(KAIRO_INVOKE.pluginsDiscardInstall, { requestId });
+    }
+  };
+
+  const handleRollback = async (plugin: InstalledPlugin) => {
+    setActionInProgress(`${plugin.id}-${plugin.scope}-rollback`);
+    onClearNotice();
+    try {
+      const result = await window.kairo.invoke(KAIRO_INVOKE.pluginsRollback, {
+        id: plugin.id,
+        scope: plugin.scope
+      }) as { success?: boolean; error?: string };
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to rollback plugin');
+      }
+      await loadPlugins();
+    } catch (e) {
+      onReportNotice(createErrorNotice(t('plugins.error.rollback', { error: e instanceof Error ? e.message : 'Unknown error' }), 'rollback_plugin'));
     } finally {
       setActionInProgress(null);
     }
@@ -164,6 +290,23 @@ export const PluginStorePanel = memo(function PluginStorePanel({ onClearNotice, 
     }
   };
 
+  const handleSetEnabled = async (id: string, scope: string, enabled: boolean) => {
+    setActionInProgress(`${id}-${scope}-enabled`);
+    onClearNotice();
+    try {
+      const result = await window.kairo.invoke(KAIRO_INVOKE.pluginsSetEnabled, { id, scope, enabled }) as { success?: boolean; error?: string };
+      if (result.success) {
+        await loadPlugins();
+      } else {
+        onReportNotice(createErrorNotice(t('plugins.error.setEnabled', { error: result.error || 'Unknown error' }), 'set_plugin_enabled'));
+      }
+    } catch (e) {
+      onReportNotice(createErrorNotice(t('plugins.error.setEnabled', { error: e instanceof Error ? e.message : 'Unknown error' }), 'set_plugin_enabled'));
+    } finally {
+      setActionInProgress(null);
+    }
+  };
+
   const uninstalledPlugins = useMemo(
     () =>
       storePlugins
@@ -172,10 +315,9 @@ export const PluginStorePanel = memo(function PluginStorePanel({ onClearNotice, 
     [installedPlugins, storePlugins]
   );
 
-  const publicPlugins = useMemo(
+  const sortedInstalledPlugins = useMemo(
     () =>
       installedPlugins
-        .filter((plugin) => plugin.scope === 'public')
         .sort((a, b) => {
           if (a.filePath === 'built-in' && b.filePath !== 'built-in') {
             return -1;
@@ -232,6 +374,22 @@ export const PluginStorePanel = memo(function PluginStorePanel({ onClearNotice, 
             {t('plugins.uninstalledTab')}
           </button>
         </div>
+        <div className="plugin-panel-header-row">
+          <div className="plugin-registry-row">
+            <input
+              className="form-control"
+              value={registryUrl}
+              onChange={(event) => setRegistryUrl(event.target.value)}
+              placeholder={t('plugins.registryPlaceholder')}
+            />
+            <button type="button" className="btn btn-secondary" onClick={() => { void handleLoadRegistry(); }} disabled={registryLoading}>
+              {registryLoading ? t('plugins.loading') : t('plugins.loadRegistry')}
+            </button>
+            <button type="button" className="btn btn-secondary" onClick={() => { void handleImportPlugin(); }}>
+              {t('plugins.importZip')}
+            </button>
+          </div>
+        </div>
       </div>
 
       <div className="config-content plugin-panel-content">
@@ -244,17 +402,24 @@ export const PluginStorePanel = memo(function PluginStorePanel({ onClearNotice, 
         {!loading && activeTab === 'installed' && (
           <div className="installed-plugins-container">
             <h3 className="store-section-title">{t('plugins.installedTitle')}</h3>
-            {publicPlugins.length === 0 ? (
+            {sortedInstalledPlugins.length === 0 ? (
               <div className="empty-state">{t('plugins.noInstalled')}</div>
             ) : (
               <div className="plugin-grid">
-                {publicPlugins.map(plugin => (
+                {sortedInstalledPlugins.map(plugin => (
                   <InstalledPluginItem 
                     key={`${plugin.id}-${plugin.scope}`} 
                     plugin={plugin} 
+                    scopeLabel={getPluginScopeLabel(plugin.scope, agents, t)}
+                    onToggleEnabled={() => handleSetEnabled(plugin.id, plugin.scope, plugin.enabled === false)}
+                    onUpdate={() => { void handlePrepareUpdate(plugin); }}
+                    onRollback={() => { void handleRollback(plugin); }}
                     onUninstall={() => handleUninstall(plugin.id, plugin.scope)}
                     onRequestConfirmation={onRequestConfirmation}
                     isWorking={actionInProgress === `${plugin.id}-${plugin.scope}`}
+                    isToggling={actionInProgress === `${plugin.id}-${plugin.scope}-enabled`}
+                    isUpdating={actionInProgress === `${plugin.id}-${plugin.scope}-update`}
+                    isRollingBack={actionInProgress === `${plugin.id}-${plugin.scope}-rollback`}
                     isNative={plugin.filePath === 'built-in'}
                   />
                 ))}
@@ -296,9 +461,9 @@ export const PluginStorePanel = memo(function PluginStorePanel({ onClearNotice, 
                       <button 
                         className="btn btn-primary"
                         onClick={() => handleInstallClick(plugin.id)}
-                        disabled={actionInProgress === plugin.id}
+                        disabled={actionInProgress === plugin.id || reviewLoading}
                       >
-                        {actionInProgress === plugin.id ? <IconRefresh size={14} className="spinning" /> : t('plugins.install')}
+                        {actionInProgress === `${plugin.id}-public-review` ? <IconRefresh size={14} className="spinning" /> : t('plugins.install')}
                       </button>
                     </div>
                   </div>
@@ -358,24 +523,93 @@ export const PluginStorePanel = memo(function PluginStorePanel({ onClearNotice, 
           </div>
         </div>
       )}
+
+      {review && (
+        <div className="modal-overlay" onClick={() => { void handleCancelReview(); }}>
+          <div className="modal-content" onClick={e => e.stopPropagation()}>
+            <h3 className="plugin-modal-title">{t('plugins.reviewTitle')}</h3>
+            <div className="plugin-install-review">
+              <div className="plugin-card-header">
+                <div className="plugin-card-icon">🧩</div>
+                <div className="plugin-card-copy">
+                  <h4 className="plugin-card-title">{review.pluginName}</h4>
+                  <div className="plugin-card-meta">v{review.version} • {t('plugins.by', { author: review.author })}</div>
+                </div>
+              </div>
+              <p className="plugin-card-description">{review.summary}</p>
+              <div className={`plugin-risk-badge risk-${review.recommendation === 'block' ? 'critical' : review.recommendation === 'caution' ? 'medium' : 'low'}`}>
+                {t(`plugins.recommendation.${review.recommendation}`)}
+              </div>
+              {review.versionDiff && (
+                <div className="plugin-detail-block">
+                  <div className="plugin-detail-label">{t('plugins.versionDiff')}</div>
+                  <div className="plugin-card-meta">
+                    {review.versionDiff.fromVersion || '-'} → {review.versionDiff.toVersion}
+                  </div>
+                  <div className="plugin-card-meta">
+                    {t('plugins.tools')}: +{review.versionDiff.toolChanges.added.length} / -{review.versionDiff.toolChanges.removed.length}
+                  </div>
+                </div>
+              )}
+              <div className="plugin-detail-block">
+                <div className="plugin-detail-label">{t('plugins.reviewFindings')}</div>
+                {review.findings.length === 0 ? (
+                  <div className="plugin-card-meta">{t('plugins.noReviewFindings')}</div>
+                ) : (
+                  <div className="plugin-capability-list">
+                    {review.findings.map((finding) => (
+                      <div className="plugin-capability-item" key={finding.id}>
+                        <span className={`plugin-capability-dot risk-${finding.severity === 'high' ? 'high' : finding.severity}`} />
+                        <span>{finding.title}</span>
+                        <span className="plugin-capability-permissions">{finding.detail}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="plugin-modal-actions">
+              <button type="button" className="btn" onClick={() => { void handleCancelReview(); }} disabled={reviewLoading}>{t('common.cancel')}</button>
+              <button type="button" className="btn btn-primary" onClick={() => { void handleConfirmReviewedInstall(); }} disabled={reviewLoading || review.recommendation === 'block'}>
+                {reviewLoading ? t('plugins.installing') : t('plugins.confirmReviewedInstall')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 });
 
 function InstalledPluginItem({
   plugin,
+  scopeLabel,
+  onToggleEnabled,
+  onUpdate,
+  onRollback,
   onUninstall,
   onRequestConfirmation,
   isWorking,
+  isToggling,
+  isUpdating,
+  isRollingBack,
   isNative
 }: {
   plugin: InstalledPlugin;
+  scopeLabel: string;
+  onToggleEnabled: () => void;
+  onUpdate: () => void;
+  onRollback: () => void;
   onUninstall: () => void;
   onRequestConfirmation: (request: AppConfirmationOptions) => Promise<boolean>;
   isWorking: boolean;
+  isToggling: boolean;
+  isUpdating: boolean;
+  isRollingBack: boolean;
   isNative?: boolean;
 }) {
   const { t } = useTranslation();
+  const enabled = plugin.enabled !== false;
   
   return (
     <div className="config-card plugin-card">
@@ -399,8 +633,56 @@ function InstalledPluginItem({
       <div className="plugin-card-meta">
         <strong>{t('plugins.installedAt')}:</strong> {new Date(plugin.installedAt).toLocaleString()}
       </div>
+      <div className="plugin-card-meta">
+        <strong>{t('plugins.installScope')}:</strong> {scopeLabel}
+      </div>
+      <div className="plugin-card-meta">
+        <span className={`plugin-risk-badge risk-${enabled ? 'low' : 'medium'}`}>
+          {enabled ? t('plugins.enabled') : t('plugins.disabled')}
+        </span>
+      </div>
 
       <div className="store-card-actions">
+        {!isNative && (
+          <button
+            type="button"
+            className={`btn btn-secondary btn-sm ${isUpdating ? 'is-loading' : ''}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              onUpdate();
+            }}
+            disabled={isUpdating}
+          >
+            {isUpdating && <IconRefresh size={14} className="spinning" />}
+            <span className="btn-text-inline">{t('plugins.update')}</span>
+          </button>
+        )}
+        {plugin.previousVersion && (
+          <button
+            type="button"
+            className={`btn btn-secondary btn-sm ${isRollingBack ? 'is-loading' : ''}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              onRollback();
+            }}
+            disabled={isRollingBack}
+          >
+            {isRollingBack && <IconRefresh size={14} className="spinning" />}
+            <span className="btn-text-inline">{t('plugins.rollback')}</span>
+          </button>
+        )}
+        <button
+          type="button"
+          className={`btn btn-secondary btn-sm ${isToggling ? 'is-loading' : ''}`}
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleEnabled();
+          }}
+          disabled={isToggling || isNative}
+        >
+          {isToggling && <IconRefresh size={14} className="spinning" />}
+          <span className="btn-text-inline">{enabled ? t('plugins.disable') : t('plugins.enable')}</span>
+        </button>
         <button 
           type="button"
           className={`btn btn-secondary btn-sm btn-danger plugin-uninstall-btn ${isNative ? 'is-native' : ''} ${isWorking ? 'is-loading' : ''}`}
@@ -442,7 +724,14 @@ function PluginCapabilitySummary({ plugin }: { plugin: PluginManifest }) {
           <div className="plugin-detail-label">{t('plugins.tools')}</div>
           <div className="plugin-chip-list">
             {tools.map((tool) => (
-              <span className="plugin-chip" key={tool.name} title={tool.description}>
+              <span
+                className="plugin-chip"
+                key={tool.name}
+                title={[
+                  tool.description,
+                  ...getRequiredPermissionLabels({ requiredPermissions: tool.requiredPermissions }, t)
+                ].filter(Boolean).join(' · ')}
+              >
                 {tool.name}
               </span>
             ))}
@@ -482,7 +771,7 @@ function PluginCapabilityItem({ capability }: { capability: PluginCapabilityDecl
 }
 
 function getRequiredPermissionLabels(
-  capability: PluginCapabilityDeclaration,
+  capability: Pick<PluginCapabilityDeclaration, 'requiredPermissions'>,
   t: ReturnType<typeof useTranslation>['t']
 ) {
   const required = capability.requiredPermissions;
@@ -511,6 +800,22 @@ function getRequiredPermissionLabels(
   }
 
   return labels;
+}
+
+function getPluginScopeLabel(
+  scope: string,
+  agents: AgentConfig[],
+  t: ReturnType<typeof useTranslation>['t']
+) {
+  if (scope === 'public') {
+    return t('plugins.publicScope');
+  }
+  if (scope.startsWith('agent:')) {
+    const agentId = scope.slice('agent:'.length);
+    const agent = agents.find((item) => item.id === agentId);
+    return t('plugins.agentScope', { agent: agent?.name ?? agentId });
+  }
+  return scope;
 }
 
 function getRiskTranslationKey(riskLevel: PluginCapabilityDeclaration['riskLevel']) {

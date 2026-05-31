@@ -588,6 +588,8 @@ export interface SkillSummary {
   skillDir: string
   skillFilePath: string
   removable?: boolean
+  rollbackAvailable?: boolean
+  previousVersion?: string
 }
 
 export interface SkillStoreResource {
@@ -651,6 +653,11 @@ export interface SkillUninstallArgs {
   scope: string
 }
 
+export interface SkillRollbackArgs {
+  id: string
+  scope: string
+}
+
 export const SKILL_IMPORT_ERROR = {
   invalidArchive: 'skills.importError.invalidArchive',
   invalidArchivePath: 'skills.importError.invalidArchivePath',
@@ -701,6 +708,12 @@ export interface SkillInstallReview {
   downloadedFiles: number
   downloadedBytes: number
   usedSkillVetter: boolean
+  versionDiff?: {
+    fromVersion?: string
+    toVersion?: string
+    fromHash?: string
+    toHash?: string
+  }
 }
 
 export interface SkillsRegistryManifestEntry {
@@ -749,6 +762,7 @@ export const DEFAULT_SKILL_MARKETPLACE_PRESETS: SkillMarketplacePreset[] = [
 export interface PluginToolManifest {
   name: string
   description: string
+  requiredPermissions?: PluginPermissionRequirement
 }
 
 export interface PluginPermissionRequirement {
@@ -782,6 +796,12 @@ export interface PluginManifest {
   version: string
   author: string
   icon?: string
+  engineVersion?: string
+  homepage?: string
+  license?: string
+  checksum?: string
+  signature?: string
+  entry?: string
   tools: PluginToolManifest[]
   capabilities: PluginCapabilityDeclaration[]
   riskLevel: RiskLevel
@@ -791,6 +811,101 @@ export interface PluginRegistryEntry extends PluginManifest {
   installedAt: number
   filePath: string
   scope: string
+  codeHash?: string
+  source?: {
+    type: 'builtin-store' | 'local' | 'registry'
+    id?: string
+    url?: string
+  }
+  enabled?: boolean
+  previousVersion?: PluginRollbackSnapshot
+}
+
+export interface PluginRollbackSnapshot {
+  version: string
+  filePath: string
+  codeHash?: string
+  backedUpAt: number
+  manifest?: PluginManifest
+}
+
+export interface PluginStoreHttpSource {
+  type: 'http'
+  codeUrl: string
+}
+
+export interface PluginStoreInlineSource {
+  type: 'inline'
+  code: string
+}
+
+export type PluginStoreSource = PluginStoreHttpSource | PluginStoreInlineSource
+
+export interface PluginStoreEntry extends PluginManifest {
+  marketplace?: string
+  registryUrl?: string
+  installedScopes: string[]
+  source: PluginStoreSource
+}
+
+export interface PluginInstallReviewArgs {
+  id: string
+  scope: string
+  registryUrl?: string
+}
+
+export interface PluginImportReviewArgs {
+  sourceFile: string
+  scope: string
+}
+
+export interface PluginInstallArgs {
+  requestId: string
+}
+
+export interface PluginUpdateReviewArgs {
+  id: string
+  scope: string
+  registryUrl?: string
+}
+
+export interface PluginRollbackArgs {
+  id: string
+  scope: string
+}
+
+export interface PluginVersionDiff {
+  fromVersion?: string
+  toVersion: string
+  fromHash?: string
+  toHash: string
+  toolChanges: {
+    added: string[]
+    removed: string[]
+    unchanged: string[]
+  }
+  capabilityChanges: {
+    added: string[]
+    removed: string[]
+    unchanged: string[]
+  }
+}
+
+export interface PluginInstallReview {
+  requestId: string
+  pluginId: string
+  pluginName: string
+  scope: string
+  version: string
+  author: string
+  marketplace?: string
+  recommendation: 'allow' | 'caution' | 'block'
+  summary: string
+  findings: SkillReviewFinding[]
+  downloadedBytes: number
+  codeHash: string
+  versionDiff?: PluginVersionDiff
+  operation: 'install' | 'update' | 'import'
 }
 
 export type WebSearchProviderId = 'searxng' | 'tavily' | 'bing' | 'duckduckgo' | 'baidu'

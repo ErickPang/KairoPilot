@@ -524,6 +524,22 @@ export const SkillStorePanel = memo(function SkillStorePanel() {
     }
   };
 
+  const handleRollbackSkill = async (skill: SkillSummary, scope: string) => {
+    setError(null);
+    try {
+      const result = await window.kairo.invoke(KAIRO_INVOKE.skillsRollback, {
+        id: skill.id,
+        scope
+      }) as { success?: boolean; error?: string } | undefined;
+      if (!result?.success) {
+        throw new Error(result?.error || 'Failed to rollback skill');
+      }
+      await loadBaseData();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to rollback skill');
+    }
+  };
+
   const handleCloseSourceModal = () => {
     setSourceModalOpen(false);
     setSavingRegistry(false);
@@ -731,13 +747,14 @@ export const SkillStorePanel = memo(function SkillStorePanel() {
               ) : (
                 <div className="skills-grid">
                   {sortedPublicSkills.map(skill => (
-                    <SkillItem
-                      key={skill.id}
-                      skill={skill}
-                      scope="public"
-                      uninstalling={uninstallLoading && uninstallTarget?.skill.id === skill.id && uninstallTarget.scope === 'public'}
-                      onUninstall={handleOpenUninstallModal}
-                    />
+                      <SkillItem
+                        key={skill.id}
+                        skill={skill}
+                        scope="public"
+                        uninstalling={uninstallLoading && uninstallTarget?.skill.id === skill.id && uninstallTarget.scope === 'public'}
+                        onUninstall={handleOpenUninstallModal}
+                        onRollback={handleRollbackSkill}
+                      />
                   ))}
                 </div>
               )}
@@ -764,6 +781,7 @@ export const SkillStorePanel = memo(function SkillStorePanel() {
                           scope={`agent:${agentId}`}
                           uninstalling={uninstallLoading && uninstallTarget?.skill.id === skill.id && uninstallTarget.scope === `agent:${agentId}`}
                           onUninstall={handleOpenUninstallModal}
+                          onRollback={handleRollbackSkill}
                         />
                       ))
                     )}
@@ -1201,6 +1219,19 @@ export const SkillStorePanel = memo(function SkillStorePanel() {
                       <div className="skill-install-metric-value">{formatBytes(reviewResult.downloadedBytes)}</div>
                     </div>
                   </div>
+                  {reviewResult.versionDiff && (
+                    <div className="skill-install-findings-overview">
+                      <div className="skill-install-findings-overview-title">{t('skills.versionDiff')}</div>
+                      <div className="skill-install-findings-overview-chips">
+                        <span className="skill-meta-chip">
+                          {(reviewResult.versionDiff.fromVersion || '-')} → {(reviewResult.versionDiff.toVersion || '-')}
+                        </span>
+                        {reviewResult.versionDiff.fromHash && (
+                          <span className="skill-meta-chip">{reviewResult.versionDiff.fromHash.slice(0, 8)} → {reviewResult.versionDiff.toHash?.slice(0, 8)}</span>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
                 <div className="skill-install-findings-overview">
                   <div className="skill-install-findings-overview-title">{t('skills.reviewFindingsTitle')}</div>
@@ -1276,12 +1307,14 @@ function SkillItem({
   skill,
   scope,
   uninstalling,
-  onUninstall
+  onUninstall,
+  onRollback
 }: {
   skill: SkillSummary;
   scope: string;
   uninstalling: boolean;
   onUninstall: (skill: SkillSummary, scope: string) => void;
+  onRollback: (skill: SkillSummary, scope: string) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const { t } = useTranslation();
@@ -1333,6 +1366,15 @@ function SkillItem({
           <span>{expanded ? t('skills.hideContent') : t('skills.showContent')}</span>
           <IconChevronDown size={16} />
         </button>
+        {skill.rollbackAvailable && (
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={() => onRollback(skill, scope)}
+          >
+            <span className="btn-text-inline">{t('skills.rollback')}</span>
+          </button>
+        )}
         {skill.removable && (
           <button
             type="button"
