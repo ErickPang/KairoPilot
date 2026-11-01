@@ -1,0 +1,21 @@
+import {beforeEach,describe,expect,it,vi} from 'vitest';
+import type {TaskPlan} from '../../shared/contracts';
+const state=vi.hoisted(()=>({plan:null as TaskPlan|null,context:{model:'fixture/a',permissionsHash:'read-write'},executing:false,workflow:'plan',archived:false}));
+vi.mock('../store/chat',()=>({getSessionById:()=>({messages:[]}),getRunById:()=>({status:'completed'}),getSessionAttachmentById:vi.fn()}));
+vi.mock('./projectService',()=>({executionAgentForTask:()=>({}),executionContextForSession:()=>state.context}));
+vi.mock('./taskSettingsService',()=>({requireTask:(id:string)=>({id,archivedAt:state.archived?1:undefined}),settingsForTask:()=>({workflow:state.workflow})}));
+vi.mock('./taskOrganizationService',()=>({resolveTaskReferences:()=>[]}));
+vi.mock('./workbenchExecution',()=>({isTaskExecuting:()=>state.executing,assertTaskMutable:()=>{if(state.executing)throw new Error('busy');}}));
+vi.mock('../store/taskPlans',()=>({getTaskPlan:(id:string)=>state.plan?.id===id?state.plan:null,latestTaskPlan:()=>state.plan,updateTaskPlan:(id:string,revision:number,patch:Partial<TaskPlan>)=>{if(!state.plan||state.plan.id!==id||state.plan.revision!==revision)throw new Error('changed');state.plan={...state.plan,...patch,revision:revision+1};return state.plan;}}));
+import {claimTaskPlan,editTaskPlan,getLatestTaskPlan,rejectTaskPlan,taskPlanFingerprint} from './taskPlanService';
+beforeEach(()=>{state.executing=false;state.workflow='plan';state.archived=false;state.context={model:'fixture/a',permissionsHash:'read-write'};state.plan={id:'plan',sessionId:'task',revision:2,status:'pending',goal:'goal',body:'reviewed steps',model:'fixture/a',referenceIds:[],attachmentIds:[],fingerprint:'',createdAt:1,updatedAt:1};state.plan.fingerprint=taskPlanFingerprint(state.plan);});
+describe('task plan confirmation boundary',()=>{
+ it('claims exactly the reviewed revision once',()=>{const plan=claimTaskPlan('task','plan',2);expect(plan).toMatchObject({status:'executing',approvedRevision:3});expect(()=>claimTaskPlan('task','plan',2)).toThrow('already handled');});
+ it('rejects confirmation from another task',()=>{expect(()=>claimTaskPlan('other','plan',2)).toThrow('does not belong');expect(state.plan!.status).toBe('pending');});
+ it.each(['model','permissionsHash'] as const)('requires regeneration after %s changes',field=>{state.context[field]='changed';expect(()=>claimTaskPlan('task','plan',2)).toThrow('changed');expect(state.plan!.status).toBe('pending');});
+ it('a workflow change also invalidates the old confirmation context',()=>{state.workflow='direct';expect(()=>claimTaskPlan('task','plan',2)).toThrow('changed');});
+ it('editing requires a new revision and the edited body remains immutable after approval',()=>{editTaskPlan('task','plan',2,'edited plan');expect(()=>claimTaskPlan('task','plan',2)).toThrow('changed');expect(claimTaskPlan('task','plan',3).body).toBe('edited plan');expect(()=>editTaskPlan('task','plan',4,'bypass')).toThrow('already handled');});
+ it('a rejected plan cannot execute or be approved again',()=>{rejectTaskPlan('task','plan',2);expect(()=>claimTaskPlan('task','plan',3)).toThrow('already handled');});
+ it('archived tasks cannot approve a plan',()=>{state.archived=true;expect(()=>claimTaskPlan('task','plan',2)).toThrow('Restore');});
+ it('interrupting planning fails the candidate after restart but never converts it into execution',()=>{state.plan!.status='planning';state.executing=true;expect(getLatestTaskPlan('task')!.status).toBe('planning');state.executing=false;expect(getLatestTaskPlan('task')!.status).toBe('failed');});
+});

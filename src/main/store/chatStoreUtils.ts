@@ -34,6 +34,7 @@ export function serializeComparableMessage(message: ChatMessage): string {
     tool_call_id: message.tool_call_id || null,
     tool_calls: message.tool_calls || null,
     attachments: message.attachments || null,
+    references: message.references || null,
     usage: message.usage || null,
     model: message.model || null
   });
@@ -53,18 +54,42 @@ export function getSharedMessagePrefixLength(existingMessages: ChatMessage[], ne
   return prefixLength;
 }
 
+export const FIRST_USER_MESSAGE_SQL = `(SELECT content FROM messages WHERE session_id = sessions.id AND role = 'user' ORDER BY timestamp ASC, rowid ASC LIMIT 1)`;
+export const SESSION_TITLE_PREVIEW_SQL = `CASE WHEN sessions.title = 'New Chat' OR trim(sessions.title) = '' THEN ${FIRST_USER_MESSAGE_SQL} END`;
+
+export function getSessionTitle(title: string, firstUserContent?: string | null): string {
+  if (title.trim() && title !== 'New Chat') return title;
+  const content = (firstUserContent || '').replace(/\s+/g, ' ').trim();
+  const characters = Array.from(content);
+  return characters.length ? characters.slice(0, 80).join('') + (characters.length > 80 ? '…' : '') : title || 'New Chat';
+}
+
 export function mapSessionRowToSummary(session: {
   id: string;
   title: string;
   agent_id: string;
   created_at: number;
   updated_at: number;
+  first_user_content?: string | null;
+  run_status?: RunStatus;
+  archived_at?: number | null;
+  activity_version?: number;
+  read_version?: number;
+  project_id?: string | null;
+  execution_root?: string | null;
+  execution_settings?: string | null;
 }) {
   return {
     id: session.id,
-    title: session.title,
+    title: getSessionTitle(session.title, session.first_user_content),
     agentId: session.agent_id,
+    ...(session.execution_settings ? { executionSettings: parseJsonValue<import('../../shared/contracts').TaskExecutionSettings>(session.execution_settings) } : {}),
+    ...(session.archived_at ? { archivedAt: session.archived_at } : {}),
+    ...(session.activity_version !== undefined ? { activityVersion: session.activity_version, readVersion: session.read_version || 0 } : {}),
+    ...(session.project_id ? { projectId: session.project_id } : {}),
+    ...(session.execution_root ? { executionRoot: session.execution_root } : {}),
     createdAt: session.created_at,
+    ...(session.run_status ? { runStatus: session.run_status } : {}),
     updatedAt: session.updated_at
   };
 }
@@ -83,11 +108,13 @@ export function mapRunRowToSummary(run: {
   updated_at: number;
   started_at: number | null;
   completed_at: number | null;
+  execution_context?: string | null;
 }): RunSummary {
   return {
     id: run.id,
     sessionId: run.session_id,
     agentId: run.agent_id,
+    ...(run.execution_context ? { executionContext: parseJsonValue<import('../../shared/contracts').RunExecutionContext>(run.execution_context) } : {}),
     goal: run.goal,
     userInput: run.user_input,
     status: run.status,
@@ -138,7 +165,7 @@ export function mapApprovalRowToRecord(row: {
   session_id: string | null;
   tool_name: string;
   args: string;
-  status: 'pending' | 'approved' | 'denied';
+  status: 'pending' | 'approved' | 'denied' | 'invalidated';
   metadata: string | null;
   created_at: number;
   updated_at: number;
@@ -225,6 +252,7 @@ export function mapContextSummaryRow(row: {
     recentMessageCount: Number.isFinite(parsedSummary.recentMessageCount) ? parsedSummary.recentMessageCount : 0,
     omittedMessageCount: Number.isFinite(parsedSummary.omittedMessageCount) ? parsedSummary.omittedMessageCount : 0,
     budget: {
+      request: parsedSummary.budget?.request,
       maxContextChars: parsedSummary.budget?.maxContextChars || 0,
       systemPromptChars: parsedSummary.budget?.systemPromptChars || 0,
       supportChars: parsedSummary.budget?.supportChars || 0,
@@ -238,6 +266,10 @@ export function mapContextSummaryRow(row: {
 export function buildRunQueryWhere(query: RunQuery) {
   const clauses: string[] = [];
   const params: Array<string | number> = [];
+  if (query.projectId) { clauses.push('session_id IN (SELECT id FROM sessions WHERE project_id=?)'); params.push(query.projectId); }
+  if (query.model) { clauses.push("json_valid(execution_context) AND json_extract(execution_context,'$.model')=?"); params.push(query.model); }
+  if (query.startTime !== undefined) { clauses.push('created_at>=?'); params.push(query.startTime); }
+  if (query.endTime !== undefined) { clauses.push('created_at<=?'); params.push(query.endTime); }
   const search = query.search?.trim().toLowerCase();
   const status = query.status ?? 'all';
   const sessionId = query.sessionId?.trim();
@@ -283,6 +315,7 @@ export function buildMonitoringWhereClause(query: MonitoringTokenQuery) {
     "(messages.tool_calls IS NULL OR messages.tool_calls = '' OR messages.tool_calls = '[]')"
   ];
   const params: Array<string | number> = [];
+  if (query.projectId) { clauses.push('sessions.project_id = ?'); params.push(query.projectId); }
   const agentId = query.agentId?.trim();
   const model = query.model?.trim();
   const role = query.role?.trim();

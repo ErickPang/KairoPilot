@@ -1,40 +1,44 @@
 import { app } from 'electron';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
-import os from 'node:os';
+import { getKairoPilotDataRoot } from './dataRoot';
 import path from 'node:path';
 
 export interface AppPaths {
   userDataPath: string;
-  defaultWorkspacePath: string;
   defaultPluginsPath: string;
   publicSkillsPath: string;
   allowedProtocolRoots: string[];
 }
 
 export function ensureAppPaths(): AppPaths {
-  const userDataPath = path.join(os.homedir(), '.kairopilot');
-  const defaultWorkspacePath = path.join(userDataPath, 'workspace');
+  const userDataPath = getKairoPilotDataRoot();
   const defaultPluginsPath = path.join(userDataPath, 'plugins');
   const publicSkillsPath = path.join(userDataPath, 'skills');
 
-  for (const targetPath of [userDataPath, defaultWorkspacePath, defaultPluginsPath, publicSkillsPath]) {
+  for (const targetPath of [userDataPath, defaultPluginsPath, publicSkillsPath]) {
     if (!fs.existsSync(targetPath)) {
       fs.mkdirSync(targetPath, { recursive: true });
     }
   }
 
   app.setPath('userData', userDataPath);
+  if (process.env.KAIROPILOT_TEST_ROOT) {
+    const sessionDataPath = path.join(userDataPath, 'chromium');
+    const logsPath = path.join(userDataPath, 'logs');
+    fs.mkdirSync(sessionDataPath, { recursive: true });
+    fs.mkdirSync(logsPath, { recursive: true });
+    app.setPath('sessionData', sessionDataPath);
+    app.setPath('logs', logsPath);
+  }
 
   return {
     userDataPath,
-    defaultWorkspacePath,
     defaultPluginsPath,
     publicSkillsPath,
     allowedProtocolRoots: [
       userDataPath,
-      defaultWorkspacePath,
-      publicSkillsPath,
+        publicSkillsPath,
       defaultPluginsPath,
       app.getPath('temp')
     ].map((root) => path.resolve(root))

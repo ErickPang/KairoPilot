@@ -18,6 +18,7 @@ export interface ChatMessage {
   model?: string;
   usage?: LLMUsage;
   attachments?: ChatAttachment[];
+  references?: import('../../../shared/contracts').ContextReference[];
 }
 
 export interface LLMConfig {
@@ -25,6 +26,8 @@ export interface LLMConfig {
   apiKey?: string;
   baseUrl?: string;
   model: string;
+  maxRetries?: number;
+  contextWindowTokens?: number;
 }
 
 export interface ToolDefinition {
@@ -32,12 +35,13 @@ export interface ToolDefinition {
   description: string;
   parameters: z.ZodSchema;
   parametersJsonSchema?: Record<string, unknown>;
-  execute: (args: Record<string, unknown>) => Promise<unknown>;
+  execute: (args: Record<string, unknown>, signal?: AbortSignal) => Promise<unknown>;
   metadata?: {
     source?: 'builtin' | 'plugin' | 'skill';
     pluginId?: string;
     pluginName?: string;
     pluginScope?: string;
+    originalToolName?: string;
     riskLevel?: 'low' | 'medium' | 'high' | 'critical';
   };
 }
@@ -52,6 +56,8 @@ export interface LLMProviderCapabilities {
   structuredOutput: boolean;
   multimodalInput: boolean;
   protocol: LLMProviderProtocol;
+  /** 模型上下文窗口大小（tokens），用于动态调整上下文预算。 */
+  contextWindowTokens?: number;
 }
 
 export interface LLMGenerationConfig {

@@ -1,10 +1,11 @@
 import { app } from 'electron'
+import { getKairoPilotDataRoot } from '../../services/dataRoot'
 import { existsSync, readFileSync, realpathSync, watch, type FSWatcher } from 'fs'
 import fs from 'fs/promises'
 import path from 'path'
 import { createHash, randomUUID } from 'crypto'
 import { createLLMProvider } from '../llm/provider'
-import { getAgent, getAgents, getModelForAgent, readKairoPilotConfig, saveKairoPilotConfig } from '../../store/config'
+import { getModelForBinding, readKairoPilotConfig, saveKairoPilotConfig } from '../../store/config'
 import {
   DEFAULT_SKILL_MARKETPLACE_PRESETS,
   SKILL_IMPORT_ERROR,
@@ -232,7 +233,7 @@ export class SkillsManager {
   private directoryWatchers = new Map<string, FSWatcher>()
 
   constructor() {
-    this.publicSkillsDir = path.join(app.getPath('home'), '.kairopilot', 'skills')
+    this.publicSkillsDir = path.join(getKairoPilotDataRoot(app.getPath('home')), 'skills')
     this.pendingInstallsDir = path.join(app.getPath('userData'), 'pending-skill-installs')
   }
 
@@ -487,8 +488,8 @@ export class SkillsManager {
       return
     }
 
-    if (preparedInstall.scope.startsWith('agent:')) {
-      const agentId = preparedInstall.scope.slice('agent:'.length)
+    if (preparedInstall.scope === 'agent:workbench') {
+      const agentId = 'workbench'
       this.invalidateAgentSkills(agentId)
       await this.loadAgentSkills(agentId, { force: true })
     }
@@ -588,11 +589,8 @@ export class SkillsManager {
       return
     }
 
-    if (scope.startsWith('agent:')) {
-      const agentId = scope.slice('agent:'.length).trim()
-      if (!agentId) {
-        throw new Error(`Unsupported uninstall scope: ${scope}`)
-      }
+    if (scope === 'agent:workbench') {
+      const agentId = 'workbench'
       await this.loadAgentSkills(agentId)
       const skill = this.getAgentIndex(agentId).get(skillId)
       if (!skill) {
@@ -726,13 +724,8 @@ export class SkillsManager {
   }
 
   getAgentSkillsDirectoryPath(agentId: string) {
-    const agent = getAgent(agentId)
-    if (agent?.workspace) {
-      return path.join(agent.workspace, 'skills')
-    }
-
-    const fallbackName = agentId === 'mainAgent' ? 'workspace' : `workspace-${agentId}`
-    return path.join(app.getPath('userData'), fallbackName, 'skills')
+    if (agentId !== 'workbench') throw new Error('Historical Agent skill scopes are read-only. Import the skill into the workbench first.')
+    return path.join(readKairoPilotConfig().workbench!.managementRoot, 'skills')
   }
 
   private async ensureSkillsDirectories() {
@@ -877,9 +870,21 @@ export class SkillsManager {
       return
     }
 
+    // 防抖：避免 watcher 高频触发导致技能缓存反复清空
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null
+    const debouncedInvalidate = () => {
+      if (debounceTimer) {
+        clearTimeout(debounceTimer)
+      }
+      debounceTimer = setTimeout(() => {
+        onInvalidate()
+        debounceTimer = null
+      }, 500)
+    }
+
     try {
       const watcher = watch(targetPath, { recursive: true }, () => {
-        onInvalidate()
+        debouncedInvalidate()
       })
       watcher.on('error', () => {
         watcher.close()
@@ -891,7 +896,7 @@ export class SkillsManager {
       if (code === 'ERR_FEATURE_UNAVAILABLE_ON_PLATFORM' || code === 'ERR_INVALID_ARG_VALUE') {
         try {
           const watcher = watch(targetPath, () => {
-            onInvalidate()
+            debouncedInvalidate()
           })
           watcher.on('error', () => {
             watcher.close()
@@ -1042,12 +1047,8 @@ export class SkillsManager {
       return { type: 'public' } as const
     }
 
-    if (scope.startsWith('agent:')) {
-      const agentId = scope.slice('agent:'.length).trim()
-      if (!agentId || !getAgent(agentId)) {
-        throw new Error(`Agent scope ${scope} does not exist.`)
-      }
-      return { type: 'agent', agentId } as const
+    if (scope === 'agent:workbench') {
+      return { type: 'agent', agentId: 'workbench' } as const
     }
 
     throw new Error(`Unsupported install scope: ${scope}`)
@@ -1061,13 +1062,11 @@ export class SkillsManager {
       scopeMap.set(skill.id, ['public'])
     }
 
-    for (const agent of getAgents()) {
-      await this.loadAgentSkills(agent.id)
-      for (const skill of this.getAgentIndex(agent.id).values()) {
-        const currentScopes = scopeMap.get(skill.id) ?? []
-        currentScopes.push(`agent:${agent.id}`)
-        scopeMap.set(skill.id, currentScopes)
-      }
+    await this.loadAgentSkills('workbench')
+    for (const skill of this.getAgentIndex('workbench').values()) {
+      const currentScopes = scopeMap.get(skill.id) ?? []
+      currentScopes.push('agent:workbench')
+      scopeMap.set(skill.id, currentScopes)
     }
 
     return scopeMap
@@ -1235,36 +1234,8 @@ export class SkillsManager {
     }
   }
 
-  private resolveSkillReviewModel(scope: string): ModelConfig | undefined {
-    const candidateAgents = new Map<string, ReturnType<typeof getAgent>>()
-    const registerCandidate = (agentId: string | undefined) => {
-      if (!agentId || candidateAgents.has(agentId)) {
-        return
-      }
-      candidateAgents.set(agentId, getAgent(agentId))
-    }
-
-    if (scope.startsWith('agent:')) {
-      registerCandidate(scope.slice('agent:'.length).trim())
-    }
-
-    registerCandidate('mainAgent')
-
-    for (const agent of getAgents()) {
-      registerCandidate(agent.id)
-    }
-
-    for (const agent of candidateAgents.values()) {
-      if (!agent) {
-        continue
-      }
-      const model = getModelForAgent(agent)
-      if (model?.model) {
-        return model
-      }
-    }
-
-    return undefined
+  private resolveSkillReviewModel(_scope: string): ModelConfig | undefined {
+    return getModelForBinding(readKairoPilotConfig().workbench!.defaultModel)
   }
 
   private getAgentIndex(agentId: string) {

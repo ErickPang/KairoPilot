@@ -223,7 +223,7 @@ export const GeneralSettings = memo(function GeneralSettings() {
   }, []);
 
   const handleThemeChange = async (theme: AppearanceTheme) => {
-    const nextAppearance: AppearanceConfig = { theme };
+    const nextAppearance: AppearanceConfig = { ...appearanceConfig, theme };
     setAppearanceConfig(nextAppearance);
     applyAppearanceTheme(theme);
     emitAppearanceThemeChanged(theme);
@@ -231,6 +231,18 @@ export const GeneralSettings = memo(function GeneralSettings() {
       await window.kairo.invoke(KAIRO_INVOKE.configSaveAppearance, nextAppearance);
     } catch (error) {
       console.error('Failed to save appearance settings:', error);
+    }
+  };
+
+  const handleClipboardChange = async (enabled: boolean) => {
+    const previous = appearanceConfig;
+    const next = { ...appearanceConfig, clipboardSuggestions: enabled };
+    setAppearanceConfig(next);
+    try {
+      await window.kairo.invoke(KAIRO_INVOKE.configSaveAppearance, next);
+    } catch (error) {
+      setAppearanceConfig(previous);
+      console.error('Failed to save clipboard preference:', error);
     }
   };
 
@@ -284,7 +296,7 @@ export const GeneralSettings = memo(function GeneralSettings() {
           <div className="form-group form-group-tight">
             <label>{t('settings.theme')}</label>
             <Select
-              value={appearanceConfig.theme}
+              aria-label={t('settings.theme')} value={appearanceConfig.theme}
               onChange={(value) => {
                 void handleThemeChange(value as AppearanceTheme);
               }}
@@ -323,7 +335,7 @@ export const GeneralSettings = memo(function GeneralSettings() {
           <div className="form-group form-group-tight">
             <label>{t('general.language')}</label>
             <Select
-              value={locale}
+              aria-label={t('general.language')} value={locale}
               onChange={(value) => setLocale(value as 'zh' | 'en')}
               className="select-fill"
               options={[
@@ -333,6 +345,13 @@ export const GeneralSettings = memo(function GeneralSettings() {
             />
             <div className="form-help">{t('settings.preferencesLanguageHelp')}</div>
           </div>
+          <label className="settings-toggle-card">
+            <div className="settings-toggle-copy">
+              <div className="settings-toggle-title">{t('settings.clipboardSuggestions')}</div>
+              <div className="settings-toggle-help">{t('settings.clipboardSuggestionsHelp')}</div>
+            </div>
+            <input data-clipboard-suggestions className="settings-toggle-input" type="checkbox" disabled={loading} checked={appearanceConfig.clipboardSuggestions === true} onChange={event => void handleClipboardChange(event.target.checked)} />
+          </label>
         </div>
       </section>
 

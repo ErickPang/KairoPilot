@@ -9,31 +9,28 @@ const electronMocks = vi.hoisted(() => ({
 }));
 
 const chatStoreMocks = vi.hoisted(() => ({
+  getUnsettledRunsForAgent: vi.fn(() => []),
   createSession: vi.fn(),
   getActiveSession: vi.fn(),
   getApprovalRecord: vi.fn(),
   getLatestSessionContextSummary: vi.fn(),
   getLatestRun: vi.fn(),
   getLatestRunSteps: vi.fn(),
+  getRetryableRunStepIds: vi.fn(),
   getPendingApproval: vi.fn(),
   getRunById: vi.fn(),
   queryRuns: vi.fn(),
   getRunTrace: vi.fn(),
-  migrateLegacyAttachmentsForSession: vi.fn(),
   getSessionById: vi.fn(),
   updateSessionTitle: vi.fn(),
   deleteSession: vi.fn(),
-  deleteSessionsByAgent: vi.fn(),
   setActiveSessionId: vi.fn(),
   listSessions: vi.fn(),
   getAgentStats: vi.fn(),
   getTokenUsageDetails: vi.fn()
 }));
 
-const configStoreMocks = vi.hoisted(() => ({
-  getActiveAgentId: vi.fn(() => 'agent-1'),
-  getAgent: vi.fn()
-}));
+
 
 const attachmentMocks = vi.hoisted(() => ({
   deleteAttachmentFile: vi.fn(),
@@ -52,8 +49,8 @@ vi.mock('electron', () => ({
   }
 }));
 
-vi.mock('../../store/chat', () => chatStoreMocks);
-vi.mock('../../store/config', () => configStoreMocks);
+vi.mock('../../store/chat', () => ({...chatStoreMocks,getDb:()=>({prepare:()=>({all:()=>[{id:'session-2'}]})})}));
+vi.mock('../../store/taskPages', () => ({ getOwnedSessionSummary: (_agent: string, id: string) => chatStoreMocks.getSessionById(id), getActiveSessionSummary: (agent: string) => chatStoreMocks.getActiveSession(agent) }));
 vi.mock('../../store/attachments', () => attachmentMocks);
 vi.mock('../../store/audit', () => auditMocks);
 
@@ -67,18 +64,17 @@ describe('chatHandlers', () => {
 
     for (const mock of [
       ...Object.values(chatStoreMocks),
-      ...Object.values(configStoreMocks),
       ...Object.values(attachmentMocks),
       ...Object.values(auditMocks)
     ]) {
       mock.mockReset();
     }
 
-    configStoreMocks.getActiveAgentId.mockReturnValue('agent-1');
+    chatStoreMocks.getUnsettledRunsForAgent.mockReturnValue([]);
     registerChatHandlers();
   });
 
-  it('rejects title updates for sessions outside the active agent', async () => {
+  it('allows title updates for historical tasks in the workbench', async () => {
     chatStoreMocks.getSessionById.mockReturnValue({
       id: 'session-2',
       title: 'Other',
@@ -94,14 +90,11 @@ describe('chatHandlers', () => {
       title: 'Renamed'
     });
 
-    expect(result).toEqual({
-      success: false,
-      error: 'Session does not belong to the active agent.'
-    });
-    expect(chatStoreMocks.updateSessionTitle).not.toHaveBeenCalled();
+    expect(result).toEqual({success:true});
+    expect(chatStoreMocks.updateSessionTitle).toHaveBeenCalledWith('session-2','Renamed');
   });
 
-  it('rejects deletes for sessions outside the active agent', async () => {
+  it('allows deletes for idle historical tasks in the workbench', async () => {
     chatStoreMocks.getSessionById.mockReturnValue({
       id: 'session-2',
       title: 'Other',
@@ -114,18 +107,15 @@ describe('chatHandlers', () => {
     const handler = registeredHandlers.get(KAIRO_INVOKE.chatDeleteSession);
     const result = await handler?.({}, 'session-2');
 
-    expect(result).toEqual({
-      success: false,
-      error: 'Session does not belong to the active agent.'
-    });
-    expect(chatStoreMocks.deleteSession).not.toHaveBeenCalled();
+    expect(result).toEqual({success:true});
+    expect(chatStoreMocks.deleteSession).toHaveBeenCalledWith('session-2');
   });
 
-  it('clears only sessions for the active agent', async () => {
+  it('clears tasks from all historical sources', async () => {
     const handler = registeredHandlers.get(KAIRO_INVOKE.chatClearAllSessions);
     const result = await handler?.({});
 
     expect(result).toEqual({ success: true });
-    expect(chatStoreMocks.deleteSessionsByAgent).toHaveBeenCalledWith('agent-1');
+    expect(chatStoreMocks.deleteSession).toHaveBeenCalledWith('session-2');
   });
 });

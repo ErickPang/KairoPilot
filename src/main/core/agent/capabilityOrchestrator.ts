@@ -75,6 +75,8 @@ export class CapabilityOrchestrator {
     this.tools.set(tool.name, tool);
   }
 
+  unregisterTool(name:string){this.tools.delete(name);}
+
   clearLoadedSkills(options?: { activationSource?: 'manual' | 'automatic' }) {
     const activationSource = options?.activationSource;
     if (!activationSource) {

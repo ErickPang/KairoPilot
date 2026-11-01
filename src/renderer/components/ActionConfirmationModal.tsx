@@ -1,4 +1,5 @@
 import type { AppConfirmationOptions } from '../types';
+import { WorkbenchDialog } from './WorkbenchDialog';
 
 interface ActionConfirmationModalProps {
   request: AppConfirmationOptions;
@@ -8,33 +9,8 @@ interface ActionConfirmationModalProps {
 
 export function ActionConfirmationModal({ request, onConfirm, onCancel }: ActionConfirmationModalProps) {
   const isDanger = request.variant === 'danger';
-
-  return (
-    <div className="modal-overlay" onClick={onCancel}>
-      <div
-        className={`modal-content action-confirmation-modal ${isDanger ? 'is-danger' : ''}`}
-        onClick={(event) => event.stopPropagation()}
-      >
-        <div className="modal-header">
-          <h3 className={`action-confirmation-title ${isDanger ? 'is-danger' : ''}`}>{request.title}</h3>
-          <button type="button" className="close-btn" onClick={onCancel}>×</button>
-        </div>
-        <div className="modal-body">
-          <p className="action-confirmation-message">{request.message}</p>
-        </div>
-        <div className="modal-actions">
-          <button type="button" className="btn btn-secondary" onClick={onCancel}>
-            {request.cancelLabel}
-          </button>
-          <button
-            type="button"
-            className={`btn ${isDanger ? 'btn-danger' : 'btn-primary'}`}
-            onClick={onConfirm}
-          >
-            {request.confirmLabel}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
+  return <WorkbenchDialog title={request.title} kind="confirm-action" className={`action-confirmation-modal ${isDanger ? 'is-danger' : ''}`} onClose={onCancel} actions={<>
+    <button type="button" className="btn btn-secondary" onClick={onCancel}>{request.cancelLabel}</button>
+    <button type="button" className={`btn ${isDanger ? 'btn-danger' : 'btn-primary'}`} onClick={onConfirm}>{request.confirmLabel}</button>
+  </>}><p className="action-confirmation-message">{request.message}</p></WorkbenchDialog>;
 }

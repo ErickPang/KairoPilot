@@ -1,3 +1,4 @@
+import {readImplicitInvocationPolicy} from './invocationPolicy';
 import { createHash } from 'crypto'
 import fs from 'fs/promises'
 import path from 'path'
@@ -61,6 +62,8 @@ export async function readSkillRecord(
     }
 
     const parsed = parseSkillFrontmatter(rawContent, folderName)
+    const policy=await readImplicitInvocationPolicy(resolvedSkillDir);
+    parsed.metadata.modelInvocable=parsed.metadata.modelInvocable&&policy.allowed;
 
     return {
       id: folderName,
@@ -69,7 +72,7 @@ export async function readSkillRecord(
       content: parsed.body,
       skillDir: resolvedSkillDir,
       skillFilePath: resolvedSkillFilePath,
-      contentHash: createHash('sha256').update(rawContent).digest('hex'),
+      contentHash: createHash('sha256').update(rawContent).update(policy.raw?`\n<openai_policy>\n${policy.raw}`:'').digest('hex'),
       metadata: parsed.metadata
     } satisfies SkillRecord
   } catch {

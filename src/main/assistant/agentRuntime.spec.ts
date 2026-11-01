@@ -57,14 +57,11 @@ vi.mock('../store/audit', () => ({
   addAuditLog: vi.fn()
 }));
 
-vi.mock('../store/config', () => ({
-  getAgent: vi.fn(),
-  getModelForAgent: vi.fn()
-}));
 
 vi.mock('../core/plugins/manager', () => ({
   pluginManager: {
-    loadAllTools: vi.fn(async () => [])
+    listToolCatalog: vi.fn(async () => []),
+    loadPluginTools: vi.fn(async () => [])
   }
 }));
 

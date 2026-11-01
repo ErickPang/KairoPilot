@@ -1,25 +1,28 @@
+import {UsageOverview} from './UsageOverview';
+import {DateField} from './DateField';
 import { memo, useState, useEffect, useMemo, useCallback } from 'react';
-import { AgentConfig, AgentStats, MonitoringTokenQueryResult } from '../types';
-import { IconDashboard, IconBot, IconChat, IconCpu, IconArrowLeft, IconRefresh } from './Icons';
+import { MonitoringTokenQueryResult } from '../types';
+import { IconCpu, IconArrowLeft, IconRefresh } from './Icons';
 import { useTranslation } from '../hooks/useTranslation';
 import { KAIRO_INVOKE } from '../../shared/ipc';
 import { Select } from './Select';
 import { getErrorMessage, logRendererError } from '../hooks/errorUtils';
-import { useSystemStats } from '../hooks/useSystemStats';
 import './Dashboard.css';
 
 interface DashboardProps {
-  agents: AgentConfig[];
   isActive: boolean;
   onReportError?: (message: string, source: string) => void;
 }
 
 const TOKEN_DETAIL_PAGE_SIZE = 10;
 
-export const Dashboard = memo(function Dashboard({ agents, isActive, onReportError }: DashboardProps) {
-  const [stats, setStats] = useState<AgentStats[]>([]);
+export const Dashboard = memo(function Dashboard({ isActive, onReportError }: DashboardProps) {
   const [view, setView] = useState<'overview' | 'tokenDetails'>('overview');
-  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
+  const [projectId,setProjectId]=useState('');
+  const [sessionId,setSessionId]=useState('');
+  const [startDate,setStartDate]=useState('');
+  const [endDate,setEndDate]=useState('');
+  const [projects,setProjects]=useState<Array<{id:string;name:string}>>([]);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailPage, setDetailPage] = useState(1);
   const [detailSearchText, setDetailSearchText] = useState('');
@@ -41,46 +44,32 @@ export const Dashboard = memo(function Dashboard({ agents, isActive, onReportErr
     }
   });
   const { t } = useTranslation();
-  const systemStats = useSystemStats(isActive);
 
   useEffect(() => {
     if (!isActive) {
       return;
     }
 
-    const fetchStats = async () => {
+    let cancelled = false;
+    const fetchProjects = async () => {
       try {
-        const data = await window.kairo.invoke(KAIRO_INVOKE.chatGetAgentStats);
-        setStats(data);
+        const data = await window.kairo.invoke(KAIRO_INVOKE.projectList);
+        if (!cancelled) {
+          setProjects(data);
+        }
       } catch (error) {
-        logRendererError('Failed to fetch agent stats', error);
-        onReportError?.(t('dashboard.error.loadStats', { error: getErrorMessage(error) }), 'dashboard_stats');
+        if (!cancelled) {
+          logRendererError('Failed to fetch usage projects', error);
+          onReportError?.(t('dashboard.error.loadProjects', { error: getErrorMessage(error) }), 'dashboard_projects');
+        }
       }
     };
 
-    void fetchStats();
-    const interval = setInterval(fetchStats, 10000);
-    return () => clearInterval(interval);
+    void fetchProjects();
+    return () => { cancelled = true; };
   }, [isActive, onReportError, t]);
 
-  const getAgentName = (id: string) => {
-    if (id === 'mainAgent') {
-      return t('agent.defaultName');
-    }
-    const agent = agents.find((item) => item.id === id);
-    return agent ? agent.name : 'Unknown Agent';
-  };
-
-  const totalTokens = stats.reduce((acc, stat) => acc + stat.totalTokens, 0);
-  const totalMessages = stats.reduce((acc, stat) => acc + stat.totalMessages, 0);
-  const totalSessions = stats.reduce((acc, stat) => acc + stat.totalSessions, 0);
-  const totalRuns = stats.reduce((acc, stat) => acc + stat.totalRuns, 0);
-  const totalCompletedRuns = stats.reduce((acc, stat) => acc + stat.completedRuns, 0);
-  const totalApprovalRequests = stats.reduce((acc, stat) => acc + stat.approvalRequests, 0);
-  const totalApprovalApproved = stats.reduce((acc, stat) => acc + stat.approvalApproved, 0);
-  const totalToolCalls = stats.reduce((acc, stat) => acc + stat.toolCalls, 0);
-  const totalSuccessfulToolCalls = stats.reduce((acc, stat) => acc + stat.successfulToolCalls, 0);
-  const selectedAgentName = selectedAgentId ? getAgentName(selectedAgentId) : '';
+  const selectedAgentName = t('workbench.workbenchScope');
 
   const modelSelectOptions = useMemo(
     () => [
@@ -105,14 +94,13 @@ export const Dashboard = memo(function Dashboard({ agents, isActive, onReportErr
   );
 
   const fetchTokenDetails = useCallback(async () => {
-    if (!selectedAgentId) {
-      return;
-    }
-
     try {
       setDetailLoading(true);
       const data = await window.kairo.invoke(KAIRO_INVOKE.chatGetTokenUsageDetails, {
-        agentId: selectedAgentId,
+        projectId: projectId || undefined,
+        sessionId: sessionId.trim() || undefined,
+        startTime: startDate ? new Date(`${startDate}T00:00:00`).getTime() : undefined,
+        endTime: endDate ? new Date(`${endDate}T23:59:59.999`).getTime() : undefined,
         page: detailPage,
         pageSize: TOKEN_DETAIL_PAGE_SIZE,
         search: detailSearchText.trim() || undefined,
@@ -126,10 +114,10 @@ export const Dashboard = memo(function Dashboard({ agents, isActive, onReportErr
     } finally {
       setDetailLoading(false);
     }
-  }, [detailModelFilter, detailPage, detailRoleFilter, detailSearchText, onReportError, selectedAgentId, t]);
+  }, [detailModelFilter, detailPage, detailRoleFilter, detailSearchText, onReportError, projectId, sessionId, startDate, endDate, t]);
 
   useEffect(() => {
-    if (view !== 'tokenDetails' || !selectedAgentId) {
+    if (view !== 'tokenDetails') {
       return;
     }
 
@@ -140,7 +128,7 @@ export const Dashboard = memo(function Dashboard({ agents, isActive, onReportErr
     return () => {
       window.clearTimeout(timeoutId);
     };
-  }, [detailSearchText, fetchTokenDetails, selectedAgentId, view]);
+  }, [detailSearchText, fetchTokenDetails, view]);
 
   const formatTimestamp = (timestamp: number) =>
     new Intl.DateTimeFormat(undefined, {
@@ -151,87 +139,9 @@ export const Dashboard = memo(function Dashboard({ agents, isActive, onReportErr
       minute: '2-digit'
     }).format(timestamp);
 
-  const formatRate = (value: number, total: number) => {
-    if (total <= 0) {
-      return '—';
-    }
-    return `${((value / total) * 100).toFixed(1)}%`;
-  };
-
   const refreshTokenDetails = async () => {
     await fetchTokenDetails();
   };
-
-  const summaryCards = [
-    {
-      label: t('dashboard.totalTokens'),
-      value: totalTokens.toLocaleString(),
-      meta: undefined,
-      accent: 'accent',
-      icon: <IconCpu size={22} />,
-      iconStyle: {
-        background: 'var(--surface-muted)',
-        color: 'var(--info)'
-      }
-    },
-    {
-      label: t('dashboard.totalMessages'),
-      value: totalMessages.toLocaleString(),
-      meta: undefined,
-      accent: '',
-      icon: <IconChat size={22} />,
-      iconStyle: {
-        background: 'var(--surface-muted)',
-        color: 'var(--success)'
-      }
-    },
-    {
-      label: t('dashboard.totalSessions'),
-      value: totalSessions.toLocaleString(),
-      meta: undefined,
-      accent: '',
-      icon: <IconBot size={22} />,
-      iconStyle: {
-        background: 'var(--surface-muted)',
-        color: 'var(--warning)'
-      }
-    },
-    {
-      label: t('dashboard.totalRuns'),
-      value: totalRuns.toLocaleString(),
-      meta: undefined,
-      accent: 'accent',
-      icon: <IconRefresh size={22} />,
-      iconStyle: {
-        background: 'var(--surface-muted)',
-        color: 'var(--primary)'
-      }
-    },
-    {
-      label: t('dashboard.runCompletionRate'),
-      value: formatRate(totalCompletedRuns, totalRuns),
-      meta: t('dashboard.completedRunsMeta', { completed: totalCompletedRuns, total: totalRuns }),
-      accent: '',
-      icon: null,
-      iconStyle: undefined
-    },
-    {
-      label: t('dashboard.approvalAcceptRate'),
-      value: formatRate(totalApprovalApproved, totalApprovalRequests),
-      meta: t('dashboard.approvalMeta', { approved: totalApprovalApproved, total: totalApprovalRequests }),
-      accent: '',
-      icon: null,
-      iconStyle: undefined
-    },
-    {
-      label: t('dashboard.toolSuccessRate'),
-      value: formatRate(totalSuccessfulToolCalls, totalToolCalls),
-      meta: t('dashboard.toolMeta', { success: totalSuccessfulToolCalls, total: totalToolCalls }),
-      accent: '',
-      icon: null,
-      iconStyle: undefined
-    }
-  ];
 
   return (
     <div className="dashboard-container">
@@ -276,6 +186,10 @@ export const Dashboard = memo(function Dashboard({ agents, isActive, onReportErr
 
           <div className="animate-stagger-3">
             <div className="token-filter-panel">
+              <Select aria-label={t('workbench.project')} value={projectId} onChange={value=>{setProjectId(value);setDetailPage(1);}} options={[{value:'',label:t('workbench.allProjects')},...projects.map(project=>({value:project.id,label:project.name}))]}/>
+              <input className="form-control" aria-label={t('workbench.taskId')} placeholder={t('workbench.taskId')} value={sessionId} onChange={event=>{setSessionId(event.target.value);setDetailPage(1);}}/>
+              <DateField label={t('workbench.startDate')} value={startDate} onChange={value=>{setStartDate(value);setDetailPage(1);}}/>
+              <DateField label={t('workbench.endDate')} value={endDate} onChange={value=>{setEndDate(value);setDetailPage(1);}}/>
               <div className="token-filter-group">
                 <input
                   className="form-control"
@@ -312,6 +226,7 @@ export const Dashboard = memo(function Dashboard({ agents, isActive, onReportErr
               <button
                 className="btn btn-secondary"
                 onClick={() => {
+                  setProjectId('');setSessionId('');setStartDate('');setEndDate('');
                   setDetailSearchText('');
                   setDetailModelFilter('all');
                   setDetailRoleFilter('all');
@@ -424,169 +339,7 @@ export const Dashboard = memo(function Dashboard({ agents, isActive, onReportErr
           </div>
         </>
       ) : (
-        <>
-          <div className="dashboard-hero animate-stagger-1">
-            <div className="dashboard-hero-copy">
-              <span className="dashboard-eyebrow">{t('dashboard.liveUpdates')}</span>
-              <div className="dashboard-title-row">
-                <IconDashboard size={34} color="var(--primary)" />
-                <h2 className="dashboard-title">{t('dashboard.title')}</h2>
-                <span className="live-dot" title={t('dashboard.liveUpdates')}></span>
-              </div>
-              <p className="dashboard-subtitle">{t('audit.runCenterSubtitle')}</p>
-            </div>
-            <div className="dashboard-hero-meta">
-              <div className="dashboard-hero-chip">
-                <span className="dashboard-hero-chip-label">{t('dashboard.totalRuns')}</span>
-                <span className="dashboard-hero-chip-value">{totalRuns.toLocaleString()}</span>
-              </div>
-              <div className="dashboard-hero-chip">
-                <span className="dashboard-hero-chip-label">{t('dashboard.totalTokens')}</span>
-                <span className="dashboard-hero-chip-value">{totalTokens.toLocaleString()}</span>
-              </div>
-              <div className="dashboard-hero-chip">
-                <span className="dashboard-hero-chip-label">{t('dashboard.cpuUsage')}</span>
-                <span className="dashboard-hero-chip-value">{systemStats ? `${systemStats.cpuUsage}%` : '—'}</span>
-              </div>
-              <div className="dashboard-hero-chip">
-                <span className="dashboard-hero-chip-label">{t('dashboard.memoryUsage')}</span>
-                <span className="dashboard-hero-chip-value">{systemStats ? `${systemStats.memoryUsage}%` : '—'}</span>
-              </div>
-            </div>
-          </div>
-
-          <div className="dashboard-summary-grid animate-stagger-2">
-            {summaryCards.map((card) => (
-              <div key={card.label} className="stat-card">
-                {card.icon ? (
-                  <div className="dashboard-stat-header">
-                    <div className="dashboard-stat-label">{card.label}</div>
-                    <div className="stat-icon-wrapper" style={card.iconStyle}>{card.icon}</div>
-                  </div>
-                ) : (
-                  <div className="dashboard-stat-label">{card.label}</div>
-                )}
-                <div className={`dashboard-stat-value ${card.accent ? 'is-accent' : ''}`}>{card.value}</div>
-                {card.meta && <div className="dashboard-stat-meta">{card.meta}</div>}
-              </div>
-            ))}
-          </div>
-
-          <div className="dashboard-section animate-stagger-3">
-            <h3 className="dashboard-section-title">{t('dashboard.agentActivity')}</h3>
-            <div className="data-table-container">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>{t('dashboard.agentName')}</th>
-                    <th>{t('dashboard.sessions')}</th>
-                    <th>{t('dashboard.runs')}</th>
-                    <th>{t('dashboard.messages')}</th>
-                    <th>{t('dashboard.runCompletionRate')}</th>
-                    <th>{t('dashboard.approvalAcceptRate')}</th>
-                    <th>{t('dashboard.toolSuccessRate')}</th>
-                    <th>{t('dashboard.promptTokens')}</th>
-                    <th>{t('dashboard.completionTokens')}</th>
-                    <th>{t('dashboard.totalTokens')}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {stats.length === 0 ? (
-                    <tr>
-                      <td colSpan={10} className="dashboard-empty-state">
-                        <div className="dashboard-empty-icon">
-                          <IconBot size={48} />
-                        </div>
-                        <div className="dashboard-empty-title">{t('dashboard.noActivity')}</div>
-                        <div className="dashboard-empty-description">{t('dashboard.startChatting')}</div>
-                      </td>
-                    </tr>
-                  ) : (
-                    stats.map((stat) => (
-                      <tr key={stat.agentId}>
-                        <td className="dashboard-table-cell-strong">
-                          <div className="dashboard-agent-cell">
-                            <div className="dashboard-agent-icon">
-                              <IconBot size={18} color="var(--primary)" />
-                            </div>
-                            {getAgentName(stat.agentId)}
-                          </div>
-                        </td>
-                        <td className="dashboard-table-cell-medium">{stat.totalSessions}</td>
-                        <td className="dashboard-table-cell-medium">{stat.totalRuns}</td>
-                        <td className="dashboard-table-cell-medium">{stat.totalMessages}</td>
-                        <td className="dashboard-table-cell-medium">{formatRate(stat.completedRuns, stat.totalRuns)}</td>
-                        <td className="dashboard-table-cell-medium">{formatRate(stat.approvalApproved, stat.approvalRequests)}</td>
-                        <td className="dashboard-table-cell-medium">{formatRate(stat.successfulToolCalls, stat.toolCalls)}</td>
-                        <td className="dashboard-table-number-subtle">{stat.promptTokens.toLocaleString()}</td>
-                        <td className="dashboard-table-number-subtle">{stat.completionTokens.toLocaleString()}</td>
-                        <td>
-                          <button
-                            className="agent-token-trigger"
-                            onClick={() => {
-                              setSelectedAgentId(stat.agentId);
-                              setDetailPage(1);
-                              setDetailSearchText('');
-                              setDetailModelFilter('all');
-                              setDetailRoleFilter('all');
-                              setView('tokenDetails');
-                            }}
-                            title={t('dashboard.openAgentTokenDetails', { agent: getAgentName(stat.agentId) })}
-                          >
-                            {stat.totalTokens.toLocaleString()}
-                          </button>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          {systemStats && (
-            <div className="dashboard-section animate-stagger-4">
-              <h3 className="dashboard-section-title">{t('dashboard.systemResources')}</h3>
-              <div className="dashboard-resource-grid">
-                <div className="stat-card">
-                  <div className="dashboard-stat-header">
-                    <div className="dashboard-stat-label">{t('dashboard.cpuUsage')}</div>
-                    <div className="dashboard-resource-value">{systemStats.cpuUsage}%</div>
-                  </div>
-                  <div className="progress-bar-bg">
-                    <div
-                      className="progress-bar-fill"
-                      style={{ width: `${Math.min(systemStats.cpuUsage, 100)}%`, backgroundColor: systemStats.cpuUsage > 80 ? 'var(--danger)' : 'var(--primary)' }}
-                    />
-                  </div>
-                </div>
-
-                <div className="stat-card">
-                  <div className="dashboard-stat-header">
-                    <div className="dashboard-stat-label">{t('dashboard.memoryUsage')}</div>
-                    <div className="dashboard-resource-value">{systemStats.memoryUsage}%</div>
-                  </div>
-                  <div className="progress-bar-bg">
-                    <div
-                      className="progress-bar-fill"
-                      style={{ width: `${Math.min(systemStats.memoryUsage, 100)}%`, backgroundColor: systemStats.memoryUsage > 80 ? 'var(--danger)' : 'var(--success)' }}
-                    />
-                  </div>
-                  <div className="dashboard-resource-meta">
-                    {t('dashboard.totalGb', { total: systemStats.totalMemory })}
-                  </div>
-                </div>
-
-                <div className="stat-card dashboard-stat-card-center">
-                  <div className="dashboard-stat-label">{t('dashboard.systemUptime')}</div>
-                  <div className="dashboard-uptime-value">
-                    {systemStats.uptime} <span className="dashboard-uptime-unit">{t('dashboard.hrs')}</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-        </>
+        <UsageOverview isActive={isActive} projects={projects} onDetails={selection=>{setProjectId(selection.projectId||'');setSessionId('');setStartDate(selection.date||'');setEndDate(selection.date||'');setDetailModelFilter(selection.model||'all');setDetailRoleFilter('all');setDetailSearchText('');setDetailPage(1);setView('tokenDetails');}}/>
       )}
     </div>
   );

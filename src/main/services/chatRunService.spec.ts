@@ -4,6 +4,7 @@ const chatStoreMocks = vi.hoisted(() => ({
   getApprovalRecord: vi.fn(),
   getLatestRun: vi.fn(),
   getLatestRunSteps: vi.fn(),
+  getRetryableRunStepIds: vi.fn(),
   getLatestSessionContextSummary: vi.fn(),
   getPendingApproval: vi.fn(),
   getRunById: vi.fn(),
@@ -12,15 +13,14 @@ const chatStoreMocks = vi.hoisted(() => ({
   queryRuns: vi.fn()
 }));
 
-const configStoreMocks = vi.hoisted(() => ({
-  getActiveAgentId: vi.fn()
-}));
 
-vi.mock('../store/chat', () => chatStoreMocks);
-vi.mock('../store/config', () => configStoreMocks);
+
+vi.mock('../store/chat', () => ({ ...chatStoreMocks, RESTART_INTERRUPTED_ERROR: 'RUN_INTERRUPTED_BY_RESTART: fixture' }));
+vi.mock('../store/taskPages', () => ({ getOwnedSessionSummary: (_agent: string, id: string) => chatStoreMocks.getSessionById(id), getActiveSessionSummary: vi.fn() }));
 
 import {
   getPendingApprovalForActiveAgentSession,
+  getRunStepsForActiveAgentSession,
   getRunTraceForActiveAgent,
   queryRunsForActiveAgent
 } from './chatRunService';
@@ -28,16 +28,27 @@ import {
 describe('chatRunService', () => {
   beforeEach(() => {
     for (const mock of [
-      ...Object.values(chatStoreMocks),
-      ...Object.values(configStoreMocks)
+      ...Object.values(chatStoreMocks)
     ]) {
       mock.mockReset();
     }
 
-    configStoreMocks.getActiveAgentId.mockReturnValue('agent-1');
   });
 
-  it('scopes run queries to the active agent', () => {
+  it('redacts displayed activity and exposes retry only for recorded checkpoints', () => {
+    chatStoreMocks.getSessionById.mockReturnValue({ id: 'session-1', agentId: 'agent-1' });
+    chatStoreMocks.getLatestRun.mockReturnValue({ id: 'run-1', status: 'failed', executionContext: { executionRoot: '/synthetic' } });
+    chatStoreMocks.getRetryableRunStepIds.mockReturnValue(['step-with-snapshot']);
+    chatStoreMocks.getLatestRunSteps.mockReturnValue([
+      { id: 'step-with-snapshot', input: { apiKey: 'sample-private-value' }, output: 'token=sample-private-value', status: 'failed' },
+      { id: 'step-without-snapshot', input: undefined, output: undefined, status: 'failed' }
+    ]);
+    const result = getRunStepsForActiveAgentSession('session-1');
+    expect(result[0]).toMatchObject({ input: { apiKey: '[REDACTED]' }, output: 'token=[REDACTED]', metadata: { retryable: true } });
+    expect(result[1].metadata.retryable).toBe(false);
+  });
+
+  it('queries workbench runs across historical sources', () => {
     chatStoreMocks.queryRuns.mockReturnValue({
       items: [],
       total: 0,
@@ -55,11 +66,11 @@ describe('chatRunService', () => {
     expect(chatStoreMocks.queryRuns).toHaveBeenCalledWith({
       page: 2,
       status: 'completed',
-      agentId: 'agent-1'
+      agentId: undefined
     });
   });
 
-  it('blocks run trace access outside the active agent', () => {
+  it('loads historical run traces by task ownership', () => {
     chatStoreMocks.getRunById.mockReturnValue({
       id: 'run-1',
       sessionId: 'session-2',
@@ -74,8 +85,8 @@ describe('chatRunService', () => {
       updatedAt: 1
     });
 
-    expect(getRunTraceForActiveAgent({ runId: 'run-1' })).toBeNull();
-    expect(chatStoreMocks.getRunTrace).not.toHaveBeenCalled();
+    getRunTraceForActiveAgent({runId:'run-1'});
+    expect(chatStoreMocks.getRunTrace).toHaveBeenCalledWith({runId:'run-1'});
   });
 
   it('loads global pending approval through the approval record', () => {

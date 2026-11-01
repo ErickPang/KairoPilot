@@ -34,17 +34,10 @@ const PageNumberSchema = createPositiveIntegerInputSchema(100000);
 const RunQueryPageSizeSchema = createPositiveIntegerInputSchema(100);
 const RunTracePageSizeSchema = createPositiveIntegerInputSchema(50);
 const AuditLogPageSizeSchema = createPositiveIntegerInputSchema(1000);
-const LegacyAuditLogPageSizeSchema = z.union([z.number(), z.string()]).transform((value) => {
-  const numberValue = Number(value);
-  if (!Number.isFinite(numberValue) || numberValue < 1) {
-    return undefined;
-  }
-  return Math.min(Math.floor(numberValue), 1000);
-});
-
 export const SessionIdInputSchema = NonEmptyStringSchema.max(200);
 
 export const CreateSessionTitleInputSchema = z.string().trim().max(300).optional();
+export const CreateSessionInputSchema = z.union([CreateSessionTitleInputSchema, z.object({ title: CreateSessionTitleInputSchema, projectId: NonEmptyStringSchema.max(200).optional() }).strict()]);
 
 export const UpdateSessionTitleInputSchema = z.object({
   sessionId: SessionIdInputSchema,
@@ -60,6 +53,10 @@ export const RetryStepInputSchema = RunIdInputSchema.extend({
 });
 
 export const RunQueryInputSchema = z.object({
+  projectId: NonEmptyStringSchema.max(200).optional(),
+  model: NonEmptyStringSchema.max(500).optional(),
+  startTime:z.number().finite().nonnegative().optional(),
+  endTime:z.number().finite().nonnegative().optional(),
   page: PageNumberSchema,
   pageSize: RunQueryPageSizeSchema,
   search: SearchTextSchema,
@@ -78,12 +75,10 @@ const RunTraceObjectInputSchema = z.object({
   includeContextSummary: z.boolean().optional()
 }).strict();
 
-export const RunTraceInputSchema = z.union([
-  NonEmptyStringSchema.max(200),
-  RunTraceObjectInputSchema
-]).transform((value) => (typeof value === 'string' ? { runId: value } : value));
+export const RunTraceInputSchema = RunTraceObjectInputSchema;
 
 export const MonitoringTokenQueryInputSchema = z.object({
+  projectId: NonEmptyStringSchema.max(200).optional(),
   agentId: NonEmptyStringSchema.max(200).optional(),
   page: PageNumberSchema,
   pageSize: RunQueryPageSizeSchema,
@@ -95,9 +90,7 @@ export const MonitoringTokenQueryInputSchema = z.object({
   endTime: z.number().finite().nonnegative().optional()
 }).strict().optional().default({});
 
-export const AuditLogQueryInputSchema = z.union([
-  LegacyAuditLogPageSizeSchema.transform((pageSize) => ({ page: 1, pageSize })),
-  z.object({
+export const AuditLogQueryInputSchema = z.object({
     page: PageNumberSchema,
     pageSize: AuditLogPageSizeSchema,
     search: SearchTextSchema,
@@ -109,8 +102,7 @@ export const AuditLogQueryInputSchema = z.union([
     stepId: NonEmptyStringSchema.max(200).optional(),
     startTime: z.number().finite().nonnegative().optional(),
     endTime: z.number().finite().nonnegative().optional()
-  }).strict()
-]).optional().default({});
+  }).strict().optional().default({});
 
 export const ApprovalResponseInputSchema = z.object({
   id: NonEmptyStringSchema.max(200),
@@ -163,3 +155,10 @@ export const OllamaPullInputSchema = z.object({
   baseUrl: LocalOrHttpUrlSchema.optional(),
   modelName: NonEmptyStringSchema.max(200).regex(/^[A-Za-z0-9._:/-]+$/, 'Invalid model name.')
 });
+
+export const OllamaDeleteModelSchema = z.object({
+  baseUrl: LocalOrHttpUrlSchema.optional(),
+  modelName: NonEmptyStringSchema.max(200)
+});
+
+export const OllamaListModelsSchema = LocalOrHttpUrlSchema.optional();

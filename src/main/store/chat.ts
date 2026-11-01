@@ -1,13 +1,15 @@
+import {readKairoPilotConfig} from './configRepository';
+import {recoverTaskQueue} from './taskQueue';
 import { ChatMessage } from '../core/llm/types';
 import { v4 as uuidv4 } from 'uuid';
 import Database from 'better-sqlite3';
 import path from 'path';
 import { app } from 'electron';
 import fs from 'fs';
-import { getAgents } from './config';
 import { queryAuditLogs } from './audit';
 import { buildRunTraceAggregations, normalizeRunTraceQuery, paginateRunSteps } from './chat_trace_utils';
 import { initializeChatDatabase } from './chatDb';
+import type { RunExecutionContext, SessionProjectContext } from '../../shared/contracts';
 import {
   isVisibleSessionMessage,
   mapMessageRowToChatMessage,
@@ -16,9 +18,7 @@ import {
 import { buildAgentStats, mapMonitoringRows } from './chatAnalyticsUtils';
 import {
   deleteSessionAttachmentFiles,
-  deleteWorkspaceAttachmentUploads,
-  getAttachmentById,
-  prepareChatAttachments
+  getAttachmentById
 } from './attachments';
 import {
   buildMonitoringWhereClause,
@@ -30,6 +30,8 @@ import {
   mapRunRowToSummary,
   mapRunStepRow,
   mapSessionRowToSummary,
+  getSessionTitle,
+  SESSION_TITLE_PREVIEW_SQL,
   mapToolCallRecordRow,
   parseJsonValue
 } from './chatStoreUtils';
@@ -54,7 +56,7 @@ import type {
   ToolCallRecord
 } from '../../shared/contracts';
 
-export interface Session {
+export interface Session extends SessionProjectContext {
   id: string;
   title: string;
   agentId?: string;
@@ -63,16 +65,10 @@ export interface Session {
   updatedAt: number;
 }
 
-export interface SessionSummary {
-  id: string;
-  title: string;
-  agentId?: string;
-  createdAt: number;
-  updatedAt: number;
-}
+export type SessionSummary = import('../../shared/contracts').SessionSummary;
 
 let db: Database.Database | null = null;
-const DEFAULT_AGENT_ID = 'mainAgent';
+const DEFAULT_AGENT_ID = 'workbench';
 const MAX_RUN_QUERY_PAGE_SIZE = 100;
 const RUN_TERMINAL_STATUSES = new Set<RunStatus>(['completed', 'failed', 'cancelled']);
 const ALLOWED_RUN_STATUS_TRANSITIONS: Record<RunStatus, RunStatus[]> = {
@@ -102,17 +98,6 @@ function assertRunStatusTransition(currentStatus: RunStatus, nextStatus: RunStat
   }
 }
 
-function getAgentWorkspaceById(agentId?: string | null) {
-  const normalizedAgentId = normalizeAgentId(agentId);
-  return getAgents().find((agent) => normalizeAgentId(agent.id) === normalizedAgentId)?.workspace || null;
-}
-
-function getAllAgentWorkspaces() {
-  return [...new Set(getAgents()
-    .map((agent) => agent.workspace)
-    .filter((workspace): workspace is string => typeof workspace === 'string' && workspace.trim().length > 0))];
-}
-
 function cleanupSessionAttachments(workspace: string | null, sessionIds: string[]) {
   if (!workspace || sessionIds.length === 0) {
     return;
@@ -124,22 +109,10 @@ function cleanupSessionAttachments(workspace: string | null, sessionIds: string[
     });
 }
 
-function cleanupWorkspaceAttachments(workspaces: string[]) {
-  if (workspaces.length === 0) {
-    return;
-  }
-
-  void Promise.all(workspaces.map((workspace) => deleteWorkspaceAttachmentUploads(workspace)))
-    .catch((error) => {
-      console.warn('[DB] Failed to cleanup workspace attachment files:', error);
-    });
-}
-
-
 function insertMessageAttachments(
   database: Database.Database,
   sessionId: string,
-  messageId: string,
+  messageId: string | null,
   attachments: ChatAttachment[] | undefined
 ) {
   if (!attachments || attachments.length === 0) {
@@ -184,7 +157,7 @@ function insertMessageAttachments(
 }
 
 // Initialize Database
-function getDb(): Database.Database {
+export function getDb(): Database.Database {
   if (!db) {
     const userDataPath = app.getPath('userData');
     const dbPath = path.join(userDataPath, 'kairopilot.db');
@@ -198,10 +171,14 @@ function getDb(): Database.Database {
     db = new Database(dbPath);
     db.pragma('journal_mode = WAL'); // Enable Write-Ahead Logging for performance
     db.pragma('foreign_keys = ON');
-    initializeChatDatabase(db, {
-      defaultAgentId: DEFAULT_AGENT_ID,
-      getActiveSessionStateKey
-    });
+    try {
+      initializeChatDatabase(db);
+      recoverTaskQueue(db);
+    } catch (error) {
+      db.close();
+      db = null;
+      throw error;
+    }
   }
   return db;
 }
@@ -210,56 +187,8 @@ export function getSessionAttachmentById(attachmentId: string, sessionId?: strin
   return getAttachmentById(getDb(), attachmentId, sessionId);
 }
 
-function extractLegacyAttachmentPaths(content: string) {
-  const paths: string[] = [];
-  const contextFileRegex = /^Context file:\s*(.+)$/gm;
-  let contextMatch: RegExpExecArray | null;
-  while ((contextMatch = contextFileRegex.exec(content)) !== null) {
-    const candidate = contextMatch[1]?.trim();
-    if (candidate) {
-      paths.push(candidate.replace(/^file:\/\//, ''));
-    }
-  }
-
-  const markdownImageRegex = /!\[[^\]]*\]\((kairopilot:\/\/[^)]+|file:\/\/[^)]+|\/[^)\s]+)\)/g;
-  let imageMatch: RegExpExecArray | null;
-  while ((imageMatch = markdownImageRegex.exec(content)) !== null) {
-    const raw = imageMatch[1]?.trim();
-    if (!raw) {
-      continue;
-    }
-    if (raw.startsWith('kairopilot://')) {
-      paths.push(decodeURIComponent(raw.slice('kairopilot://'.length)));
-    } else if (raw.startsWith('file://')) {
-      paths.push(decodeURIComponent(raw.slice('file://'.length)));
-    } else {
-      paths.push(raw);
-    }
-  }
-
-  return [...new Set(paths)].filter((item) => path.isAbsolute(item) && fs.existsSync(item));
-}
-
-async function migrateLegacyMessageAttachments(params: {
-  database: Database.Database;
-  sessionId: string;
-  messageId: string;
-  workspace: string;
-  content: string;
-}) {
-  const legacyPaths = extractLegacyAttachmentPaths(params.content);
-  if (legacyPaths.length === 0) {
-    return [];
-  }
-
-  const attachments = await prepareChatAttachments({
-    sessionId: params.sessionId,
-    workspace: params.workspace,
-    files: legacyPaths.map((legacyPath) => ({ path: legacyPath }))
-  });
-  insertMessageAttachments(params.database, params.sessionId, params.messageId, attachments);
-  params.database.prepare('UPDATE messages SET attachments = ? WHERE id = ?').run(JSON.stringify(attachments), params.messageId);
-  return attachments;
+export function registerPreparedAttachments(sessionId: string, attachments: ChatAttachment[]) {
+  insertMessageAttachments(getDb(), sessionId, null, attachments);
 }
 
 function getSessionAgentId(sessionId: string): string | null {
@@ -268,25 +197,13 @@ function getSessionAgentId(sessionId: string): string | null {
   return row?.agent_id || null;
 }
 
-function getLatestSessionSummary(agentId?: string): SessionSummary | null {
-  const db = getDb();
-  const normalizedAgentId = normalizeAgentId(agentId);
-  const row = db.prepare(
-    'SELECT id, title, agent_id, created_at, updated_at FROM sessions WHERE agent_id = ? ORDER BY updated_at DESC LIMIT 1'
-  ).get(normalizedAgentId) as {
-    id: string;
-    title: string;
-    agent_id: string;
-    created_at: number;
-    updated_at: number;
-  } | undefined;
-
-  return row ? mapSessionRowToSummary(row) : null;
-}
-
 export function listSessions(agentId?: string): SessionSummary[] {
   const db = getDb();
-  let query = 'SELECT id, title, agent_id, created_at, updated_at FROM sessions';
+  let query = `SELECT id, title, agent_id, created_at, updated_at, project_id, execution_root, archived_at, activity_version, read_version,
+    ${SESSION_TITLE_PREVIEW_SQL} AS first_user_content,
+    (SELECT status FROM runs WHERE session_id = sessions.id AND agent_id = sessions.agent_id
+      ORDER BY updated_at DESC, created_at DESC, rowid DESC LIMIT 1) AS run_status
+    FROM sessions`;
   const params: unknown[] = [];
   
   if (agentId) {
@@ -307,28 +224,24 @@ export function listSessions(agentId?: string): SessionSummary[] {
   return sessions.map(mapSessionRowToSummary);
 }
 
-export function getSessions(agentId?: string): Session[] {
-  return listSessions(agentId)
-    .map((session) => getSessionById(session.id))
-    .filter((session): session is Session => session !== null);
-}
-
-export function createSession(title: string = 'New Chat', agentId?: string): Session {
+export function createSession(title: string = 'New Chat', agentId?: string, context: SessionProjectContext = {}): Session {
   const db = getDb();
   const normalizedAgentId = normalizeAgentId(agentId);
   const newSession: Session = {
     id: uuidv4(),
     title,
     agentId: normalizedAgentId,
+    ...context,
     messages: [],
     createdAt: Date.now(),
     updatedAt: Date.now(),
   };
 
-  db.prepare('INSERT INTO sessions (id, title, agent_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)').run(
-    newSession.id, newSession.title, newSession.agentId || null, newSession.createdAt, newSession.updatedAt
+  db.prepare('INSERT INTO sessions (id, title, agent_id, created_at, updated_at, project_id, execution_root) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
+    newSession.id, newSession.title, newSession.agentId || null, newSession.createdAt, newSession.updatedAt, context.projectId || null, context.executionRoot || null
   );
   
+  if (context.executionSettings) db.prepare('UPDATE sessions SET execution_settings=? WHERE id=?').run(JSON.stringify(context.executionSettings),newSession.id);
   setActiveSessionId(newSession.id, normalizedAgentId);
   return newSession;
 }
@@ -341,70 +254,25 @@ export function getActiveSession(agentId?: string): Session | null {
   return getSessionById(row.value);
 }
 
-export function ensureActiveSession(agentId?: string, title: string = 'New Chat'): Session {
-  const normalizedAgentId = normalizeAgentId(agentId);
-  const activeSession = getActiveSession(normalizedAgentId);
-  if (activeSession?.agentId === normalizedAgentId) {
-    return activeSession;
-  }
-
-  const latestSession = getLatestSessionSummary(normalizedAgentId);
-  if (latestSession) {
-    setActiveSessionId(latestSession.id, normalizedAgentId);
-    const hydratedSession = getSessionById(latestSession.id);
-    if (hydratedSession) {
-      return hydratedSession;
-    }
-  }
-
-  return createSession(title, normalizedAgentId);
-}
-
 export function getSessionById(sessionId: string): Session | null {
   const db = getDb();
   const sessionRow = db.prepare('SELECT * FROM sessions WHERE id = ?').get(sessionId) as { id: string; title: string; agent_id: string; created_at: number; updated_at: number } | undefined;
   if (!sessionRow) return null;
 
-  const messages = db.prepare('SELECT role, content, timestamp, name, tool_call_id, tool_calls, attachments, usage, model FROM messages WHERE session_id = ? ORDER BY timestamp ASC').all(sessionId) as { role: ChatMessage['role']; content: string; timestamp: number; name?: string; tool_call_id?: string; tool_calls?: string; attachments?: string; usage?: string; model?: string }[];
+  const messages = db.prepare('SELECT role, content, timestamp, name, tool_call_id, tool_calls, attachments, context_refs, usage, model FROM messages WHERE session_id = ? ORDER BY timestamp ASC, rowid ASC').all(sessionId) as { role: ChatMessage['role']; content: string; timestamp: number; name?: string; tool_call_id?: string; tool_calls?: string; attachments?: string; context_refs?: string; usage?: string; model?: string }[];
 
   return {
-    ...mapSessionRowToSummary(sessionRow),
+    ...mapSessionRowToSummary({ ...sessionRow, first_user_content: messages.find(message => message.role === 'user')?.content }),
     messages: messages
       .filter((message) => isVisibleSessionMessage(message))
       .map(mapMessageRowToChatMessage)
   };
 }
 
-export async function migrateLegacyAttachmentsForSession(sessionId: string, workspace: string) {
-  const db = getDb();
-  const rows = db.prepare(`
-    SELECT id, content, attachments
-    FROM messages
-    WHERE session_id = ? AND role = 'user'
-    ORDER BY timestamp ASC
-  `).all(sessionId) as Array<{ id: string; content: string; attachments?: string | null }>;
-
-  let migrated = 0;
-  for (const row of rows) {
-    if (row.attachments && row.attachments.trim() && row.attachments.trim() !== '[]') {
-      continue;
-    }
-    const attachments = await migrateLegacyMessageAttachments({
-      database: db,
-      sessionId,
-      messageId: row.id,
-      workspace,
-      content: row.content || ''
-    });
-    migrated += attachments.length;
-  }
-  return migrated;
-}
-
 export function setActiveSessionId(sessionId: string | null, agentId?: string) {
   const db = getDb();
   const resolvedAgentId = sessionId
-    ? getSessionAgentId(sessionId) || agentId
+    ? agentId === 'workbench' ? agentId : getSessionAgentId(sessionId) || agentId
     : agentId;
   const stateKey = getActiveSessionStateKey(resolvedAgentId);
 
@@ -422,9 +290,15 @@ export function updateSessionMessages(sessionId: string, messages: ChatMessage[]
   const transaction = db.transaction(() => {
     const now = Date.now();
     db.prepare('UPDATE sessions SET updated_at = ? WHERE id = ?').run(now, sessionId);
+    const firstUserMessage = visibleMessages.find(message => message.role === 'user');
+    if (firstUserMessage?.content?.trim()) {
+      db.prepare("UPDATE sessions SET title = ? WHERE id = ? AND (title = 'New Chat' OR trim(title) = '')")
+        .run(getSessionTitle('New Chat', firstUserMessage.content), sessionId);
+    }
+
 
     const existingRows = db.prepare(
-      'SELECT role, content, timestamp, name, tool_call_id, tool_calls, attachments, usage, model FROM messages WHERE session_id = ? ORDER BY timestamp ASC'
+      'SELECT role, content, timestamp, name, tool_call_id, tool_calls, attachments, context_refs, usage, model FROM messages WHERE session_id = ? ORDER BY timestamp ASC, rowid ASC'
     ).all(sessionId) as Array<{
       role: ChatMessage['role'];
       content: string;
@@ -433,12 +307,13 @@ export function updateSessionMessages(sessionId: string, messages: ChatMessage[]
       tool_call_id?: string;
       tool_calls?: string;
       attachments?: string;
+      context_refs?: string;
       usage?: string;
       model?: string;
     }>;
     const existingMessages = existingRows.map(mapMessageRowToChatMessage);
     const sharedPrefixLength = getSharedMessagePrefixLength(existingMessages, visibleMessages);
-    const insert = db.prepare('INSERT INTO messages (id, session_id, role, content, timestamp, name, tool_call_id, tool_calls, attachments, usage, model) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+    const insert = db.prepare('INSERT INTO messages (id, session_id, role, content, timestamp, name, tool_call_id, tool_calls, attachments, context_refs, usage, model) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
 
     if (sharedPrefixLength === existingMessages.length && visibleMessages.length >= existingMessages.length) {
       for (const msg of visibleMessages.slice(sharedPrefixLength)) {
@@ -453,6 +328,7 @@ export function updateSessionMessages(sessionId: string, messages: ChatMessage[]
           msg.tool_call_id || null,
           msg.tool_calls ? JSON.stringify(msg.tool_calls) : null,
           msg.attachments ? JSON.stringify(msg.attachments) : null,
+          msg.references ? JSON.stringify(msg.references) : null,
           msg.usage ? JSON.stringify(msg.usage) : null,
           msg.model || null
         );
@@ -461,8 +337,9 @@ export function updateSessionMessages(sessionId: string, messages: ChatMessage[]
       return;
     }
 
+    db.prepare('UPDATE sessions SET message_generation = message_generation + 1 WHERE id = ?').run(sessionId);
     db.prepare('DELETE FROM messages WHERE session_id = ?').run(sessionId);
-    db.prepare('DELETE FROM message_attachments WHERE session_id = ?').run(sessionId);
+    db.prepare('DELETE FROM message_attachments WHERE session_id = ? AND message_id IS NOT NULL').run(sessionId);
 
     for (const msg of visibleMessages) {
       const messageId = uuidv4();
@@ -476,6 +353,7 @@ export function updateSessionMessages(sessionId: string, messages: ChatMessage[]
         msg.tool_call_id || null,
         msg.tool_calls ? JSON.stringify(msg.tool_calls) : null,
         msg.attachments ? JSON.stringify(msg.attachments) : null,
+          msg.references ? JSON.stringify(msg.references) : null,
         msg.usage ? JSON.stringify(msg.usage) : null,
         msg.model || null
       );
@@ -498,7 +376,7 @@ export function deleteSession(sessionId: string) {
     const sessionRow = db.prepare('SELECT agent_id FROM sessions WHERE id = ?').get(sessionId) as { agent_id: string | null } | undefined;
     const sessionAgentId = normalizeAgentId(sessionRow?.agent_id);
     const stateKey = getActiveSessionStateKey(sessionAgentId);
-    attachmentWorkspace = getAgentWorkspaceById(sessionAgentId);
+    attachmentWorkspace = readKairoPilotConfig().workbench!.managementRoot;
 
     // Cascade delete handles messages, but we need to check active session
     db.prepare('DELETE FROM sessions WHERE id = ?').run(sessionId);
@@ -518,40 +396,6 @@ export function deleteSession(sessionId: string) {
   cleanupSessionAttachments(attachmentWorkspace, [sessionId]);
 }
 
-export function deleteSessionsByAgent(agentId: string) {
-  const db = getDb();
-  const normalizedAgentId = normalizeAgentId(agentId);
-  const stateKey = getActiveSessionStateKey(normalizedAgentId);
-  const sessionRows = db.prepare('SELECT id FROM sessions WHERE agent_id = ?').all(normalizedAgentId) as Array<{ id: string }>;
-  const sessionIds = sessionRows.map((row) => row.id);
-  const attachmentWorkspace = getAgentWorkspaceById(normalizedAgentId);
-
-  const transaction = db.transaction(() => {
-    const deleteMessages = db.prepare('DELETE FROM messages WHERE session_id = ?');
-    for (const sessionId of sessionIds) {
-      deleteMessages.run(sessionId);
-    }
-    db.prepare('DELETE FROM sessions WHERE agent_id = ?').run(normalizedAgentId);
-    db.prepare('DELETE FROM app_state WHERE key = ?').run(stateKey);
-  });
-
-  transaction();
-  cleanupSessionAttachments(attachmentWorkspace, sessionIds);
-  return sessionIds;
-}
-
-export function clearAllSessions() {
-  const db = getDb();
-  const attachmentWorkspaces = getAllAgentWorkspaces();
-  const transaction = db.transaction(() => {
-    db.prepare('DELETE FROM sessions').run(); // Cascade deletes messages
-    db.prepare("DELETE FROM app_state WHERE key LIKE 'active_session_id:%'").run();
-    db.prepare('DELETE FROM app_state WHERE key = ?').run('active_session_id');
-  });
-  transaction();
-  cleanupWorkspaceAttachments(attachmentWorkspaces);
-}
-
 export function getAgentStats(): AgentStats[] {
   const db = getDb();
   const sessions = db.prepare('SELECT id, agent_id FROM sessions').all() as {id: string, agent_id: string}[];
@@ -568,7 +412,7 @@ export function getAgentStats(): AgentStats[] {
     run_id: string,
     status: ToolCallRecord['status']
   }[];
-  return buildAgentStats({
+  const stats=buildAgentStats({
     defaultAgentId: DEFAULT_AGENT_ID,
     sessions,
     messages,
@@ -576,6 +420,9 @@ export function getAgentStats(): AgentStats[] {
     approvals,
     toolCalls
   });
+  const auxiliary=db.prepare('SELECT sessions.agent_id,auxiliary_usage.usage FROM auxiliary_usage JOIN sessions ON sessions.id=auxiliary_usage.session_id').all() as {agent_id:string;usage:string}[];
+  for(const row of auxiliary){const stat=stats.find(item=>item.agentId===row.agent_id);if(!stat)continue;const usage=JSON.parse(row.usage);stat.promptTokens+=usage.prompt_tokens;stat.completionTokens+=usage.completion_tokens;stat.totalTokens+=usage.total_tokens;}
+  return stats;
 }
 
 function getNextRunStepIndex(database: Database.Database, runId: string) {
@@ -585,15 +432,15 @@ function getNextRunStepIndex(database: Database.Database, runId: string) {
   return (row?.max_step_index ?? -1) + 1;
 }
 
-export function createRun(sessionId: string, agentId: string, userInput: string, goal?: string): RunSummary {
+export function createRun(sessionId: string, agentId: string, userInput: string, goal?: string, executionContext?: RunExecutionContext): RunSummary {
   const database = getDb();
   const now = Date.now();
   const id = uuidv4();
   database.prepare(`
     INSERT INTO runs (
-      id, session_id, agent_id, goal, user_input, status, created_at, updated_at, started_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(id, sessionId, normalizeAgentId(agentId), goal || userInput, userInput, 'running', now, now, now);
+      id, session_id, agent_id, goal, user_input, status, created_at, updated_at, started_at, execution_context
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(id, sessionId, normalizeAgentId(agentId), goal || userInput, userInput, 'running', now, now, now, executionContext ? JSON.stringify(executionContext) : null);
   database.prepare('UPDATE sessions SET updated_at = ? WHERE id = ?').run(now, sessionId);
   return getRunById(id)!;
 }
@@ -614,7 +461,8 @@ export function getRunById(runId: string): RunSummary | null {
       created_at,
       updated_at,
       started_at,
-      completed_at
+      completed_at,
+      execution_context
     FROM runs
     WHERE id = ?
   `).get(runId) as {
@@ -652,7 +500,8 @@ export function getLatestRun(sessionId: string): RunSummary | null {
       created_at,
       updated_at,
       started_at,
-      completed_at
+      completed_at,
+      execution_context
     FROM runs
     WHERE session_id = ?
     ORDER BY updated_at DESC, created_at DESC
@@ -674,6 +523,24 @@ export function getLatestRun(sessionId: string): RunSummary | null {
   } | undefined;
 
   return row ? mapRunRowToSummary(row) : null;
+}
+
+export const RESTART_INTERRUPTED_ERROR = 'RUN_INTERRUPTED_BY_RESTART: Previous execution was interrupted. Inspect files and external processes before starting a new run; no operation was rolled back.';
+
+export function recoverInterruptedRuns(): number {
+  const database = getDb();
+  return database.transaction(() => {
+    const runs = database.prepare("SELECT id, session_id FROM runs WHERE status = 'running'").all() as Array<{ id: string; session_id: string }>;
+    const now = Date.now();
+    for (const run of runs) {
+      database.prepare("UPDATE runs SET status = 'failed', error = ?, waiting_approval_id = NULL, completed_at = ?, updated_at = ? WHERE id = ? AND status = 'running'").run(RESTART_INTERRUPTED_ERROR, now, now, run.id);
+      database.prepare("UPDATE run_steps SET status = 'failed', error = ?, updated_at = ? WHERE run_id = ? AND status IN ('running', 'pending')").run(RESTART_INTERRUPTED_ERROR, now, run.id);
+      database.prepare("UPDATE tool_call_records SET status = 'failed', error = ?, updated_at = ? WHERE run_id = ? AND status IN ('running', 'pending')").run(RESTART_INTERRUPTED_ERROR, now, run.id);
+      database.prepare("UPDATE approval_records SET status = 'denied', resolved_at = ?, updated_at = ? WHERE run_id = ? AND status = 'pending'").run(now, now, run.id);
+      database.prepare('UPDATE sessions SET updated_at = ? WHERE id = ?').run(now, run.session_id);
+    }
+    return runs.length;
+  })();
 }
 
 export function queryRuns(query: RunQuery = {}): RunQueryResult {
@@ -706,7 +573,8 @@ export function queryRuns(query: RunQuery = {}): RunQueryResult {
       created_at,
       updated_at,
       started_at,
-      completed_at
+      completed_at,
+      execution_context
     FROM runs
     ${whereClause}
     ORDER BY updated_at DESC, created_at DESC
@@ -997,6 +865,14 @@ export function getLatestRunSteps(sessionId: string): RunStep[] {
   return getRunSteps(latestRun.id);
 }
 
+export function getRetryableRunStepIds(runId: string): string[] {
+  const rows = getDb().prepare(`
+    SELECT DISTINCT step_id FROM context_snapshots
+    WHERE run_id = ? AND step_id IS NOT NULL
+  `).all(runId) as Array<{ step_id: string }>;
+  return rows.map((row) => row.step_id);
+}
+
 export function createToolCallRecord(runId: string, stepId: string | null, toolName: string, args: unknown) {
   const database = getDb();
   const now = Date.now();
@@ -1139,7 +1015,7 @@ export function getApprovalRecord(approvalId: string): ApprovalRecord | null {
     session_id: string | null;
     tool_name: string;
     args: string;
-    status: 'pending' | 'approved' | 'denied';
+    status: 'pending' | 'approved' | 'denied' | 'invalidated';
     metadata: string | null;
     created_at: number;
     updated_at: number;
@@ -1212,7 +1088,7 @@ export function getPendingApproval(sessionId?: string): ApprovalRecord | null {
         session_id: string | null;
         tool_name: string;
         args: string;
-        status: 'pending' | 'approved' | 'denied';
+        status: 'pending' | 'approved' | 'denied' | 'invalidated';
         metadata: string | null;
         created_at: number;
         updated_at: number;
@@ -1246,7 +1122,7 @@ export function getApprovalRecords(runId: string): ApprovalRecord[] {
     session_id: string | null;
     tool_name: string;
     args: string;
-    status: 'pending' | 'approved' | 'denied';
+    status: 'pending' | 'approved' | 'denied' | 'invalidated';
     metadata: string | null;
     created_at: number;
     updated_at: number;
@@ -1424,7 +1300,8 @@ export function getTokenUsageDetails(query: MonitoringTokenQuery = {}): Monitori
   const { whereClause, params, normalizedAgentId } = buildMonitoringWhereClause(query);
   const totalRow = db.prepare(`
     SELECT COUNT(*) as count
-    FROM messages
+    FROM (SELECT id,session_id,role,content,timestamp,usage,tool_calls,model FROM messages
+      UNION ALL SELECT id,session_id,'assistant',purpose,timestamp,usage,NULL,model FROM auxiliary_usage) AS messages
     INNER JOIN sessions ON sessions.id = messages.session_id
     ${whereClause}
   `).get(...params) as { count: number };
@@ -1444,7 +1321,8 @@ export function getTokenUsageDetails(query: MonitoringTokenQuery = {}): Monitori
       messages.usage,
       messages.tool_calls,
       messages.model
-    FROM messages
+    FROM (SELECT id,session_id,role,content,timestamp,usage,tool_calls,model FROM messages
+      UNION ALL SELECT id,session_id,'assistant',purpose,timestamp,usage,NULL,model FROM auxiliary_usage) AS messages
     INNER JOIN sessions ON sessions.id = messages.session_id
     ${whereClause}
   `;
@@ -1479,9 +1357,8 @@ export function getTokenUsageDetails(query: MonitoringTokenQuery = {}): Monitori
     tool_calls: string | null;
     model: string | null;
   }>;
-  const agentModelMap = new Map(getAgents().map((agent) => [agent.id, agent.model || '']));
-  const items = mapMonitoringRows(rows, (agentId) => agentModelMap.get(agentId));
-  const aggregateItems = mapMonitoringRows(aggregateRows, (agentId) => agentModelMap.get(agentId));
+  const items = mapMonitoringRows(rows, () => undefined);
+  const aggregateItems = mapMonitoringRows(aggregateRows, () => undefined);
   const aggregations = aggregateItems.reduce((acc, item) => ({
     promptTokens: acc.promptTokens + item.promptTokens,
     completionTokens: acc.completionTokens + item.completionTokens,

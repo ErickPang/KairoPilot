@@ -1,10 +1,10 @@
-# AGENT.md
+# AGENTS.md
 
 ## 项目介绍
 KairoPilot 是一个面向本地工作流的桌面 AI Agent 工作台
 它将"聊天式 AI"升级为"可持续协作的本地 AI 操作环境"。核心差异化：
-- **多 Agent 隔离**：每个 Agent 拥有独立的模型绑定、权限策略、工作区与会话历史
-- **Prompt 文件系统**：通过 `KAIROPILOT.md` / `IDENTITY.md` / `USER.md` / `SOUL.md` / `MEMORY.md` 组织 Agent 行为、人格与长期上下文
+- **统一任务工作台**：按项目与任务组织工作；任务分别记录模型、执行策略、目录与上下文
+- **指令与记忆**：通过 `~/.kairopilot/AGENTS.md` 和项目 `AGENTS.md` 组织规则；记忆与任务背景独立装配
 - **桌面原生能力**：文件系统、Shell 命令、网络检索、系统监控等工具链
 - **安全可观测**：高风险操作可确认、关键工具调用可审计、Token消耗可监控
 
@@ -12,17 +12,16 @@ KairoPilot 是一个面向本地工作流的桌面 AI Agent 工作台
 
 | 类别 | 技术 |
 |------|------|
-| 框架 | Electron 30 |
-| 构建工具 | Vite 5 + vite-plugin-electron |
+| 框架 | Electron 45 |
+| 构建工具 | Vite 7 + vite-plugin-electron |
 | 前端 | React 18 + TypeScript 5 (strict 模式) |
 | 打包 | electron-builder（支持 macOS / Windows / Linux） |
-| 本地存储 | better-sqlite3 + lowdb + electron-store |
+| 本地存储 | better-sqlite3 13 (N-API) + JSON 配置 |
 | AI SDK | OpenAI SDK v6 |
-| 数据校验 | Zod 4 + zod-to-json-schema |
+| 数据校验 | Zod 4 |
 | Markdown | react-markdown + remark-gfm |
 | 图标 | lucide-react |
-| 定时调度 | node-schedule |
-| 测试 | Vitest 3 |
+| 测试 | Vitest 5 |
 | 代码检查 | ESLint 8 + @typescript-eslint + eslint-plugin-react-hooks |
 
 **架构模式：**
@@ -121,7 +120,7 @@ npm run postinstall  # 安装 Electron 原生依赖（postinstall 钩子）
 ### 测试文件约定
 
 - 与被测文件同名，后缀 `.test.ts` 或 `.spec.ts`，存放于**同一目录**
-- 测试文件被 `.gitignore` 排除，不提交到仓库（仅本地运行）
+- 与产品实现对应的回归测试纳入版本管理，CI 与本地使用同一套测试；临时验收数据与日志不提交
 
 ### 覆盖范围
 
@@ -138,9 +137,11 @@ npm run postinstall  # 安装 Electron 原生依赖（postinstall 钩子）
 ## 约束
 - 只修改与任务直接相关的文件。
 - 不要引入新依赖，除非用户明确同意。
+- 开始前要明确方案，避免反馈恢复修改。
 ### Always — 每次必须执行
 - 提交前lint必须通过,运行`npm run lint`
 - 提交前测试全部通过,运行`npm test`
+- 说明已完成任务和未完成任务，以及可能的影响范围。
 ### Never—绝对禁止
 - 提交 .env、密钥、Token、密码等敏感信息
 - 配置硬编码到源码中，如数据库连接字符串、API密钥等
@@ -158,7 +159,7 @@ npm run postinstall  # 安装 Electron 原生依赖（postinstall 钩子）
 ## git提交规范
 - 每个提交都必须包含一个清晰、简洁的提交信息，描述改动的内容和原因。
 - 提交信息应符合git提交信息规范，建议使用 [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) 格式。
-- 提交的文件按照.gitignore规则过滤，避免提交敏感信息、临时文件、测试文件。
+- 提交的文件按照.gitignore规则过滤，避免提交敏感信息、临时文件和测试产物；产品回归测试应随实现提交。
 
 ### 分支命名
 

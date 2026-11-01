@@ -38,8 +38,7 @@ export class RuntimeRunControl {
     }
 
     if (control.cancelRequested) {
-      control.cancelRequested = false;
-      this.controls.set(runId, control);
+      // Keep the signal until the engine persists its interrupted checkpoint.
       return {
         kind: 'cancel',
         reason: 'Run cancelled by user.'
@@ -47,8 +46,6 @@ export class RuntimeRunControl {
     }
 
     if (control.pauseRequested) {
-      control.pauseRequested = false;
-      this.controls.set(runId, control);
       return {
         kind: 'pause',
         reason: 'Run paused by user.'

@@ -8,6 +8,9 @@ import type { ContextAssemblyMetadata } from '../context/assembler';
 import type { ChatMessage, LLMProvider, LLMStreamEvent, LLMUsage, ToolDefinition } from '../llm/types';
 import type { LoadedSkillCapability } from './capabilityOrchestrator';
 import type { PendingToolCallSnapshot } from './approvalCoordinator';
+import { categorizeError, executeWithRetry } from './retryPolicy';
+import {assertRequestFits} from '../context/requestBudget';
+import {PLANNING_TOOLS} from '../../../shared/planningPolicy';
 
 export type RuntimeUpdate = RuntimeUpdateEvent;
 
@@ -32,6 +35,9 @@ export interface RuntimeChatOptions {
   runId?: string;
   maxIterations?: number;
   attachments?: ChatAttachment[];
+  references?: import('../../../shared/contracts').ContextReference[];
+  onAccepted?: () => void;
+  executionContext?: import('../../../shared/contracts').RunExecutionContext;
 }
 
 export interface RuntimeModelContext {
@@ -64,6 +70,7 @@ type RuntimeToolCallHandlerResult =
 interface ExecuteRunEngineParams {
   llm: LLMProvider;
   tools: ToolDefinition[];
+  getTools?: () => ToolDefinition[];
   runId: string;
   userInput: string;
   onUpdate?: (update: RuntimeUpdate) => void;
@@ -116,6 +123,7 @@ export async function executeRunEngine(params: ExecuteRunEngineParams): Promise<
 
     iterations += 1;
     latestContext = buildModelContext(runId, options?.sessionId);
+    const iterationTools=params.getTools?.()||tools;
     const context = latestContext.messages;
     const modelStep = createRunStep(runId, 'model_call', `模型推理 ${iterations}`, {
       status: 'running',
@@ -134,16 +142,48 @@ export async function executeRunEngine(params: ExecuteRunEngineParams): Promise<
       status: 'running'
     });
 
-    const modelCall = await executeModelCall({
-      llm,
-      context,
-      tools,
-      runId,
-      stepId: modelStep.id,
-      onUpdate,
-      emitUpdate,
-      shouldInterrupt
-    });
+    let modelCall: { message: ChatMessage; interrupted?: RuntimeInterruptSignal };
+    try {
+      modelCall = await executeModelCall({
+        llm,
+        context,
+        tools: iterationTools,
+        runId,
+        stepId: modelStep.id,
+        onUpdate,
+        emitUpdate,
+        shouldInterrupt
+      });
+    } catch (error) {
+      const category = categorizeError(error);
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      updateRunStep(modelStep.id, {
+        status: 'failed',
+        error: `模型调用致命错误 [${category}]: ${errorMsg}`,
+        output: {
+          errorCategory: category,
+          fatal: true
+        }
+      });
+      updateRun(runId, {
+        status: 'failed',
+        error: `模型调用失败 (${category}): ${errorMsg}`,
+        waitingApprovalId: null,
+        completedAt: Date.now()
+      });
+      emitUpdate(onUpdate, {
+        type: 'run-failed',
+        runId,
+        stepId: modelStep.id,
+        status: 'failed',
+        error: `模型调用失败 (${category}): ${errorMsg}`
+      });
+      return {
+        status: 'failed',
+        runId,
+        error: `模型调用致命错误 [${category}]: ${errorMsg}`
+      };
+    }
     if (modelCall.interrupted) {
       updateRunStep(modelStep.id, {
         status: modelCall.interrupted.kind === 'cancel' ? 'cancelled' : 'completed',
@@ -170,6 +210,16 @@ export async function executeRunEngine(params: ExecuteRunEngineParams): Promise<
       });
     }
     const response = modelCall.message;
+    if(options?.executionContext?.phase==='planning' && response.tool_calls?.some(call=>{
+      const name=(call.function as {name?:string}|undefined)?.name;
+      return !name||!PLANNING_TOOLS.has(name)||!iterationTools.some(tool=>tool.name===name);
+    })) {
+      const error='Planning permits only registered read-only investigation tools.';
+      updateRunStep(modelStep.id,{status:'failed',error});
+      updateRun(runId,{status:'failed',error,completedAt:Date.now()});
+      emitUpdate(onUpdate,{type:'run-failed',runId,stepId:modelStep.id,status:'failed',error});
+      return {status:'failed',runId,error};
+    }
     const postModelResponseInterrupt = shouldInterrupt?.();
     if (postModelResponseInterrupt) {
       updateRunStep(modelStep.id, {
@@ -277,16 +327,21 @@ export async function executeRunEngine(params: ExecuteRunEngineParams): Promise<
   }
 
   if (!finalResponse.trim()) {
-      finalResponse = await finalizeWithoutTools({
+    const finalPass = await finalizeWithoutTools({
       llm,
       runId,
-      context: latestContext?.messages ?? [],
+      context: buildModelContext(runId, options?.sessionId).messages,
       userInput,
       onUpdate,
       emitUpdate,
       pushHistory,
-      shouldBlockSensitiveDisclosure
+      shouldBlockSensitiveDisclosure,
+      shouldInterrupt
     });
+    if (finalPass.interrupted) {
+      return finalizeInterruptedRun({ runId, userInput, iterations, signal: finalPass.interrupted, onUpdate, emitUpdate, persistSnapshot, contextSummary: latestContext?.metadata });
+    }
+    finalResponse = finalPass.content;
   }
 
   const preCompleteInterrupt = shouldInterrupt?.();
@@ -363,20 +418,16 @@ async function executeModelCall(params: {
     emitUpdate,
     shouldInterrupt
   } = params;
+  const budget=assertRequestFits(context,tools,llm.getCapabilities?.().contextWindowTokens);
   const canStream = typeof llm.stream === 'function'
     && (typeof llm.getCapabilities !== 'function' || llm.getCapabilities().stream !== false);
 
-  if (!canStream || !llm.stream) {
-    return {
-      message: await llm.chat(context, tools)
-    };
-  }
-
-  let content = '';
-  let model = llm.config.model;
-  let usage: Partial<LLMUsage> | undefined;
   let interrupted: RuntimeInterruptSignal | undefined;
   const abortController = new AbortController();
+  const interruptPoller = shouldInterrupt ? setInterval(() => {
+    const signal = shouldInterrupt();
+    if (signal && !interrupted) { interrupted = signal; abortController.abort(); }
+  }, 100) : undefined;
   const toolCalls: Array<{
     id: string;
     type: 'function';
@@ -386,69 +437,127 @@ async function executeModelCall(params: {
     };
   }> = [];
 
-  const handleStreamEvent = (event: LLMStreamEvent) => {
-    if (interrupted) {
-      return;
-    }
-    model = event.model;
-
-    if (event.type === 'assistant_delta') {
-      content += event.delta;
-      emitUpdate(onUpdate, {
-        type: 'assistant-delta',
-        delta: event.delta,
-        content,
-        runId,
-        stepId,
-        status: 'running'
-      });
-    }
-
-    if (event.type === 'tool_call_delta') {
-      mergeToolCallDeltas(toolCalls, event.delta);
-    }
-
-    if (event.type === 'usage_delta') {
-      usage = {
-        ...usage,
-        ...event.usage
-      };
-    }
-
-    const signal = shouldInterrupt?.();
-    if (signal) {
-      interrupted = signal;
-      abortController.abort();
-    }
-  };
-
   try {
-    await llm.stream({
-      messages: context,
-      tools,
-      signal: abortController.signal
-    }, handleStreamEvent);
-  } catch (error) {
-    if (!interrupted) {
-      throw error;
-    }
-  }
+    const result = await executeWithRetry({
+      signal: abortController.signal,
+      streamFn: async (_attempt: number) => {
+        toolCalls.length = 0;
+        if (!canStream || !llm.stream) {
+          const msg = typeof llm.complete === 'function'
+            ? (await llm.complete({ messages: context, tools, signal: abortController.signal, generationConfig:{maxOutputTokens:budget.outputTokens} })).message
+            : await llm.chat(context, tools);
+          return {
+            content: msg.content || '',
+            toolCalls: (msg.tool_calls as Array<{
+              id: string;
+              type: 'function';
+              function: { name: string; arguments: string };
+            }>) ?? [],
+            model: msg.model || llm.config?.model || '',
+            usage: msg.usage
+          };
+        }
 
-  const normalizedUsage = usage
-    && typeof usage.prompt_tokens === 'number'
-    && typeof usage.completion_tokens === 'number'
-    && typeof usage.total_tokens === 'number'
-    ? usage as LLMUsage
-    : undefined;
+        let streamContent = '';
+        let streamModel = llm.config.model;
+        let streamUsage: Partial<LLMUsage> | undefined;
+        const handleStreamEvent = (event: LLMStreamEvent) => {
+          if (interrupted) {
+            return;
+          }
+          streamModel = event.model;
+
+          if (event.type === 'assistant_delta') {
+            streamContent += event.delta;
+            emitUpdate(onUpdate, {
+              type: 'assistant-delta',
+              delta: event.delta,
+              content: streamContent,
+              runId,
+              stepId,
+              status: 'running'
+            });
+          }
+
+          if (event.type === 'tool_call_delta') {
+            mergeToolCallDeltas(toolCalls, event.delta);
+          }
+
+          if (event.type === 'usage_delta') {
+            streamUsage = {
+              ...streamUsage,
+              ...event.usage
+            };
+          }
+
+          const signal = shouldInterrupt?.();
+          if (signal) {
+            interrupted = signal;
+            abortController.abort();
+          }
+        };
+
+        await llm.stream({
+          messages: context,
+          tools,
+          generationConfig:{maxOutputTokens:budget.outputTokens},
+          signal: abortController.signal
+        }, handleStreamEvent);
+
+        const normalizedStreamUsage = streamUsage
+          && typeof streamUsage.prompt_tokens === 'number'
+          && typeof streamUsage.completion_tokens === 'number'
+          && typeof streamUsage.total_tokens === 'number'
+          ? streamUsage as LLMUsage
+          : undefined;
+
+        return {
+          content: streamContent,
+          toolCalls: [...toolCalls],
+          model: streamModel,
+          usage: normalizedStreamUsage
+        };
+      },
+      onRetry: (attempt: number, _error: Error, delayMs: number) => {
+        emitUpdate(onUpdate, {
+          type: 'thinking',
+          content: `模型调用失败，第 ${attempt} 次重试 (${(delayMs / 1000).toFixed(1)}s)...`,
+          runId,
+          stepId,
+          status: 'running'
+        });
+      }
+    });
+
+    const finalUsage = result.usage
+      && typeof result.usage.prompt_tokens === 'number'
+      && typeof result.usage.completion_tokens === 'number'
+      && typeof result.usage.total_tokens === 'number'
+      ? result.usage as LLMUsage
+      : undefined;
+
+    return {
+      interrupted,
+      message: {
+        role: 'assistant',
+        content: result.content,
+        tool_calls: result.toolCalls.length > 0 ? result.toolCalls : undefined,
+        model: result.model,
+        usage: finalUsage,
+        timestamp: Date.now()
+      }
+    };
+  } catch (error) {
+    if (!interrupted) throw error;
+  } finally {
+    if (interruptPoller) clearInterval(interruptPoller);
+  }
 
   return {
     interrupted,
     message: {
       role: 'assistant',
-      content,
-      tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
-      model,
-      usage: normalizedUsage,
+      content: '',
       timestamp: Date.now()
     }
   };
@@ -563,6 +672,7 @@ async function finalizeWithoutTools(params: {
   emitUpdate: (onUpdate: ((update: RuntimeUpdate) => void) | undefined, update: RuntimeUpdate) => void;
   pushHistory: (message: ChatMessage) => void;
   shouldBlockSensitiveDisclosure: (userInput: string, assistantOutput: string) => boolean;
+  shouldInterrupt?: () => RuntimeInterruptSignal | null;
 }) {
   const {
     llm,
@@ -572,9 +682,11 @@ async function finalizeWithoutTools(params: {
     onUpdate,
     emitUpdate,
     pushHistory,
-    shouldBlockSensitiveDisclosure
+    shouldBlockSensitiveDisclosure,
+    shouldInterrupt
   } = params;
 
+  const step = createRunStep(runId, 'model_call', '汇总已有结果', { status: 'running' });
   try {
     emitUpdate(onUpdate, {
       type: 'thinking',
@@ -582,17 +694,22 @@ async function finalizeWithoutTools(params: {
       runId
     });
 
-    const finalPass = await llm.chat([
+    const finalPass = await executeModelCall({ llm, runId, stepId: step.id, tools: [], onUpdate, emitUpdate, shouldInterrupt, context: [
       ...context,
       {
         role: 'user',
         content: '请基于以上已有上下文和工具结果，直接给出最终答复，不要再调用任何工具。如果信息不足，也请明确说明已确认的结论与缺失的信息。'
       }
-    ]);
+    ] });
+    if (finalPass.interrupted) {
+      updateRunStep(step.id, { status: finalPass.interrupted.kind === 'cancel' ? 'cancelled' : 'completed', output: { interrupted: true } });
+      return { content: '', interrupted: finalPass.interrupted };
+    }
 
-    const content = (finalPass.content || '').trim();
+    const content = (finalPass.message.content || '').trim();
+    updateRunStep(step.id, { status: 'completed' });
     if (!content) {
-      return '';
+      return { content: '' };
     }
 
     const sanitizedContent = shouldBlockSensitiveDisclosure(userInput, content)
@@ -602,13 +719,14 @@ async function finalizeWithoutTools(params: {
     pushHistory({
       role: 'assistant',
       content: sanitizedContent,
-      model: finalPass.model,
-      usage: finalPass.usage,
+      model: finalPass.message.model,
+      usage: finalPass.message.usage,
       timestamp: Date.now()
     });
 
-    return sanitizedContent;
-  } catch {
-    return '';
+    return { content: sanitizedContent };
+  } catch (error) {
+    updateRunStep(step.id, { status: 'failed', error: error instanceof Error ? error.message : 'Model summary failed.' });
+    throw error;
   }
 }

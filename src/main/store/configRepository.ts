@@ -1,3 +1,5 @@
+import {readAgentsDirectory,writeAgentsFile} from '../core/instructions/agents';
+import {defaultAgentsInstructions} from './configPromptTemplates';
 import fs from 'fs';
 import path from 'path';
 import type { KairoPilotConfig } from '../../shared/contracts';
@@ -6,8 +8,8 @@ import { getConfigPath } from './configPaths';
 import {
   normalizeConfig,
   sanitizeConfigForStorage
-} from './configMigration';
-import { ensureAgentWorkspaceAndPrompt, stripAgentPromptFields } from './configWorkspace';
+} from './configNormalization';
+import { ensureWorkspaceDirectories, stripRuntimeInstructions } from './configWorkspace';
 import { writeConfigAtomically } from './configFileIO';
 
 export interface KairoPilotConfigLoadResult {
@@ -24,14 +26,18 @@ export function loadKairoPilotConfigFromDisk(configPath: string = getConfigPath(
   try {
     if (fs.existsSync(configPath)) {
       const data = fs.readFileSync(configPath, 'utf-8');
+      const raw = JSON.parse(data) as {version?:string;workbench?:{version?:number}};
+      if(raw.version!=='4.2.0'||raw.workbench?.version!==2)throw new Error('Unsupported configuration format. Use a fresh data directory.');
       return {
-        config: normalizeConfig(JSON.parse(data)),
+        config: normalizeConfig(raw),
+
         source: 'disk',
         shouldPersist: true
       };
     }
   } catch (error) {
-    console.error('Failed to load config:', error);
+    console.error('Failed to load config:', error instanceof Error ? error.name : 'Invalid config');
+    throw new Error('Unable to read configuration safely.');
   }
 
   return {
@@ -46,28 +52,18 @@ export function readKairoPilotConfig(configPath: string = getConfigPath()): Kair
 }
 
 export function ensureKairoPilotConfigWorkspaces(config: KairoPilotConfig): KairoPilotConfig {
-  config.agents.list.forEach(ensureAgentWorkspaceAndPrompt);
+  const workbench = config.workbench!;
+  ensureWorkspaceDirectories(workbench.managementRoot);
   return config;
 }
 
-export function persistKairoPilotConfigMigrations(config: KairoPilotConfig) {
-  saveKairoPilotConfig(config);
-}
-
 export function initializeKairoPilotConfig(): KairoPilotConfig {
-  const loaded = loadKairoPilotConfigFromDisk();
-  ensureKairoPilotConfigWorkspaces(loaded.config);
-  if (loaded.shouldPersist) {
-    persistKairoPilotConfigMigrations(loaded.config);
-  }
-  return loaded.config;
-}
-
-/**
- * @deprecated Use readKairoPilotConfig for side-effect-free reads or initializeKairoPilotConfig during app bootstrap.
- */
-export function getKairoPilotConfig(): KairoPilotConfig {
-  return initializeKairoPilotConfig();
+ const loaded=loadKairoPilotConfigFromDisk();
+ ensureKairoPilotConfigWorkspaces(loaded.config);
+ const instructionRoot=loaded.config.workbench!.instructionRoot!;
+ if(!readAgentsDirectory(instructionRoot,'global'))writeAgentsFile(instructionRoot,defaultAgentsInstructions());
+ if(loaded.shouldPersist)saveKairoPilotConfig(loaded.config);
+ return loaded.config;
 }
 
 export function saveKairoPilotConfig(config: KairoPilotConfig) {
@@ -78,7 +74,7 @@ export function saveKairoPilotConfig(config: KairoPilotConfig) {
       fs.mkdirSync(dir, { recursive: true });
     }
     const normalized = normalizeConfig(config);
-    const sanitized = stripAgentPromptFields(sanitizeConfigForStorage(normalized));
+    const sanitized = stripRuntimeInstructions(sanitizeConfigForStorage(normalized));
     writeConfigAtomically(configPath, JSON.stringify(sanitized, null, 2));
   } catch (error) {
     console.error('Failed to save config:', error);
@@ -90,4 +86,4 @@ export {
   normalizeConfig,
   redactKairoPilotConfigSecrets,
   redactWebSearchConfig
-} from './configMigration';
+} from './configNormalization';

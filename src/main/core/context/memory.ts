@@ -44,14 +44,15 @@ function readMarkdownDirectory(directoryPath: string) {
   }
 }
 
-function readTextFiles(directoryPath: string, extensions: string[], maxEntries: number) {
+function readTextFiles(directoryPath: string, extensions: string[], maxEntries: number, canRead?: (target: string) => boolean) {
+  if (canRead && !canRead(directoryPath)) return [];
   if (!fs.existsSync(directoryPath)) {
     return [];
   }
 
   try {
     return fs.readdirSync(directoryPath, { withFileTypes: true })
-      .filter((entry) => entry.isFile() && extensions.some((extension) => entry.name.toLowerCase().endsWith(extension)))
+      .filter((entry) => (!canRead || canRead(path.join(directoryPath, entry.name))) && entry.isFile() && extensions.some((extension) => entry.name.toLowerCase().endsWith(extension)))
       .sort((left, right) => left.name.localeCompare(right.name))
       .slice(0, maxEntries)
       .map((entry) => {
@@ -67,7 +68,8 @@ function readTextFiles(directoryPath: string, extensions: string[], maxEntries: 
   }
 }
 
-function collectFileTree(rootPath: string, maxEntries: number, depth = 2, prefix = ''): string[] {
+function collectFileTree(rootPath: string, maxEntries: number, depth = 2, prefix = '', canRead?: (target: string) => boolean): string[] {
+  if (canRead && !canRead(rootPath)) return [];
   if (!fs.existsSync(rootPath) || maxEntries <= 0) {
     return [];
   }
@@ -84,12 +86,13 @@ function collectFileTree(rootPath: string, maxEntries: number, depth = 2, prefix
 
     const lines: string[] = [];
     for (const entry of entries) {
+      if (canRead && !canRead(path.join(rootPath, entry.name))) continue;
       if (lines.length >= maxEntries) {
         break;
       }
       lines.push(`${prefix}${entry.isDirectory() ? '[dir]' : '[file]'} ${entry.name}`);
       if (entry.isDirectory() && depth > 0 && lines.length < maxEntries) {
-        const childLines = collectFileTree(path.join(rootPath, entry.name), maxEntries - lines.length, depth - 1, `${prefix}  `);
+        const childLines = collectFileTree(path.join(rootPath, entry.name), maxEntries - lines.length, depth - 1, `${prefix}  `, canRead);
         lines.push(...childLines);
       }
     }
@@ -99,14 +102,15 @@ function collectFileTree(rootPath: string, maxEntries: number, depth = 2, prefix
   }
 }
 
-function describeDirectory(directoryPath: string, maxEntries: number) {
+function describeDirectory(directoryPath: string, maxEntries: number, canRead?: (target: string) => boolean) {
+  if (canRead && !canRead(directoryPath)) return '';
   if (!fs.existsSync(directoryPath)) {
     return '';
   }
 
   try {
     const entries = fs.readdirSync(directoryPath, { withFileTypes: true })
-      .filter((entry) => !entry.name.startsWith('.'))
+      .filter((entry) => !entry.name.startsWith('.') && (!canRead || canRead(path.join(directoryPath, entry.name))))
       .sort((left, right) => left.name.localeCompare(right.name))
       .slice(0, maxEntries)
       .map((entry) => `${entry.isDirectory() ? '[dir]' : '[file]'} ${entry.name}`);
@@ -139,15 +143,6 @@ export function buildMemoryDigest(workspace: string, maxChars: number, episodicM
     sections.push(`<memory_notes_digest>\n${rendered}\n</memory_notes_digest>`);
   }
 
-  const promptNotes = readMarkdownDirectory(layout.promptsDir);
-  if (promptNotes.length > 0) {
-    const rendered = promptNotes
-      .slice(0, 6)
-      .map((entry) => `- ${entry.name}: ${trimText(entry.content, 260)}`)
-      .join('\n');
-    sections.push(`<workspace_prompt_digest>\n${rendered}\n</workspace_prompt_digest>`);
-  }
-
   if (episodicMemory.trim()) {
     sections.push(`<episodic_memory>\n${trimText(episodicMemory, 1400)}\n</episodic_memory>`);
   }
@@ -155,21 +150,20 @@ export function buildMemoryDigest(workspace: string, maxChars: number, episodicM
   return trimText(sections.join('\n\n'), maxChars);
 }
 
-export function buildWorkspaceRetrievalDigest(workspace: string, maxChars: number) {
+export function buildWorkspaceRetrievalDigest(workspace: string, maxChars: number, canRead?: (target: string) => boolean) {
+  if (canRead && !canRead(workspace)) return '';
   if (!workspace || maxChars <= 0) {
     return '';
   }
 
   const layout = getPromptWorkspaceLayout(workspace);
   const sections: string[] = [];
-  const rootListing = describeDirectory(layout.workspaceRoot, 18);
-  const taskListing = describeDirectory(layout.tasksDir, 8);
-  const artifactListing = describeDirectory(layout.artifactsDir, 8);
-  const fileTree = collectFileTree(layout.workspaceRoot, 28, 2).join('\n');
-  const docsIndex = readTextFiles(layout.promptsDir, ['.md', '.txt'], 6)
-    .concat(readTextFiles(layout.tasksDir, ['.md', '.txt'], 6))
-    .slice(0, 8);
-  const symbolIndex = readTextFiles(layout.workspaceRoot, ['.ts', '.tsx', '.js', '.jsx'], 8)
+  const rootListing = describeDirectory(layout.workspaceRoot, 18, canRead);
+  const taskListing = describeDirectory(layout.tasksDir, 8, canRead);
+  const artifactListing = describeDirectory(layout.artifactsDir, 8, canRead);
+  const fileTree = collectFileTree(layout.workspaceRoot, 28, 2, '', canRead).join('\n');
+  const docsIndex = readTextFiles(layout.tasksDir, ['.md', '.txt'], 6, canRead);
+  const symbolIndex = readTextFiles(layout.workspaceRoot, ['.ts', '.tsx', '.js', '.jsx'], 8, canRead)
     .map((entry) => {
       const symbols = entry.content
         .split('\n')

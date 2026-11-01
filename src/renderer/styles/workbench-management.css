@@ -1,0 +1,79 @@
+:root[data-theme] .workbench-app :is(button, input, select, textarea) { font-family: inherit; }
+:root[data-theme] .workbench-app button { transition: background-color 140ms ease, color 140ms ease, border-color 140ms ease; }
+:root[data-theme] .workbench-app :is(.main-content, .config-panel, .config-content, .config-content-standalone, .config-header, .config-detail-section, .config-detail-footer) {
+  background: var(--background);
+  color: var(--foreground);
+  box-shadow: none;
+  backdrop-filter: none;
+}
+:root[data-theme] .workbench-app .workspace-panel-main { overflow: auto; background: var(--background); }
+:root[data-theme] .workbench-app .main-content { padding: 24px 28px; min-width: 0; }
+:root[data-theme] .workbench-app .main-content-settings { padding: 0; }
+:root[data-theme] .workbench-app .settings-menu-item { min-height: 36px; padding: 8px 10px; border: 0; border-radius: var(--control-radius); justify-content: flex-start; font-size: 12px; background: transparent; color: var(--muted-fg); box-shadow: none; }
+:root[data-theme] .workbench-app .settings-menu-item.active,
+:root[data-theme] .workbench-app .settings-menu-item:hover { background: var(--sidebar-accent); color: var(--foreground); box-shadow: none; }
+:root[data-theme] .workbench-app :is(.config-card, .skill-card, .plugin-card):hover { transform: none; box-shadow: none; border-color: var(--border-muted); }
+:root[data-theme] .workbench-app :is(.config-card, .skill-card, .plugin-card)::after { display: none; }
+:root[data-theme] .workbench-app :is(.form-control, .custom-select-trigger, .custom-select-dropdown, .model-editor-select-menu, .model-switcher-menu) {
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--control-radius);
+  color: var(--foreground);
+  box-shadow: none;
+}
+:root[data-theme] .workbench-app .form-control { min-height: 34px; padding: 8px 10px; font-size: 13px; }
+:root[data-theme] .workbench-app textarea.form-control { line-height: 1.7; }
+:root[data-theme] .workbench-app .form-control:focus { border-color: var(--border-strong); box-shadow: 0 0 0 2px var(--ring); }
+:root[data-theme] .workbench-app :is(.btn, .btn-secondary, .btn-icon, .icon-btn, .close-btn) { border-radius: var(--control-radius); box-shadow: none; text-shadow: none; }
+:root[data-theme] .workbench-app .btn-primary { background: var(--primary); color: var(--primary-fg); border-color: var(--primary); }
+:root[data-theme] .workbench-app .btn-primary:hover:enabled { background: var(--primary-hover); }
+:root[data-theme] .workbench-app .btn-secondary { background: var(--surface-panel); color: var(--foreground); border-color: var(--border); }
+:root[data-theme] .workbench-app .btn-danger { background: var(--danger); color: var(--destructive-fg); border-color: var(--danger); }
+:root[data-theme] .workbench-app :is(.custom-select-option, .model-editor-select-option).is-selected { background: var(--surface-muted); color: var(--foreground); }
+:root[data-theme] .workbench-app :is(.workbench-results, .workbench-run-details) > h3 { font-size: 12px; margin: 24px 0 12px; }
+:root[data-theme] .workbench-app .diff-viewer { border: 1px solid var(--border-soft); border-radius: var(--control-radius); background: var(--background); }
+:root[data-theme] .workbench-app .diff-viewer-header { background: var(--surface-muted); padding: 10px; }
+:root[data-theme] .workbench-app .diff-viewer-mode-toggle { display: flex; gap: 4px; }
+:root[data-theme] .workbench-app .diff-mode-btn { color: var(--muted-fg); background: transparent; border: 0; padding: 4px 7px; }
+:root[data-theme] .workbench-app .diff-mode-btn.active { color: var(--primary-fg); background: var(--primary); }
+:root[data-theme] .workbench-app :is(.diff-stat-added, .diff-line-added .diff-line-prefix) { color: var(--success); }
+:root[data-theme] .workbench-app :is(.diff-stat-removed, .diff-line-removed .diff-line-prefix) { color: var(--danger); }
+:root[data-theme] .workbench-app .diff-line-added { background: rgba(var(--success-rgb), .09); }
+:root[data-theme] .workbench-app .diff-line-removed { background: rgba(var(--danger-rgb), .09); }
+:root[data-theme] .workbench-app .diff-hunk-header { color: var(--muted-fg); background: var(--surface-muted); font: 11px/1.8 ui-monospace, monospace; padding: 4px 8px; }
+:root[data-theme] .workbench-app .diff-line-num { color: var(--muted-fg); min-width: 28px; padding-inline: 5px; }
+:root[data-theme] .workbench-app .diff-line-content { padding-inline: 6px; }
+:root[data-theme] .workbench-app .diff-line-prefix { display: inline-block; min-width: 12px; }
+:root[data-theme] .workbench-app .workbench-evidence-diff .diff-line { font-size: 11px; line-height: 1.8; }
+@media (max-width: 1100px) {
+  :root[data-theme] .workbench-app .main-content { padding: 20px; }
+  :root[data-theme] .workbench-app .main-content-settings { padding: 0; }
+}
+:root[data-theme] .workbench-app .settings-sidebar.workbench-settings-navigation {
+  width: 248px;
+  flex: 0 0 248px;
+  min-height: 0;
+  padding: 0 12px 10px;
+  gap: 0;
+  background: var(--sidebar-bg);
+  border-right: 1px solid var(--border-soft);
+  overflow: hidden;
+}
+.settings-window-spacer { height: 64px; flex-shrink: 0; -webkit-app-region: drag; }
+:root[data-theme] .workbench-app .settings-back-button {
+  width: 100%; min-height: 36px; justify-content: flex-start; gap: 9px;
+  padding: 8px 10px; margin-bottom: 18px;
+  color: var(--foreground); background: var(--surface-muted); border: 0;
+}
+.workbench-settings-navigation .settings-sidebar-menu { flex: 1; min-height: 0; overflow-y: auto; padding: 0; gap: 20px; }
+.workbench-settings-navigation .settings-menu-group { display: flex; flex-direction: column; gap: 3px; }
+.workbench-settings-navigation .settings-menu-group h2 { margin: 0 10px 5px; color: var(--muted-fg); font-size: 11px; font-weight: 600; line-height: 1.7; }
+:root[data-theme] .workbench-app .workbench-settings-navigation .settings-menu-item { min-height: 38px; font-size: 13px; font-weight: 500; }
+.settings-sidebar-footer { display: flex; align-items: center; gap: 9px; padding: 14px 8px 6px; color: var(--muted-fg); font-size: 12px; flex-shrink: 0; }
+.settings-sidebar-footer span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.settings-sidebar-footer svg { flex-shrink: 0; }
+:root[data-theme] .workbench-app.is-settings-page .workspace-panel-main { flex: 1; min-width: 0; }
+:root[data-theme] .workbench-app.is-settings-page .config-page-title-main { flex: 1 1 auto; }
+@media (max-width: 1200px) {
+  :root[data-theme] .workbench-app .settings-sidebar.workbench-settings-navigation { width: 225px; flex-basis: 225px; }
+}
