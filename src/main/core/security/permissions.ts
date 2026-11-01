@@ -83,6 +83,10 @@ export type PermissionConfig = z.infer<typeof PermissionSchema>;
 export class PermissionGuard {
   private config: PermissionConfig;
 
+  getDefaultWorkspacePath(): string | undefined {
+    return this.config.fileSystem.allowedPaths[0];
+  }
+
   constructor(config: PermissionConfigInput | PermissionConfig) {
     this.config = PermissionSchema.parse({
       ...config,

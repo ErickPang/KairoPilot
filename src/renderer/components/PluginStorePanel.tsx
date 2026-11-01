@@ -1,9 +1,12 @@
+import {CapabilityListItem} from './CapabilityListItem';
+import {CirclePause} from 'lucide-react';
+import './CapabilityLibrary.css';
+import { WorkbenchDialog } from './WorkbenchDialog';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
-import { IconPlugin, IconTrash, IconRefresh } from './Icons';
+import { IconPlugin, IconTrash, IconRefresh, IconSearch, IconSettings, IconPlus, IconCheck } from './Icons';
 import './PluginStorePanel.css';
 import { useTranslation } from '../hooks/useTranslation';
 import type {
-  AgentConfig,
   AppConfirmationOptions,
   AppNotice,
   PluginCapabilityDeclaration,
@@ -27,7 +30,6 @@ export const PluginStorePanel = memo(function PluginStorePanel({ onClearNotice, 
   const { t } = useTranslation();
   const [storePlugins, setStorePlugins] = useState<PluginStoreEntry[]>([]);
   const [installedPlugins, setInstalledPlugins] = useState<InstalledPlugin[]>([]);
-  const [agents, setAgents] = useState<AgentConfig[]>([]);
   const [loading, setLoading] = useState(true);
   const [registryUrl, setRegistryUrl] = useState('');
   const [registryLoading, setRegistryLoading] = useState(false);
@@ -36,6 +38,8 @@ export const PluginStorePanel = memo(function PluginStorePanel({ onClearNotice, 
   const [selectedPluginId, setSelectedPluginId] = useState<string | null>(null);
   const [review, setReview] = useState<PluginInstallReview | null>(null);
   const [reviewLoading, setReviewLoading] = useState(false);
+  const [searchText,setSearchText]=useState('');
+  const [sourceModalOpen,setSourceModalOpen]=useState(false);
   const [activeTab, setActiveTab] = useState<'installed' | 'store'>('installed');
 
   const handleInstallClick = (id: string) => {
@@ -55,12 +59,11 @@ export const PluginStorePanel = memo(function PluginStorePanel({ onClearNotice, 
     setLoading(true);
     onClearNotice();
     try {
-      const [store, installed, fetchedAgents] = await Promise.all([
+      const [store, installed] = await Promise.all([
         window.kairo.invoke(KAIRO_INVOKE.pluginsGetStore),
-        window.kairo.invoke(KAIRO_INVOKE.pluginsGetInstalled),
-        window.kairo.invoke(KAIRO_INVOKE.configGetAgents)
+        window.kairo.invoke(KAIRO_INVOKE.pluginsGetInstalled)
       ]);
-      
+
       // Inject native tools as installed plugins
       const nativeTools: InstalledPlugin[] = [
         {
@@ -120,10 +123,9 @@ export const PluginStorePanel = memo(function PluginStorePanel({ onClearNotice, 
           ]
         }
       ];
-      
+
       setStorePlugins(store as unknown as PluginStoreEntry[]);
       setInstalledPlugins([...nativeTools, ...(installed as unknown as InstalledPlugin[])]);
-      setAgents(fetchedAgents as AgentConfig[]);
     } catch (e) {
       onReportNotice(createErrorNotice(t('plugins.error.load', { error: e instanceof Error ? e.message : 'Unknown error' }), 'load_plugins'));
     } finally {
@@ -138,7 +140,7 @@ export const PluginStorePanel = memo(function PluginStorePanel({ onClearNotice, 
   const handleLoadRegistry = async () => {
     const url = registryUrl.trim();
     if (!url) {
-      return;
+      return false;
     }
     setRegistryLoading(true);
     onClearNotice();
@@ -151,8 +153,10 @@ export const PluginStorePanel = memo(function PluginStorePanel({ onClearNotice, 
         }
         return Array.from(merged.values()).sort((a, b) => a.name.localeCompare(b.name));
       });
+      return true;
     } catch (e) {
       onReportNotice(createErrorNotice(t('plugins.error.load', { error: e instanceof Error ? e.message : 'Unknown error' }), 'load_plugin_registry'));
+      return false;
     } finally {
       setRegistryLoading(false);
     }
@@ -317,7 +321,7 @@ export const PluginStorePanel = memo(function PluginStorePanel({ onClearNotice, 
 
   const sortedInstalledPlugins = useMemo(
     () =>
-      installedPlugins
+      [...installedPlugins]
         .sort((a, b) => {
           if (a.filePath === 'built-in' && b.filePath !== 'built-in') {
             return -1;
@@ -333,66 +337,50 @@ export const PluginStorePanel = memo(function PluginStorePanel({ onClearNotice, 
     [installedPlugins]
   );
 
-  const sortedAgents = useMemo(
-    () => [...agents].sort((a, b) => a.name.localeCompare(b.name)),
-    [agents]
-  );
+  const filteredInstalledPlugins=useMemo(()=>{
+    const query=searchText.trim().toLowerCase();
+    return sortedInstalledPlugins.filter(plugin=>`${plugin.name} ${plugin.description} ${plugin.id}`.toLowerCase().includes(query));
+  },[sortedInstalledPlugins,searchText]);
+
   const selectedPlugin = useMemo(
     () => storePlugins.find((plugin) => plugin.id === selectedPluginId) || null,
     [selectedPluginId, storePlugins]
   );
 
   return (
-    <div className="config-panel">
-      <div className="config-header plugin-panel-header">
-        <div className="plugin-panel-header-row">
+    <div className="config-panel capability-library plugin-library">
+      <div className="config-header capability-header">
+        <div className="capability-header-row">
           <div>
-            <div className="config-title">
-              <div className="plugin-panel-title-icon">
-                <IconPlugin size={20} />
-              </div>
-              {t('nav.plugins')}
-            </div>
+            <div className="config-title">{t('nav.plugins')}</div>
             <div className="config-subtitle">{t('plugins.subtitle')}</div>
           </div>
-          <button type="button" onClick={loadPlugins} className={`btn btn-secondary ${loading ? 'is-loading' : ''}`} disabled={loading} title={t('common.refresh')}>
-            <IconRefresh size={16} className={loading ? 'spinning' : ''} />
-          </button>
+          <div className="capability-actions">
+            {activeTab==='installed'&&<label className="capability-search"><IconSearch size={17}/><input type="search" aria-label={t('plugins.searchInstalled')} placeholder={t('plugins.searchInstalled')} value={searchText} onChange={event=>setSearchText(event.target.value)}/></label>}
+            <button type="button" className="capability-icon-button" onClick={loadPlugins} disabled={loading} aria-label={t('common.refresh')} title={t('common.refresh')}><IconRefresh size={18} className={loading?'spinning':''}/></button>
+            <button type="button" className="capability-icon-button" onClick={()=>setSourceModalOpen(true)} aria-label={t('plugins.registrySettings')} title={t('plugins.registrySettings')}><IconSettings size={18}/></button>
+            <button type="button" className="btn btn-primary capability-add" onClick={()=>{void handleImportPlugin();}} disabled={reviewLoading}><IconPlus size={16}/>{t('common.add')}</button>
+          </div>
         </div>
 
         <div className="store-tabs">
-          <button 
+          <button
             className={`store-tab ${activeTab === 'installed' ? 'active' : ''}`}
             onClick={() => setActiveTab('installed')}
           >
             {t('plugins.installedTab')}
           </button>
-          <button 
+          <button
             className={`store-tab ${activeTab === 'store' ? 'active' : ''}`}
             onClick={() => setActiveTab('store')}
           >
             {t('plugins.uninstalledTab')}
           </button>
         </div>
-        <div className="plugin-panel-header-row">
-          <div className="plugin-registry-row">
-            <input
-              className="form-control"
-              value={registryUrl}
-              onChange={(event) => setRegistryUrl(event.target.value)}
-              placeholder={t('plugins.registryPlaceholder')}
-            />
-            <button type="button" className="btn btn-secondary" onClick={() => { void handleLoadRegistry(); }} disabled={registryLoading}>
-              {registryLoading ? t('plugins.loading') : t('plugins.loadRegistry')}
-            </button>
-            <button type="button" className="btn btn-secondary" onClick={() => { void handleImportPlugin(); }}>
-              {t('plugins.importZip')}
-            </button>
-          </div>
-        </div>
+
       </div>
 
-      <div className="config-content plugin-panel-content">
+      <div className="config-content capability-content plugin-panel-content">
         {loading && (
           <div className="plugin-panel-loading">
             {t('plugins.loading')}
@@ -401,16 +389,15 @@ export const PluginStorePanel = memo(function PluginStorePanel({ onClearNotice, 
 
         {!loading && activeTab === 'installed' && (
           <div className="installed-plugins-container">
-            <h3 className="store-section-title">{t('plugins.installedTitle')}</h3>
-            {sortedInstalledPlugins.length === 0 ? (
-              <div className="empty-state">{t('plugins.noInstalled')}</div>
+            {filteredInstalledPlugins.length === 0 ? (
+              <div className="empty-state">{t(searchText.trim()?'plugins.noSearchResults':'plugins.noInstalled')}</div>
             ) : (
-              <div className="plugin-grid">
-                {sortedInstalledPlugins.map(plugin => (
-                  <InstalledPluginItem 
-                    key={`${plugin.id}-${plugin.scope}`} 
-                    plugin={plugin} 
-                    scopeLabel={getPluginScopeLabel(plugin.scope, agents, t)}
+              <div className="capability-grid">
+                {filteredInstalledPlugins.map(plugin => (
+                  <InstalledPluginItem
+                    key={`${plugin.id}-${plugin.scope}`}
+                    plugin={plugin}
+                    scopeLabel={getPluginScopeLabel(plugin.scope, t)}
                     onToggleEnabled={() => handleSetEnabled(plugin.id, plugin.scope, plugin.enabled === false)}
                     onUpdate={() => { void handlePrepareUpdate(plugin); }}
                     onRollback={() => { void handleRollback(plugin); }}
@@ -451,14 +438,14 @@ export const PluginStorePanel = memo(function PluginStorePanel({ onClearNotice, 
                         </div>
                       </div>
                     </div>
-                    
+
                     <p className="plugin-card-description">
                       {plugin.description}
                     </p>
                     <PluginCapabilitySummary plugin={plugin} />
 
                     <div className="store-card-actions">
-                      <button 
+                      <button
                         className="btn btn-primary"
                         onClick={() => handleInstallClick(plugin.id)}
                         disabled={actionInProgress === plugin.id || reviewLoading}
@@ -474,10 +461,14 @@ export const PluginStorePanel = memo(function PluginStorePanel({ onClearNotice, 
         )}
       </div>
 
+      {sourceModalOpen&&<WorkbenchDialog title={t('plugins.registrySettings')} kind="plugin-sources" onClose={()=>setSourceModalOpen(false)} busy={registryLoading} actions={<button type="button" className="btn btn-primary" disabled={registryLoading||!registryUrl.trim()} onClick={()=>{void handleLoadRegistry().then(success=>{if(success)setSourceModalOpen(false);});}}>{registryLoading?t('plugins.loading'):t('plugins.loadRegistry')}</button>}>
+        <label className="form-group"><span>{t('plugins.registrySettings')}</span><input className="form-control" value={registryUrl} onChange={event=>setRegistryUrl(event.target.value)} placeholder={t('plugins.registryPlaceholder')}/></label>
+      </WorkbenchDialog>}
+
       {installModalOpen && (
-        <div className="modal-overlay" onClick={() => setInstallModalOpen(false)}>
-          <div className="modal-content" onClick={e => e.stopPropagation()}>
-            <h3 className="plugin-modal-title">{t('plugins.installReview')}</h3>
+        <WorkbenchDialog kind="plugin-scope" title={t('plugins.installReview')} onClose={() => setInstallModalOpen(false)} busy={false} actions={<>
+              <button type="button" className="btn" onClick={() => setInstallModalOpen(false)}>{t('common.cancel')}</button>
+            </>}>
             {selectedPlugin && (
               <div className="plugin-install-review">
                 <div className="plugin-card-header">
@@ -506,28 +497,19 @@ export const PluginStorePanel = memo(function PluginStorePanel({ onClearNotice, 
               >
                 {t('plugins.publicScope')}
               </button>
-              {sortedAgents.map(agent => (
-                <button
-                  type="button"
-                  key={agent.id}
-                  className="btn btn-secondary plugin-modal-scope-btn"
-                  onClick={() => handleConfirmInstall(`agent:${agent.id}`)}
-                >
-                  {t('plugins.agentScope', { agent: agent.name })}
-                </button>
-              ))}
+
             </div>
-            <div className="plugin-modal-actions">
-              <button type="button" className="btn" onClick={() => setInstallModalOpen(false)}>{t('common.cancel')}</button>
-            </div>
-          </div>
-        </div>
+
+        </WorkbenchDialog>
       )}
 
       {review && (
-        <div className="modal-overlay" onClick={() => { void handleCancelReview(); }}>
-          <div className="modal-content" onClick={e => e.stopPropagation()}>
-            <h3 className="plugin-modal-title">{t('plugins.reviewTitle')}</h3>
+        <WorkbenchDialog kind="plugin-review" title={t('plugins.reviewTitle')} onClose={() => { void handleCancelReview(); }} busy={reviewLoading} actions={<>
+              <button type="button" className="btn" onClick={() => { void handleCancelReview(); }} disabled={reviewLoading}>{t('common.cancel')}</button>
+              <button type="button" className="btn btn-primary" onClick={() => { void handleConfirmReviewedInstall(); }} disabled={reviewLoading || review.recommendation === 'block'}>
+                {reviewLoading ? t('plugins.installing') : t('plugins.confirmReviewedInstall')}
+              </button>
+            </>}>
             <div className="plugin-install-review">
               <div className="plugin-card-header">
                 <div className="plugin-card-icon">🧩</div>
@@ -568,14 +550,8 @@ export const PluginStorePanel = memo(function PluginStorePanel({ onClearNotice, 
                 )}
               </div>
             </div>
-            <div className="plugin-modal-actions">
-              <button type="button" className="btn" onClick={() => { void handleCancelReview(); }} disabled={reviewLoading}>{t('common.cancel')}</button>
-              <button type="button" className="btn btn-primary" onClick={() => { void handleConfirmReviewedInstall(); }} disabled={reviewLoading || review.recommendation === 'block'}>
-                {reviewLoading ? t('plugins.installing') : t('plugins.confirmReviewedInstall')}
-              </button>
-            </div>
-          </div>
-        </div>
+
+        </WorkbenchDialog>
       )}
     </div>
   );
@@ -610,102 +586,31 @@ function InstalledPluginItem({
 }) {
   const { t } = useTranslation();
   const enabled = plugin.enabled !== false;
-  
-  return (
-    <div className="config-card plugin-card">
-      <div className="plugin-card-header">
-        <div className="plugin-card-icon">
-          {plugin.icon || '🧩'}
-        </div>
-        <div className="plugin-card-copy">
-          <h4 className="plugin-card-title">{plugin.name}</h4>
-          <div className="plugin-card-meta">
-            v{plugin.version} • {t('plugins.by', { author: plugin.author })}
-          </div>
-        </div>
-      </div>
-      
-      <p className="plugin-card-description">
-        {plugin.description}
-      </p>
-      <PluginCapabilitySummary plugin={plugin} />
 
-      <div className="plugin-card-meta">
-        <strong>{t('plugins.installedAt')}:</strong> {new Date(plugin.installedAt).toLocaleString()}
-      </div>
-      <div className="plugin-card-meta">
-        <strong>{t('plugins.installScope')}:</strong> {scopeLabel}
-      </div>
-      <div className="plugin-card-meta">
-        <span className={`plugin-risk-badge risk-${enabled ? 'low' : 'medium'}`}>
-          {enabled ? t('plugins.enabled') : t('plugins.disabled')}
-        </span>
-      </div>
-
-      <div className="store-card-actions">
-        {!isNative && (
-          <button
-            type="button"
-            className={`btn btn-secondary btn-sm ${isUpdating ? 'is-loading' : ''}`}
-            onClick={(e) => {
-              e.stopPropagation();
-              onUpdate();
-            }}
-            disabled={isUpdating}
-          >
-            {isUpdating && <IconRefresh size={14} className="spinning" />}
-            <span className="btn-text-inline">{t('plugins.update')}</span>
-          </button>
-        )}
-        {plugin.previousVersion && (
-          <button
-            type="button"
-            className={`btn btn-secondary btn-sm ${isRollingBack ? 'is-loading' : ''}`}
-            onClick={(e) => {
-              e.stopPropagation();
-              onRollback();
-            }}
-            disabled={isRollingBack}
-          >
-            {isRollingBack && <IconRefresh size={14} className="spinning" />}
-            <span className="btn-text-inline">{t('plugins.rollback')}</span>
-          </button>
-        )}
-        <button
-          type="button"
-          className={`btn btn-secondary btn-sm ${isToggling ? 'is-loading' : ''}`}
-          onClick={(e) => {
-            e.stopPropagation();
-            onToggleEnabled();
-          }}
-          disabled={isToggling || isNative}
-        >
-          {isToggling && <IconRefresh size={14} className="spinning" />}
-          <span className="btn-text-inline">{enabled ? t('plugins.disable') : t('plugins.enable')}</span>
-        </button>
-        <button 
-          type="button"
-          className={`btn btn-secondary btn-sm btn-danger plugin-uninstall-btn ${isNative ? 'is-native' : ''} ${isWorking ? 'is-loading' : ''}`}
-          onClick={async (e) => {
-            e.stopPropagation();
-            const confirmed = await onRequestConfirmation({
-              title: t('common.confirm'),
-              message: `${t('common.confirm')} ${t('plugins.uninstall')}?`,
-              confirmLabel: t('plugins.uninstall'),
-              variant: 'danger'
-            });
-            if (confirmed) {
-              onUninstall();
-            }
-          }}
-          disabled={isWorking || isNative}
-        >
-          {isWorking ? <IconRefresh size={14} className="spinning" /> : <IconTrash size={14} />}
-          <span className="btn-text-inline">{isNative ? t('plugins.installed') : t('plugins.uninstall')}</span>
-        </button>
-      </div>
-    </div>
-  );
+  const [expanded,setExpanded]=useState(false);
+  const busy=isWorking||isToggling||isUpdating||isRollingBack;
+  return <>
+    <CapabilityListItem id={plugin.id} kind="plugin" name={plugin.name} description={plugin.description} icon={<IconPlugin size={23}/>} status={enabled?<IconCheck size={20}/>:<CirclePause size={20}/>} statusLabel={t(enabled?'plugins.enabled':'plugins.disabled')} label={t('plugins.details')} onOpen={()=>setExpanded(true)}/>
+    {expanded&&<WorkbenchDialog title={plugin.name} kind="plugin-details" onClose={()=>setExpanded(false)} busy={busy} actions={<>
+      {!isNative&&<>
+        <button type="button" className="btn btn-secondary" disabled={busy} onClick={()=>{setExpanded(false);onUpdate();}}>{t('plugins.update')}</button>
+        {plugin.previousVersion&&<button type="button" className="btn btn-secondary" disabled={busy} onClick={onRollback}>{t('plugins.rollback')}</button>}
+        <button type="button" className="btn btn-secondary" disabled={busy} onClick={onToggleEnabled}>{t(enabled?'plugins.disable':'plugins.enable')}</button>
+        <button type="button" className="btn btn-secondary btn-danger" disabled={busy} onClick={async()=>{
+          setExpanded(false);
+          const confirmed=await onRequestConfirmation({title:t('common.confirm'),message:`${t('common.confirm')} ${t('plugins.uninstall')}?`,confirmLabel:t('plugins.uninstall'),variant:'danger'});
+          if(confirmed)onUninstall();
+        }}><IconTrash size={14}/>{t('plugins.uninstall')}</button>
+      </>}
+      <button type="button" className="btn btn-primary" disabled={busy} onClick={()=>setExpanded(false)}>{t('common.close')}</button>
+    </>}>
+      <div className="capability-detail-meta"><span>{scopeLabel}</span><code>{plugin.id}</code><span>v{plugin.version}</span><span>{t('plugins.by',{author:plugin.author})}</span></div>
+      <p className="plugin-card-description">{plugin.description}</p>
+      <PluginCapabilitySummary plugin={plugin}/>
+      <p className="plugin-card-meta">{t('plugins.installedAt')}: {new Date(plugin.installedAt).toLocaleString()}</p>
+      <p className="plugin-card-meta">{t(enabled?'plugins.enabled':'plugins.disabled')}</p>
+    </WorkbenchDialog>}
+  </>;
 }
 
 function PluginCapabilitySummary({ plugin }: { plugin: PluginManifest }) {
@@ -804,16 +709,13 @@ function getRequiredPermissionLabels(
 
 function getPluginScopeLabel(
   scope: string,
-  agents: AgentConfig[],
   t: ReturnType<typeof useTranslation>['t']
 ) {
   if (scope === 'public') {
     return t('plugins.publicScope');
   }
   if (scope.startsWith('agent:')) {
-    const agentId = scope.slice('agent:'.length);
-    const agent = agents.find((item) => item.id === agentId);
-    return t('plugins.agentScope', { agent: agent?.name ?? agentId });
+    return scope === 'agent:workbench' ? t('workbench.workbenchScope') : t('plugins.publicScope');
   }
   return scope;
 }

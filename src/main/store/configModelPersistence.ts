@@ -21,7 +21,8 @@ export function providerToModelConfig(providerKey: string, provider: ProviderCon
     apiKey: provider.apiKey,
     apiKeyStored: Boolean(provider.apiKey),
     model: resolvedModel,
-    availableModels: provider.model
+    availableModels: provider.model,
+    contextWindowTokens: provider.model.find(item=>item.id===resolvedModel)?.contextWindowTokens
   };
 }
 

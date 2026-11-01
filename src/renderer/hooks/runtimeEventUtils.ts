@@ -32,6 +32,16 @@ export function upsertAssistantStreamMessage(previous: Message[], content: strin
   return [...withoutTrailingThinking, { role: 'assistant' as const, content }];
 }
 
+export function isRuntimeUpdateForSession(current: SessionContextState, update: RuntimeUpdateEvent): boolean {
+  if (current.latestRun && isRunUnsettled(current.latestRun) && current.latestRun.id !== update.runId) return false;
+  if (update.sessionId) return update.sessionId === current.activeSessionId;
+  return Boolean(current.latestRun && current.latestRun.id === update.runId);
+}
+
+export function isRunUnsettled(run: RunSummary | null | undefined): boolean {
+  return Boolean(run && ['running', 'waiting_approval', 'paused'].includes(run.status));
+}
+
 function isProgressUpdate(update: RuntimeUpdateEvent) {
   return update.type === 'thinking'
     || update.type === 'assistant-delta'
@@ -42,6 +52,10 @@ function isProgressUpdate(update: RuntimeUpdateEvent) {
 
 function patchRunSummary(current: RunSummary | null, update: RuntimeUpdateEvent): RunSummary | null {
   if (!current || current.id !== update.runId) {
+    return current;
+  }
+
+  if (['completed', 'failed', 'cancelled'].includes(current.status) && isProgressUpdate(update)) {
     return current;
   }
 
@@ -65,14 +79,14 @@ function patchRunSummary(current: RunSummary | null, update: RuntimeUpdateEvent)
     };
   }
 
-  if (update.type === 'run-paused' || update.type === 'run-cancelled') {
+  if (update.type === 'run-paused' || update.type === 'run-cancelled' || update.type === 'run-failed') {
     return {
       ...current,
       status: update.status,
       error: update.error,
       waitingApprovalId: undefined,
       updatedAt: Date.now(),
-      completedAt: update.status === 'cancelled' ? Date.now() : current.completedAt
+      completedAt: update.status !== 'paused' ? Date.now() : current.completedAt
     };
   }
 
@@ -167,6 +181,8 @@ export function applyRuntimeUpdateToSessionContext(
   current: SessionContextState,
   update: RuntimeUpdateEvent
 ): Partial<SessionContextState> {
+  if (!isRuntimeUpdateForSession(current, update)) return {};
+  if (current.latestRun && current.latestRun.id !== update.runId) return {};
   const patch: Partial<SessionContextState> = {
     latestRun: patchRunSummary(current.latestRun, update),
     activeRunSteps: patchRunSteps(current.activeRunSteps, update)
@@ -180,6 +196,7 @@ export function applyRuntimeUpdateToSessionContext(
     update.type === 'assistant-response'
     || update.type === 'run-cancelled'
     || update.type === 'run-paused'
+    || update.type === 'run-failed'
     || (
       isProgressUpdate(update)
       && current.confirmationRequest?.runId === update.runId

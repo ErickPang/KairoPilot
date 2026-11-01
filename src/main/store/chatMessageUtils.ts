@@ -8,6 +8,7 @@ export function mapMessageRowToChatMessage(message: {
   tool_call_id?: string;
   tool_calls?: string;
   attachments?: string;
+  context_refs?: string;
   usage?: string;
   model?: string;
 }): ChatMessage {
@@ -42,6 +43,10 @@ export function mapMessageRowToChatMessage(message: {
     } catch (error) {
       console.warn('[DB] Failed to parse attachments:', error);
     }
+  }
+
+  if (message.context_refs) {
+    try { chatMessage.references = JSON.parse(message.context_refs); } catch { /* Leave malformed optional references unset. */ }
   }
 
   if (message.usage) {

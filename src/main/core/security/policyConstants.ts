@@ -10,12 +10,6 @@ export const SENSITIVE_DIRS_BLACKLIST = new Set([
   '.git'
 ]);
 
-export const PROTECTED_PROMPT_FILES = new Set([
-  'KAIROPILOT.md',
-  'IDENTITY.md',
-  'USER.md',
-  'SOUL.md',
-  'MEMORY.md'
-]);
+export const PROTECTED_PROMPT_FILES = new Set(['AGENTS.md','AGENTS.override.md','MEMORY.md']);
 
 export const SUPPORTED_SKILL_SCRIPT_EXTENSIONS = ['.js', '.mjs', '.cjs', '.py', '.sh'] as const;

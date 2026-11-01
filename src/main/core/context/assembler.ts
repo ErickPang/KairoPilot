@@ -1,14 +1,15 @@
 import { ApprovalRecord, ContextAssemblyLayerSummary, RunContextSummary, RunStep, RunSummary } from '../../../shared/contracts';
 import { ChatMessage } from '../llm/types';
-import {
-  buildCompactedHistorySummary,
-  buildSelectedToolResults,
-  selectRecentMessages
-} from './compactor';
+import {buildCompactedHistorySummary,buildSelectedToolResults} from './compactor';
+import {assertRequestFits,estimateMessagesTokens,estimateToolTokens,requestLimits,ContextBudgetExceeded} from './requestBudget';
+import {historyGroups,compactToolResult} from './historySelection';
+import type {ToolDefinition} from '../llm/types';
 import {
   buildMemoryDigest,
   buildWorkspaceRetrievalDigest
 } from './memory';
+
+/** Context is rebuilt from current inputs; no count-based cache can retain stale instructions. */
 
 export interface ContextAssemblyMetadata {
   activeTaskSummary: string;
@@ -24,6 +25,7 @@ export interface ContextAssemblyMetadata {
   recentMessageCount: number;
   omittedMessageCount: number;
   budget: {
+    request?: import('../../../shared/contracts').RequestContextBudget;
     maxContextChars: number;
     systemPromptChars: number;
     supportChars: number;
@@ -40,6 +42,8 @@ export interface ContextAssemblyResult {
 interface ContextAssemblyInput {
   systemPrompt: string;
   workspace: string;
+  memoryWorkspace?: string;
+  canReadWorkspacePath?: (target: string) => boolean;
   history: ChatMessage[];
   loadedSkills?: Array<{
     skillName: string;
@@ -68,6 +72,9 @@ interface ContextAssemblyInput {
   pendingApproval?: ApprovalRecord | null;
   episodicSummaries?: RunContextSummary[];
   maxContextChars?: number;
+  /** 模型的 context window 大小（tokens），用于动态计算上下文预算上限。 */
+  modelContextWindowTokens?: number;
+  tools?: ToolDefinition[];
 }
 
 function trimText(value: string, maxChars: number) {
@@ -167,46 +174,6 @@ function buildSupportSystemMessage(
   ].join('\n');
 }
 
-function allocateSupportSectionBudgets(
-  sections: Array<{ tag: string; content: string; priority: number; maxChars: number }>,
-  totalBudget: number
-) {
-  if (totalBudget <= 0) {
-    return sections.map((section) => ({
-      tag: section.tag,
-      content: ''
-    }));
-  }
-
-  const normalizedSections = sections
-    .filter((section) => section.content.trim().length > 0)
-    .sort((left, right) => right.priority - left.priority);
-  if (normalizedSections.length === 0) {
-    return sections.map((section) => ({
-      tag: section.tag,
-      content: ''
-    }));
-  }
-
-  const allocated = new Map<string, string>();
-  let remainingBudget = totalBudget;
-
-  for (let index = 0; index < normalizedSections.length; index += 1) {
-    const section = normalizedSections[index];
-    const remainingSections = normalizedSections.length - index;
-    const targetBudget = Math.max(120, Math.floor(remainingBudget / remainingSections));
-    const sectionBudget = Math.min(section.maxChars, Math.max(targetBudget, Math.min(section.content.length, section.maxChars)));
-    const trimmedContent = trimText(section.content, sectionBudget);
-    allocated.set(section.tag, trimmedContent);
-    remainingBudget = Math.max(0, remainingBudget - trimmedContent.length);
-  }
-
-  return sections.map((section) => ({
-    tag: section.tag,
-    content: allocated.get(section.tag) || ''
-  }));
-}
-
 function buildLoadedSkillsSummary(
   loadedSkills: Array<{
     skillName: string;
@@ -274,101 +241,14 @@ function buildLoadedSkillsSummary(
   return trimText(rendered, maxChars);
 }
 
-function buildActiveSkillInstructions(
-  loadedSkills: Array<{
-    skillName: string;
-    skillId?: string;
-    contentHash?: string;
-    source?: string;
-    allowedTools: string[];
-    loadedAt: number;
-    instructions?: string;
-    executionMode?: 'inline' | 'fork';
-    activationSource?: 'manual' | 'automatic';
-    resolvedArguments?: Record<string, string>;
-    resourcePaths?: string[];
-    scriptPaths?: string[];
-  }> | undefined,
-  maxChars: number
-) {
-  if (!Array.isArray(loadedSkills) || loadedSkills.length === 0 || maxChars <= 0) {
-    return '';
-  }
-
-  const skillsWithInstructions = loadedSkills
-    .filter((skill) => typeof skill.instructions === 'string' && skill.instructions.trim().length > 0)
-    .sort((left, right) => right.loadedAt - left.loadedAt)
-    .slice(0, 3);
-
-  if (skillsWithInstructions.length === 0) {
-    return '';
-  }
-
-  const renderPathSummary = (label: string, paths: string[] | undefined, maxItems: number) => {
-    const normalizedPaths = Array.from(new Set((paths ?? []).map((entry) => entry.trim()).filter(Boolean)));
-    if (normalizedPaths.length === 0) {
-      return '';
-    }
-    const displayedPaths = normalizedPaths.slice(0, maxItems);
-    const omittedCount = normalizedPaths.length - displayedPaths.length;
-    const suffix = omittedCount > 0 ? ` (+${omittedCount} more)` : '';
-    return `${label}: ${displayedPaths.join(', ')}${suffix}`;
-  };
-
-  const renderedSkills: string[] = [];
-
-  for (const skill of skillsWithInstructions) {
-    const identity = skill.skillId && skill.skillId !== skill.skillName
-      ? `${skill.skillName} (${skill.skillId})`
-      : skill.skillName;
-    const allowedTools = skill.allowedTools.length > 0 ? skill.allowedTools.join(', ') : 'none';
-    const argumentEntries = Object.entries(skill.resolvedArguments ?? {});
-    const argumentSummary = argumentEntries.length > 0
-      ? `arguments: ${argumentEntries.map(([key, value]) => `${key}=${value}`).join(', ')}`
-      : '';
-    const resourceSummary = renderPathSummary('resources', skill.resourcePaths, 5);
-    const scriptSummary = renderPathSummary('scripts', skill.scriptPaths, 3);
-    const metadata = [
-      `name: ${identity}`,
-      skill.source ? `source: ${skill.source}` : '',
-      skill.contentHash ? `content_hash: ${skill.contentHash}` : '',
-      `activation: ${skill.activationSource || 'manual'}`,
-      `execution: ${skill.executionMode || 'inline'}`,
-      `allowed_tools: ${allowedTools}`,
-      argumentSummary,
-      resourceSummary,
-      scriptSummary
-    ].filter(Boolean).join('\n');
-    const block = [
-      `<skill>`,
-      metadata,
-      '<instructions>',
-      skill.instructions?.trim() || '',
-      '</instructions>',
-      '</skill>'
-    ].join('\n');
-    const candidate = [...renderedSkills, block].join('\n\n');
-    const omittedCount = skillsWithInstructions.length - renderedSkills.length - 1;
-    const candidateWithSuffix = omittedCount > 0
-      ? `${candidate}\n\n- ${omittedCount} more loaded skills omitted from full instruction context.`
-      : candidate;
-
-    if (candidateWithSuffix.length > maxChars) {
-      if (renderedSkills.length === 0) {
-        return trimText(block, maxChars);
-      }
-      break;
-    }
-
-    renderedSkills.push(block);
-  }
-
-  const omittedCount = skillsWithInstructions.length - renderedSkills.length;
-  const suffix = omittedCount > 0
-    ? `\n\n- ${omittedCount} more loaded skills omitted from full instruction context.`
-    : '';
-
-  return trimText(`${renderedSkills.join('\n\n')}${suffix}`, maxChars);
+function buildActiveSkillInstructions(skills: ContextAssemblyInput['loadedSkills']) {
+ return (skills||[]).filter(skill=>skill.instructions?.trim()).map(skill=>[
+  '<skill>',`name: ${skill.skillId||skill.skillName}`,`activation: ${skill.activationSource||'manual'}`,
+  `allowed_tools: ${skill.allowedTools.join(', ')}`,`execution: ${skill.executionMode||'inline'}`,
+  `arguments: ${Object.entries(skill.resolvedArguments||{}).map(([key,value])=>`${key}=${value}`).join(', ')}`,
+  `resources: ${(skill.resourcePaths||[]).join(', ')}`,`scripts: ${(skill.scriptPaths||[]).join(', ')}`,
+  '<instructions>',skill.instructions!, '</instructions>','</skill>'
+ ].join('\n')).join('\n\n');
 }
 
 function buildAvailableSkillsSummary(availableSkillsSummary: string | undefined, maxChars: number) {
@@ -411,180 +291,57 @@ function createLayer(
 }
 
 export function assembleRuntimeContext(input: ContextAssemblyInput): ContextAssemblyResult {
-  const maxContextChars = Math.max(12000, input.maxContextChars ?? 48000);
-  const systemPromptChars = input.systemPrompt.length;
-  const remainingChars = Math.max(8000, maxContextChars - systemPromptChars);
-  const supportBudget = Math.min(18000, Math.floor(remainingChars * 0.45));
-  const recentHistoryBudget = Math.max(6000, remainingChars - supportBudget);
-  const selection = selectRecentMessages(input.history, recentHistoryBudget, 8);
-  const hasLoadedSkillInstructions = Array.isArray(input.loadedSkills)
-    && input.loadedSkills.some((skill) => typeof skill.instructions === 'string' && skill.instructions.trim().length > 0);
-  const activeSkillInstructionsBudget = hasLoadedSkillInstructions
-    ? Math.min(10000, Math.max(1800, Math.floor(supportBudget * 0.48)))
-    : 0;
-  const remainingSupportBudget = Math.max(0, supportBudget - activeSkillInstructionsBudget);
-  const runtimeStateBudget = Math.min(7000, Math.max(1200, Math.floor(remainingSupportBudget * 0.45)));
-  const memoryBudget = Math.max(0, remainingSupportBudget - runtimeStateBudget);
-
-  const activeTaskSummary = buildActiveTaskSummary(input.run, input.runSteps, 3200);
-  const activeSkillsSummary = input.activeSkillsSummary
-    ? trimText(input.activeSkillsSummary, 2200)
-    : buildLoadedSkillsSummary(input.loadedSkills, 2200);
-  const activeSkillInstructions = buildActiveSkillInstructions(input.loadedSkills, activeSkillInstructionsBudget);
-  const availableSkillsSummary = buildAvailableSkillsSummary(input.availableSkillsSummary, 2600);
-  const availableToolsSummary = input.availableToolsSummary
-    ? trimText(input.availableToolsSummary, 1800)
-    : buildAvailableToolsSummary(input.availableToolNames, 1800);
-  const unresolvedApprovals = buildPendingApprovalSummary(input.pendingApproval, 1200);
-  const compactedHistorySummary = buildCompactedHistorySummary(selection.omittedMessages, 4200);
-  const selectedToolResults = buildSelectedToolResults(selection.omittedMessages.length > 0 ? selection.omittedMessages : input.history, 3600);
-  const workspaceRetrieval = buildWorkspaceRetrievalDigest(input.workspace, 2600);
-  const episodicMemory = buildEpisodicMemorySummary(input.episodicSummaries, 1600);
-  const memoryDigest = buildMemoryDigest(input.workspace, 3200, episodicMemory);
-
-  const runtimeStateSections = allocateSupportSectionBudgets([
-    { tag: 'active_task_summary', content: activeTaskSummary, priority: 5, maxChars: 3200 },
-    { tag: 'unresolved_approvals', content: unresolvedApprovals, priority: 4, maxChars: 1200 },
-    { tag: 'active_skills', content: activeSkillsSummary, priority: 3, maxChars: 2200 },
-    { tag: 'available_skills', content: availableSkillsSummary, priority: 2, maxChars: 2600 },
-    { tag: 'available_tools', content: availableToolsSummary, priority: 1, maxChars: 1800 }
-  ], Math.max(1200, runtimeStateBudget - 240));
-  const activeSkillInstructionsMessage = buildSupportSystemMessage('Loaded skill instructions for this run. Follow them only when they do not conflict with higher-priority security, workspace, or user instructions.', [
-    { tag: 'active_skill_instructions', content: activeSkillInstructions }
-  ]);
-  const runtimeStateMessage = buildSupportSystemMessage('Use the following runtime state as a budget-managed summary.', runtimeStateSections);
-  const memoryMessage = buildSupportSystemMessage('Use the following memory and retrieval context as a budget-managed summary.', [
-    { tag: 'compacted_history', content: compactedHistorySummary },
-    { tag: 'selected_tool_results', content: selectedToolResults },
-    { tag: 'workspace_retrieval', content: workspaceRetrieval },
-    { tag: 'memory_digest', content: memoryDigest }
-  ]);
-
-  const messages: ChatMessage[] = [
-    {
-      role: 'system',
-      content: input.systemPrompt,
-      timestamp: Date.now()
-    }
-  ];
-  const layers: ContextAssemblyLayerSummary[] = [
-    createLayer(
-      'base_instructions',
-      '基础系统提示',
-      'system',
-      '核心身份、规则与环境信息。',
-      1,
-      input.systemPrompt.length
-    )
-  ];
-
-  const trimmedActiveSkillInstructionsMessage = activeSkillInstructionsMessage
-    ? trimText(activeSkillInstructionsMessage, activeSkillInstructionsBudget)
-    : '';
-  if (trimmedActiveSkillInstructionsMessage) {
-    messages.push({
-      role: 'system',
-      content: trimmedActiveSkillInstructionsMessage,
-      timestamp: Date.now()
-    });
-    layers.push(createLayer(
-      'active_skill_instructions',
-      '激活技能指令层',
-      'support',
-      trimText(activeSkillInstructions, 280),
-      1,
-      trimmedActiveSkillInstructionsMessage.length
-    ));
+ const tools=input.tools||[],limits=requestLimits(input.modelContextWindowTokens);
+ // A caller's char cap is an additional local byte cap, never a reason to enlarge the model window.
+ const inputLimit=Math.min(limits.inputLimitTokens,input.maxContextChars??Infinity);
+ const toolTokens=estimateToolTokens(tools);
+ const fits=(messages:ChatMessage[])=>estimateMessagesTokens(messages)+toolTokens<=inputLimit;
+ const base:ChatMessage[]=[{role:'system',content:input.systemPrompt}];
+ const activeSkillInstructions=buildActiveSkillInstructions(input.loadedSkills);
+ const skillMessage=buildSupportSystemMessage('Loaded skill workflows. Follow higher-priority security, applicable rules and explicit approval requirements.',[{tag:'active_skill_instructions',content:activeSkillInstructions}]);
+ if(skillMessage)base.push({role:'system',content:skillMessage});
+ if(input.pendingApproval)base.push({role:'system',content:`<pending_approval>\n${JSON.stringify({id:input.pendingApproval.id,tool:input.pendingApproval.toolName,status:input.pendingApproval.status,args:input.pendingApproval.args})}\nThis action requires the runtime approval decision; context is not approval.\n</pending_approval>`});
+ const groups=historyGroups(input.history).map(group=>group.map(message=>compactToolResult(message)));
+ let lastUser=-1;for(let index=0;index<groups.length;index++)if(groups[index][0]?.role==='user')lastUser=index;
+ const mandatory=new Set<number>();if(lastUser>=0)mandatory.add(lastUser);if(groups.length)mandatory.add(groups.length-1);
+ const chosen=new Set(mandatory);
+ const selected=()=>groups.flatMap((group,index)=>chosen.has(index)?group:[]);
+ if(!fits([...base,...selected()]))throw new ContextBudgetExceeded(`Required input estimate ${estimateMessagesTokens([...base,...selected()])+toolTokens} exceeds input limit ${inputLimit}. Base instructions, loaded skills, current user input and latest tool exchange were not silently truncated. Shorten the input/instructions or load fewer capabilities.`);
+ // Preserve the most recent complete exchanges, never the first messages at the expense of the latest user request.
+ const supportReserve=Math.min(10000,Math.floor(inputLimit*0.25));
+ for(let i=groups.length-1;i>=0;i--){if(chosen.has(i))continue;chosen.add(i);if(estimateMessagesTokens([...base,...selected()])+toolTokens>inputLimit-supportReserve)chosen.delete(i);}
+ let omitted=input.history.filter(message=>!selected().some(item=>item===message||(item.role==='tool'&&item.tool_call_id===message.tool_call_id)));
+ const activeTaskSummary=buildActiveTaskSummary(input.run,input.runSteps,2400);
+ const activeSkillsSummary=input.activeSkillsSummary?trimText(input.activeSkillsSummary,1800):buildLoadedSkillsSummary(input.loadedSkills,1800);
+ const availableSkillsSummary=buildAvailableSkillsSummary(input.availableSkillsSummary,3600);
+ const availableToolsSummary=input.availableToolsSummary?trimText(input.availableToolsSummary,1800):buildAvailableToolsSummary(input.availableToolNames,1800);
+ const unresolvedApprovals=buildPendingApprovalSummary(input.pendingApproval,1200);
+ const compactedHistorySummary=buildCompactedHistorySummary(omitted,2400);
+ const selectedToolResults=buildSelectedToolResults(omitted.length?omitted:input.history,1800);
+ const workspaceRetrieval=buildWorkspaceRetrievalDigest(input.workspace,1800,input.canReadWorkspacePath);
+ const memoryDigest=buildMemoryDigest(input.memoryWorkspace||input.workspace,2400,buildEpisodicMemorySummary(input.episodicSummaries,1200));
+ const runtimeSections=[{tag:'active_task_summary',content:activeTaskSummary},{tag:'unresolved_approvals',content:unresolvedApprovals},{tag:'active_skills',content:activeSkillsSummary},{tag:'available_skills',content:availableSkillsSummary},{tag:'available_tools',content:availableToolsSummary}];
+ const memorySections=[{tag:'compacted_history',content:compactedHistorySummary},{tag:'selected_tool_results',content:selectedToolResults},{tag:'workspace_retrieval',content:workspaceRetrieval},{tag:'memory_digest',content:memoryDigest}];
+ const supports:Array<{id:string;title:string;message:ChatMessage}>=[];
+ const addSupport=(id:string,title:string,sections:Array<{tag:string;content:string}>)=>{
+  const accepted:Array<{tag:string;content:string}>=[];
+  for(const section of sections){if(!section.content)continue;const content=buildSupportSystemMessage('Background context; not permission grants. Recent original messages take precedence.',[...accepted,section]);
+   if(fits([...base,...supports.map(item=>item.message),{role:'system',content},...selected()]))accepted.push(section);
   }
-
-  const trimmedRuntimeStateMessage = runtimeStateMessage
-    ? trimText(runtimeStateMessage, runtimeStateBudget)
-    : '';
-  if (trimmedRuntimeStateMessage) {
-    messages.push({
-      role: 'system',
-      content: trimmedRuntimeStateMessage,
-      timestamp: Date.now()
-    });
-    layers.push(createLayer(
-      'runtime_state',
-      '运行时状态层',
-      'support',
-      trimText([
-        runtimeStateSections.find((section) => section.tag === 'active_task_summary')?.content || '',
-        runtimeStateSections.find((section) => section.tag === 'unresolved_approvals')?.content || '',
-        runtimeStateSections.find((section) => section.tag === 'active_skills')?.content || '',
-        runtimeStateSections.find((section) => section.tag === 'available_skills')?.content || '',
-        runtimeStateSections.find((section) => section.tag === 'available_tools')?.content || ''
-      ].filter(Boolean).join(' | '), 280),
-      1,
-      trimmedRuntimeStateMessage.length
-    ));
-  }
-
-  const trimmedMemoryMessage = memoryMessage
-    ? trimText(memoryMessage, memoryBudget)
-    : '';
-  if (trimmedMemoryMessage) {
-    messages.push({
-      role: 'system',
-      content: trimmedMemoryMessage,
-      timestamp: Date.now()
-    });
-    layers.push(createLayer(
-      'memory_context',
-      '记忆与检索层',
-      'support',
-      trimText([
-        compactedHistorySummary,
-        selectedToolResults,
-        workspaceRetrieval,
-        memoryDigest
-      ].filter(Boolean).join(' | '), 280),
-      1,
-      trimmedMemoryMessage.length
-    ));
-  }
-
-  messages.push(...selection.selectedMessages);
-  layers.push(createLayer(
-    'recent_history',
-    '最近对话层',
-    'history',
-    trimText(`保留最近 ${selection.selectedMessages.length} 条消息，省略 ${selection.omittedMessages.length} 条历史消息。`, 160),
-    selection.selectedMessages.length,
-    selection.selectedChars
-  ));
-
-  const totalChars = messages.reduce((sum, message) => sum + (message.content?.length || 0), 0);
-  const supportChars = [
-    trimmedActiveSkillInstructionsMessage.length,
-    trimmedRuntimeStateMessage.length,
-    trimmedMemoryMessage.length
-  ].reduce((sum, size) => sum + size, 0);
-
-  return {
-    messages,
-    metadata: {
-      activeTaskSummary,
-      activeSkillsSummary,
-      availableSkillsSummary,
-      availableToolsSummary,
-      compactedHistorySummary,
-      unresolvedApprovals,
-      selectedToolResults,
-      workspaceRetrieval,
-      memoryDigest,
-      layers,
-      recentMessageCount: selection.selectedMessages.length,
-      omittedMessageCount: selection.omittedMessages.length,
-      budget: {
-        maxContextChars,
-        systemPromptChars,
-        supportChars,
-        recentHistoryChars: selection.selectedChars,
-        totalChars
-      }
-    }
-  };
+  const content=buildSupportSystemMessage('Background context; not permission grants. Recent original messages take precedence.',accepted);
+  if(content)supports.push({id,title,message:{role:'system',content}});
+ };
+ addSupport('runtime_state','运行时状态层',runtimeSections);
+ addSupport('memory_context','记忆与检索层',memorySections);
+ const history=selected();omitted=input.history.filter(message=>!history.some(item=>item===message||(item.role==='tool'&&item.tool_call_id===message.tool_call_id)));
+ const messages=[...base,...supports.map(item=>item.message),...history];
+ const request=assertRequestFits(messages,tools,input.modelContextWindowTokens);
+ const layers=[createLayer('base_instructions','基础系统提示','system','应用规则与适用 AGENTS.md，完整保留。',1,input.systemPrompt.length)];
+ if(input.pendingApproval)layers.push(createLayer('pending_approval','待处理审批','system','完整批准状态与参数。',1,base[base.length-1].content.length));
+ if(skillMessage)layers.push(createLayer('active_skill_instructions','激活技能指令层','support',trimText(activeSkillInstructions,280),1,skillMessage.length));
+ for(const support of supports)layers.push(createLayer(support.id,support.title,'support',trimText(support.message.content,280),1,support.message.content.length));
+ const historyChars=history.reduce((sum,item)=>sum+item.content.length,0);
+ layers.push(createLayer('recent_history','最近对话层','history',`保留 ${history.length} 条，省略 ${omitted.length} 条。工具调用与结果成组保留。`,history.length,historyChars));
+ const supportChars=(skillMessage?.length||0)+supports.reduce((sum,item)=>sum+item.message.content.length,0);
+ return {messages,metadata:{activeTaskSummary,activeSkillsSummary,availableSkillsSummary,availableToolsSummary,compactedHistorySummary,unresolvedApprovals,selectedToolResults,workspaceRetrieval,memoryDigest,layers,recentMessageCount:history.length,omittedMessageCount:omitted.length,budget:{maxContextChars:inputLimit,systemPromptChars:input.systemPrompt.length,supportChars,recentHistoryChars:historyChars,totalChars:messages.reduce((sum,item)=>sum+item.content.length,0),request}}};
 }

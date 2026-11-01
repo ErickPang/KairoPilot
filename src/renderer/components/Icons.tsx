@@ -1,28 +1,29 @@
-import { 
-  MessageSquare, 
-  Settings, 
-  Shield, 
-  User, 
-  Bot, 
-  Wrench, 
-  Send, 
-  Trash2, 
-  Edit2, 
-  Plus, 
-  X, 
-  RefreshCw, 
+import {
+  MessageSquare,
+  Settings,
+  Shield,
+  Bot,
+  Trash2,
+  Edit2,
+  Plus,
+  X,
+  RefreshCw,
   Folder,
   Cpu,
   ArrowLeft,
   ArrowUp,
   ArrowDown,
   Check,
-  Terminal,
   ChevronDown,
   Puzzle,
   Activity,
   Search,
-  Zap
+  Zap,
+  Code2,
+  Eye,
+  Maximize2,
+  Minimize2,
+  Link2,
 } from 'lucide-react';
 import { CSSProperties } from 'react';
 
@@ -57,9 +58,6 @@ export const IconChevronDown = ({ size = 24, className = '', ...props }: IconPro
   <ChevronDown size={size} className={className} strokeWidth={1.5} {...props} />
 );
 
-export const IconTerminal = ({ size = 24, className = '', ...props }: IconProps) => (
-  <Terminal size={size} className={className} strokeWidth={1.5} {...props} />
-);
 
 export const IconChat = ({ size = 24, className = '', ...props }: IconProps) => (
   <MessageSquare size={size} className={className} strokeWidth={1.5} {...props} />
@@ -77,21 +75,12 @@ export const IconShield = ({ size = 24, className = '', ...props }: IconProps) =
   <Shield size={size} className={className} strokeWidth={1.5} {...props} />
 );
 
-export const IconUser = ({ size = 24, className = '', ...props }: IconProps) => (
-  <User size={size} className={className} strokeWidth={1.5} {...props} />
-);
 
 export const IconBot = ({ size = 24, className = '', ...props }: IconProps) => (
   <Bot size={size} className={className} strokeWidth={1.5} {...props} />
 );
 
-export const IconTool = ({ size = 24, className = '', ...props }: IconProps) => (
-  <Wrench size={size} className={className} strokeWidth={1.5} {...props} />
-);
 
-export const IconSend = ({ size = 24, className = '', ...props }: IconProps) => (
-  <Send size={size} className={className} strokeWidth={1.5} {...props} />
-);
 
 export const IconTrash = ({ size = 24, className = '', ...props }: IconProps) => (
   <Trash2 size={size} className={className} strokeWidth={1.5} {...props} />
@@ -127,4 +116,24 @@ export const IconSkill = ({ size = 24, className = '', ...props }: IconProps) =>
 
 export const IconSearch = ({ size = 24, className = '', ...props }: IconProps) => (
   <Search size={size} className={className} strokeWidth={1.5} {...props} />
+);
+
+export const IconCode = ({ size = 24, className = '', ...props }: IconProps) => (
+  <Code2 size={size} className={className} strokeWidth={1.5} {...props} />
+);
+
+export const IconPreview = ({ size = 24, className = '', ...props }: IconProps) => (
+  <Eye size={size} className={className} strokeWidth={1.5} {...props} />
+);
+
+export const IconExpand = ({ size = 24, className = '', ...props }: IconProps) => (
+  <Maximize2 size={size} className={className} strokeWidth={1.5} {...props} />
+);
+
+export const IconCollapse = ({ size = 24, className = '', ...props }: IconProps) => (
+  <Minimize2 size={size} className={className} strokeWidth={1.5} {...props} />
+);
+
+export const IconLink = ({ size = 24, className = '', ...props }: IconProps) => (
+  <Link2 size={size} className={className} strokeWidth={1.5} {...props} />
 );

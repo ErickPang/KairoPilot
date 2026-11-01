@@ -3,6 +3,7 @@ import { createHash } from 'crypto';
 
 const fsMocks = vi.hoisted(() => ({
   mkdir: vi.fn(async () => undefined),
+  realpath: vi.fn(async (value: string) => value),
   access: vi.fn(async () => undefined),
   stat: vi.fn(async () => ({ isDirectory: () => false })),
   readFile: vi.fn(async () => ''),
@@ -40,6 +41,9 @@ vi.mock('../../store/audit', () => ({
   addAuditLog: auditMocks.addAuditLog
 }));
 
+const archiveMocks=vi.hoisted(()=>({extract:vi.fn(),find:vi.fn()}));
+vi.mock('../skills/skillImportUtils',()=>({extractImportedSkillArchive:archiveMocks.extract,findImportedSkillFiles:archiveMocks.find}));
+
 import { PluginManager, pluginManager } from './manager';
 import { PermissionGuard } from '../security/permissions';
 
@@ -53,6 +57,12 @@ const installedPlugin = {
   filePath: '/tmp/kairopilot-test/plugins/broken-plugin_public.js',
   scope: 'public'
 };
+
+async function loadInstalledTools(manager:PluginManager=pluginManager,agentId?:string,permissions?:PermissionGuard){
+ const installed=await manager.getInstalledPlugins();const tools=[];
+ for(const plugin of installed)tools.push(...await manager.loadPluginTools({pluginId:plugin.id,scope:plugin.scope},agentId,permissions));
+ return tools;
+}
 
 describe('PluginManager audit visibility', () => {
   beforeEach(() => {
@@ -81,12 +91,50 @@ describe('PluginManager audit visibility', () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it.each(['../outside','nested/plugin','..\\outside','/tmp/escape','C:\\escape','.','..','bad\0id','%2e%2e%2foutside'])('rejects unsafe external plugin ID %s before registry install',async(id)=>{
+    vi.stubGlobal('fetch',vi.fn(async()=>({ok:true,text:async()=>JSON.stringify([{...installedPlugin,id,source:{type:'inline',code:'module.exports.tools=[];'}}])})));
+    const manager=new PluginManager();
+    await expect(manager.preparePluginInstallReview({id,scope:'public',registryUrl:'https://registry.invalid/plugins.json'})).rejects.toThrow('not found in registry');
+    expect(fsMocks.writeFile).not.toHaveBeenCalled();expect(configMocks.savePluginRegistry).not.toHaveBeenCalled();
+  });
+
+  it('rejects a traversal ID in a ZIP manifest before reading code or writing a target',async()=>{
+    fsMocks.stat.mockResolvedValue({isDirectory:()=>false,isFile:()=>true} as never);
+    archiveMocks.find.mockResolvedValue(['/tmp/unpacked/plugin.json']);
+    fsMocks.readFile.mockResolvedValue(JSON.stringify({...installedPlugin,id:'../outside'}));
+    await expect(new PluginManager().preparePluginImportReview({sourceFile:'/tmp/import.zip',scope:'public'})).rejects.toThrow('Invalid plugin manifest');
+    expect(fsMocks.readFile).toHaveBeenCalledExactlyOnceWith('/tmp/unpacked/plugin.json','utf-8');
+    expect(fsMocks.writeFile).not.toHaveBeenCalled();expect(configMocks.savePluginRegistry).not.toHaveBeenCalled();
+  });
+
+  it('installs a reviewed external plugin with a safe dotted ID inside the plugin directory',async()=>{
+    const id='com.example.safe-plugin';
+    vi.stubGlobal('fetch',vi.fn(async()=>({ok:true,text:async()=>JSON.stringify([{...installedPlugin,id,source:{type:'inline',code:'module.exports.tools=[];'}}])})));
+    const manager=new PluginManager();const review=await manager.preparePluginInstallReview({id,scope:'agent:workbench',registryUrl:'https://registry.invalid/plugins.json'});
+    await manager.installReviewedPlugin({requestId:review.requestId});
+    expect(fsMocks.writeFile).toHaveBeenCalledWith('/tmp/kairopilot-test/plugins/com.example.safe-plugin_agent_workbench.js','module.exports.tools=[];','utf-8');
+  });
+
+  it('keeps loading and executing after plugin log, warn and error messages',async()=>{
+    fsMocks.readFile.mockResolvedValue(`
+      console.log('loading');console.warn('warning');console.error('error log');
+      module.exports.tools=[{name:'logged_tool',description:'Logged tool',parameters:z.object({}),execute:async()=>{
+        console.log('executing');console.warn('warning');console.error('error log');
+        return {value:42,__console:'log'};
+      }}];
+    `);
+    const tools=await loadInstalledTools(new PluginManager());expect(tools).toHaveLength(1);
+    await expect(tools[0].execute({})).resolves.toEqual({value:42,__console:'log'});
+    expect(auditMocks.addAuditLog).not.toHaveBeenCalledWith(expect.objectContaining({tool:'plugin_load_failed'}));
   });
 
   it('audits plugin load failures', async () => {
     fsMocks.readFile.mockRejectedValue(new Error('read failed'));
 
-    const tools = await pluginManager.loadAllTools();
+    const tools = await loadInstalledTools();
 
     expect(tools).toEqual([]);
     expect(auditMocks.addAuditLog).toHaveBeenCalledWith({
@@ -155,7 +203,7 @@ module.exports.tools = [
 ];
 `);
 
-    const tools = await pluginManager.loadAllTools();
+    const tools = await loadInstalledTools();
 
     expect(tools).toHaveLength(1);
     expect(tools[0].metadata).toEqual({
@@ -179,7 +227,7 @@ module.exports.tools = [
 ];
 `);
 
-    const tools = await pluginManager.loadAllTools();
+    const tools = await loadInstalledTools();
 
     await expect(tools[0].execute({ value: 'ok' })).resolves.toEqual({
       value: 'ok',
@@ -199,7 +247,7 @@ module.exports.tools = [
 ];
 `);
 
-    const tools = await pluginManager.loadAllTools();
+    const tools = await loadInstalledTools();
 
     await expect(tools[0].execute({ value: 123 })).rejects.toThrow(
       'Invalid plugin tool arguments for strict_tool: value: Invalid input: expected string, received number'
@@ -221,7 +269,7 @@ module.exports.tools = [
 `);
 
     const isolatedPluginManager = new PluginManager({ executeTimeoutMs: 50 });
-    const tools = await isolatedPluginManager.loadAllTools();
+    const tools = await loadInstalledTools(isolatedPluginManager);
 
     await expect(tools[0].execute({})).rejects.toThrow('Plugin tool timed out after 50ms.');
   });
@@ -238,7 +286,7 @@ module.exports.tools = [
 ];
 `);
 
-    const tools = await pluginManager.loadAllTools();
+    const tools = await loadInstalledTools();
 
     expect(tools).toEqual([]);
     expect(auditMocks.addAuditLog).toHaveBeenCalledWith(expect.objectContaining({
@@ -276,7 +324,7 @@ module.exports.tools = [
       shell: { enabled: false, allowedCommands: [] }
     });
 
-    const tools = await pluginManager.loadAllTools('agent-1', permissions);
+    const tools = await loadInstalledTools(pluginManager,'agent-1',permissions);
 
     expect(tools).toEqual([]);
     expect(fsMocks.readFile).not.toHaveBeenCalled();
@@ -337,7 +385,7 @@ module.exports.tools = [
       shell: { enabled: false, allowedCommands: [] }
     });
 
-    const tools = await pluginManager.loadAllTools('agent-1', permissions);
+    const tools = await loadInstalledTools(pluginManager,'agent-1',permissions);
 
     expect(tools.map((tool) => tool.name)).toEqual(['local_tool']);
     expect(auditMocks.addAuditLog).toHaveBeenCalledWith(expect.objectContaining({
@@ -369,7 +417,7 @@ module.exports.tools = [
 ];
 `);
 
-    const tools = await pluginManager.loadAllTools();
+    const tools = await loadInstalledTools();
 
     expect(tools).toEqual([]);
     expect(auditMocks.addAuditLog).toHaveBeenCalledWith(expect.objectContaining({
@@ -386,7 +434,7 @@ module.exports.tools = [
   it('skips plugin files that exceed the sandbox code size limit', async () => {
     fsMocks.readFile.mockResolvedValue('x'.repeat(256 * 1024 + 1));
 
-    const tools = await pluginManager.loadAllTools();
+    const tools = await loadInstalledTools();
 
     expect(tools).toEqual([]);
     expect(auditMocks.addAuditLog).toHaveBeenCalledWith({
@@ -420,7 +468,7 @@ module.exports.tools = [
     }]);
     fsMocks.readFile.mockResolvedValue(code);
 
-    const tools = await pluginManager.loadAllTools();
+    const tools = await loadInstalledTools();
 
     expect(tools).toEqual([]);
     expect(auditMocks.addAuditLog).toHaveBeenCalledWith({
@@ -465,7 +513,7 @@ module.exports.tools = [
 ];
 `);
 
-    const tools = await pluginManager.loadAllTools();
+    const tools = await loadInstalledTools();
 
     expect(tools).toEqual([]);
     expect(fsMocks.readFile).not.toHaveBeenCalled();
@@ -594,4 +642,17 @@ module.exports.tools = [
       })
     ]);
   });
+  it('lists eligible manifest metadata without reading or evaluating plugin code',async()=>{
+    configMocks.getPluginRegistry.mockReturnValue([{...installedPlugin,id:'eligible',tools:[{name:'forecast',description:'Weather'}]},{...installedPlugin,id:'disabled',enabled:false,tools:[{name:'blocked',description:'Disabled'}]},{...installedPlugin,id:'private',scope:'agent:other',tools:[{name:'private',description:'Private'}]}]);
+    const catalog=await pluginManager.listToolCatalog('workbench');expect(catalog.map(item=>item.pluginId)).toEqual(['eligible']);expect(fsMocks.readFile).not.toHaveBeenCalled();
+  });
+  it('rechecks enabled state and code integrity immediately before an action',async()=>{
+    const code="module.exports.tools=[{name:'probe',description:'Synthetic probe',parameters:z.object({}),execute:async()=>({ok:true})}];";
+    configMocks.getPluginRegistry.mockReturnValue([{...installedPlugin,tools:[{name:'probe',description:'Probe'}]}]);fsMocks.readFile.mockResolvedValue(code);
+    const [tool]=await pluginManager.loadPluginTools({pluginId:installedPlugin.id,scope:'public',names:['probe']});
+    configMocks.getPluginRegistry.mockReturnValue([{...installedPlugin,enabled:false,tools:[{name:'probe',description:'Probe'}]}]);await expect(tool.execute({})).rejects.toThrow('disabled');
+    configMocks.getPluginRegistry.mockReturnValue([{...installedPlugin,version:'2.0.0',tools:[{name:'probe',description:'Probe'}]}]);await expect(tool.execute({})).rejects.toThrow('replaced');
+    configMocks.getPluginRegistry.mockReturnValue([{...installedPlugin,tools:[{name:'probe',description:'Probe'}]}]);fsMocks.readFile.mockResolvedValue(code+'\n// edited');await expect(tool.execute({})).rejects.toThrow('changed after discovery');
+  });
+
 });

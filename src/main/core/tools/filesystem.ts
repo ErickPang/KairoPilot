@@ -23,6 +23,7 @@ export const ReadFileTool: ToolDefinition = {
 
 export const WriteFileTool: ToolDefinition = {
   name: 'write_file',
+  metadata: { source: 'builtin' },
   description: 'Write content to a file at the specified path. Overwrites if exists.',
   parameters: z.object({
     path: z.string().describe('The absolute path to the file to write.'),
@@ -61,6 +62,7 @@ export const ListDirectoryTool: ToolDefinition = {
 
 export const DeleteFileTool: ToolDefinition = {
   name: 'delete_file',
+  metadata: { source: 'builtin' },
   description: 'Delete a file or directory at the specified path.',
   parameters: z.object({
     path: z.string().describe('The absolute path to the file or directory to delete.'),

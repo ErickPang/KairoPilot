@@ -1,8 +1,12 @@
+export type { WorkbenchConfig,WorkbenchSettingsInput,TaskExecutionSettings } from '../shared/contracts';
+import type { SessionProjectContext } from '../shared/contracts';
 import type { ChatAttachment } from '../shared/contracts';
 
 export type {
   AgentConfig,
   AgentStats,
+  OllamaModelInfo,
+  OllamaListModelsResult,
   AgentPermissionConfig,
   AppearanceConfig,
   AppearanceTheme,
@@ -12,7 +16,6 @@ export type {
   AuditLogQueryResult,
   ContextAssemblyBudget,
   KairoPilotConfig,
-  LegacyAgentConfig,
   ModelConfig,
   MonitoringTokenQuery,
   MonitoringTokenQueryResult,
@@ -47,6 +50,7 @@ export interface Message {
   role: 'user' | 'assistant' | 'system' | 'tool' | 'thinking';
   content?: string;
   attachments?: ChatAttachment[];
+  references?: import('../shared/contracts').ContextReference[];
   details?: Record<string, unknown>;
   tool_calls?: Record<string, unknown>[];
   tool_call_id?: string;
@@ -69,7 +73,7 @@ export interface SystemStats {
   uptime: number;
 }
 
-export interface Session {
+export interface Session extends SessionProjectContext {
   id: string;
   title: string;
   agentId?: string;
@@ -78,13 +82,7 @@ export interface Session {
   updatedAt: number;
 }
 
-export interface SessionSummary {
-  id: string;
-  title: string;
-  agentId?: string;
-  createdAt: number;
-  updatedAt: number;
-}
+export type SessionSummary = import('../shared/contracts').SessionSummary;
 
 export interface ConfirmationRequest {
   id: string;

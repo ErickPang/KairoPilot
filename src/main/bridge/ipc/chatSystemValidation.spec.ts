@@ -46,10 +46,8 @@ describe('chatSystemValidation', () => {
     }, 'run query')).toEqual({});
   });
 
-  it('normalizes legacy run trace string input', () => {
-    expect(parseIpcInput(RunTraceInputSchema, 'run-1', 'run trace query')).toEqual({
-      runId: 'run-1'
-    });
+  it('rejects retired run trace string input', () => {
+    expect(()=>parseIpcInput(RunTraceInputSchema,'run-1','run trace query')).toThrow('Invalid run trace query');
   });
 
   it('normalizes run trace pagination to the backend trace limits', () => {
@@ -73,11 +71,8 @@ describe('chatSystemValidation', () => {
     }, 'token usage query')).toThrow('Invalid token usage query');
   });
 
-  it('normalizes legacy audit query limits and rejects unsafe filters', () => {
-    expect(parseIpcInput(AuditLogQueryInputSchema, 50, 'audit log query')).toEqual({
-      page: 1,
-      pageSize: 50
-    });
+  it('normalizes structured audit query limits and rejects unsafe filters', () => {
+    expect(()=>parseIpcInput(AuditLogQueryInputSchema,50,'audit log query')).toThrow('Invalid audit log query');
 
     expect(parseIpcInput(AuditLogQueryInputSchema, {
       page: '2',

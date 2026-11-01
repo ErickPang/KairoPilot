@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const chatStoreMocks = vi.hoisted(() => ({
+  registerPreparedAttachments: vi.fn(),
   getSessionById: vi.fn(),
-  migrateLegacyAttachmentsForSession: vi.fn()
 }));
 
 const attachmentMocks = vi.hoisted(() => ({
@@ -16,21 +16,17 @@ const auditMocks = vi.hoisted(() => ({
   addAuditLog: vi.fn()
 }));
 
-const configStoreMocks = vi.hoisted(() => ({
-  getActiveAgentId: vi.fn(),
-  getAgent: vi.fn()
-}));
+
 
 vi.mock('../store/chat', () => chatStoreMocks);
 vi.mock('../store/attachments', () => attachmentMocks);
 vi.mock('../store/audit', () => auditMocks);
-vi.mock('../store/config', () => configStoreMocks);
+vi.mock('./workbenchConfigService',()=>({getWorkbenchConfig:()=>({managementRoot:'/workspace/agent-1'})}));
 
 import {
   ACTIVE_AGENT_ATTACHMENT_ERROR,
   ACTIVE_SESSION_ATTACHMENT_ERROR,
   deleteAttachmentForActiveSession,
-  getSessionWithLegacyAttachmentMigration,
   prepareAttachmentsForActiveAgent
 } from './chatAttachmentService';
 
@@ -39,17 +35,11 @@ describe('chatAttachmentService', () => {
     for (const mock of [
       ...Object.values(chatStoreMocks),
       ...Object.values(attachmentMocks),
-      ...Object.values(auditMocks),
-      ...Object.values(configStoreMocks)
+      ...Object.values(auditMocks)
     ]) {
       mock.mockReset();
     }
 
-    configStoreMocks.getActiveAgentId.mockReturnValue('agent-1');
-    configStoreMocks.getAgent.mockReturnValue({
-      id: 'agent-1',
-      workspace: '/workspace/agent-1'
-    });
     attachmentMocks.getWorkspaceAttachmentUploadsRoot.mockReturnValue('/workspace/agent-1/.kairopilot/uploads');
     attachmentMocks.scheduleAttachmentCleanup.mockReturnValue({ scheduled: true, reason: 'scheduled' });
   });
@@ -95,15 +85,8 @@ describe('chatAttachmentService', () => {
     }));
   });
 
-  it('rejects attachment preparation outside the active agent', async () => {
-    chatStoreMocks.getSessionById.mockReturnValue({
-      id: 'session-2',
-      title: 'Other',
-      agentId: 'agent-2',
-      messages: [],
-      createdAt: 1,
-      updatedAt: 1
-    });
+  it('rejects attachment preparation for a missing task', async () => {
+    chatStoreMocks.getSessionById.mockReturnValue(null);
 
     await expect(prepareAttachmentsForActiveAgent({
       sessionId: 'session-2',
@@ -137,29 +120,5 @@ describe('chatAttachmentService', () => {
       }
     })).rejects.toThrow(ACTIVE_SESSION_ATTACHMENT_ERROR);
     expect(attachmentMocks.deleteAttachmentFile).not.toHaveBeenCalled();
-  });
-
-  it('migrates legacy attachments only after active agent ownership passes', async () => {
-    const session = {
-      id: 'session-1',
-      title: 'Owned',
-      agentId: 'agent-1',
-      messages: [],
-      createdAt: 1,
-      updatedAt: 1
-    };
-    chatStoreMocks.getSessionById.mockReturnValue(session);
-    chatStoreMocks.migrateLegacyAttachmentsForSession.mockResolvedValue(2);
-
-    await expect(getSessionWithLegacyAttachmentMigration('session-1')).resolves.toEqual(session);
-
-    expect(chatStoreMocks.migrateLegacyAttachmentsForSession).toHaveBeenCalledWith('session-1', '/workspace/agent-1');
-    expect(auditMocks.addAuditLog).toHaveBeenCalledWith({
-      tool: 'migrate_legacy_attachments',
-      args: { sessionId: 'session-1' },
-      result: { migrated: 2 },
-      sessionId: 'session-1',
-      policyTags: ['attachment:migrate']
-    });
   });
 });

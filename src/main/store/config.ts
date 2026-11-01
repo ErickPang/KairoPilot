@@ -3,7 +3,6 @@ export type {
   AgentPermissionConfig,
   AppearanceConfig,
   KairoPilotConfig,
-  LegacyAgentConfig,
   ModelConfig,
   PluginRegistryEntry,
   ProviderConfig,
@@ -12,11 +11,9 @@ export type {
 
 export {
   ensureKairoPilotConfigWorkspaces,
-  getKairoPilotConfig,
   initializeKairoPilotConfig,
   loadKairoPilotConfigFromDisk,
   normalizeConfig,
-  persistKairoPilotConfigMigrations,
   readKairoPilotConfig,
   redactKairoPilotConfigSecrets,
   saveKairoPilotConfig,
@@ -36,21 +33,8 @@ export {
 export {
   deleteModel,
   getModel,
-  getModelForAgent,
+  getModelForBinding,
   getModels,
   getRedactedModels,
   saveModel
 } from './configModels';
-
-export {
-  createAgentDraft,
-  deleteAgent,
-  deleteAgentWorkspace,
-  getActiveAgentId,
-  getAgent,
-  getAgentConfig,
-  getAgents,
-  saveAgent,
-  saveAgentConfig,
-  setActiveAgentId
-} from './configAgents';

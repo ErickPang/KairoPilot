@@ -4,6 +4,11 @@ import electron from 'vite-plugin-electron/simple';
 
 // https://vitejs.dev/config/
 export default defineConfig({
+  build: {
+    rollupOptions: {
+      output: { manualChunks: { react: ['react', 'react-dom'], markdown: ['react-markdown', 'remark-gfm'] } }
+    }
+  },
   plugins: [
     react(),
     electron({

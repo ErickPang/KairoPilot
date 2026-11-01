@@ -1,6 +1,6 @@
 import {
-  getSessionById,
-  migrateLegacyAttachmentsForSession
+  registerPreparedAttachments,
+  getSessionById
 } from '../store/chat';
 import {
   deleteAttachmentFile,
@@ -9,48 +9,20 @@ import {
   scheduleAttachmentCleanup
 } from '../store/attachments';
 import { addAuditLog } from '../store/audit';
-import { getActiveAgentId, getAgent } from '../store/config';
+import { getWorkbenchConfig } from './workbenchConfigService';
 import type { ChatAttachment, PrepareAttachmentInput } from '../../shared/contracts';
 
 export const ACTIVE_AGENT_ATTACHMENT_ERROR = 'Session does not belong to the active agent.';
 export const ACTIVE_SESSION_ATTACHMENT_ERROR = 'Attachment does not belong to the active session.';
-export const ACTIVE_AGENT_WORKSPACE_ERROR = 'Active agent workspace is not configured.';
+export const ACTIVE_AGENT_WORKSPACE_ERROR = 'Workbench storage is not configured.';
 
 function getSessionForActiveAgent(sessionId: string) {
   const session = getSessionById(sessionId);
-  const activeAgentId = getActiveAgentId();
-  if (!session || (activeAgentId && session.agentId !== activeAgentId)) {
-    return null;
-  }
+  if (!session) return null;
   return session;
 }
 
-export async function getSessionWithLegacyAttachmentMigration(sessionId: string) {
-  const session = getSessionForActiveAgent(sessionId);
-  if (!session) {
-    return null;
-  }
-
-  const activeAgentId = getActiveAgentId();
-  const agent = getAgent(session.agentId || activeAgentId || '');
-  if (!agent?.workspace) {
-    return session;
-  }
-
-  const migrated = await migrateLegacyAttachmentsForSession(session.id, agent.workspace);
-  if (migrated > 0) {
-    addAuditLog({
-      tool: 'migrate_legacy_attachments',
-      args: { sessionId: session.id },
-      result: { migrated },
-      sessionId: session.id,
-      policyTags: ['attachment:migrate']
-    });
-    return getSessionById(sessionId);
-  }
-
-  return session;
-}
+export async function getTaskSession(sessionId: string) { return getSessionForActiveAgent(sessionId); }
 
 export async function prepareAttachmentsForActiveAgent(params: {
   sessionId: string;
@@ -61,8 +33,7 @@ export async function prepareAttachmentsForActiveAgent(params: {
     throw new Error(ACTIVE_AGENT_ATTACHMENT_ERROR);
   }
 
-  const activeAgentId = getActiveAgentId();
-  const agent = getAgent(session.agentId || activeAgentId || '');
+  const agent = {workspace:getWorkbenchConfig().managementRoot};
   if (!agent?.workspace) {
     throw new Error(ACTIVE_AGENT_WORKSPACE_ERROR);
   }
@@ -73,6 +44,7 @@ export async function prepareAttachmentsForActiveAgent(params: {
     workspace: agent.workspace,
     files: params.files
   });
+  registerPreparedAttachments(session.id, attachments);
   const cleanup = scheduleAttachmentCleanup(agent.workspace);
 
   addAuditLog({

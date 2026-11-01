@@ -1,0 +1,20 @@
+import fs from 'node:fs';import os from 'node:os';import path from 'node:path';
+import {afterEach,describe,expect,it} from 'vitest';
+import {discoverInstructions,readAgentsDirectory,writeAgentsFile,renderInstructions} from './agents';
+import {PromptBuilder} from '../llm/prompt';
+import {assembleRuntimeContext} from '../context/assembler';
+const roots:string[]=[];const root=()=>{const p=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),'kairo-agents-')));roots.push(p);return p;};
+afterEach(()=>roots.splice(0).forEach(p=>fs.rmSync(p,{recursive:true,force:true})));
+describe('AGENTS instruction chain',()=>{
+ it('merges global and root-to-cwd instructions, selects one override per directory and does not scan siblings',()=>{
+  const base=root(),global=path.join(base,'global'),repo=path.join(base,'repo'),cwd=path.join(repo,'src');fs.mkdirSync(cwd,{recursive:true});fs.mkdirSync(path.join(repo,'.git'));fs.mkdirSync(path.join(repo,'other'));writeAgentsFile(global,'GLOBAL');writeAgentsFile(repo,'ROOT');writeAgentsFile(cwd,'CHILD');fs.writeFileSync(path.join(cwd,'AGENTS.override.md'),'OVERRIDE');fs.writeFileSync(path.join(repo,'other','AGENTS.md'),'SIBLING');
+  const sources=discoverInstructions(global,cwd);expect(sources.map(item=>item.content)).toEqual(['GLOBAL','ROOT','OVERRIDE']);expect(renderInstructions(sources)).not.toContain('SIBLING');
+ });
+ it('uses AGENTS.md when override is empty and accepts a missing instruction file',()=>{const p=root();writeAgentsFile(p,'RULE');fs.writeFileSync(path.join(p,'AGENTS.override.md'),'  ');expect(readAgentsDirectory(p,'project')?.content).toBe('RULE');expect(readAgentsDirectory(path.join(p,'missing'),'project')).toBeUndefined();});
+ it('rejects oversized content and symlinked instruction files instead of reading outside scope',()=>{const p=root();expect(()=>writeAgentsFile(p,'界'.repeat(12000))).toThrow('32 KiB');const outside=path.join(root(),'outside.md');fs.writeFileSync(outside,'OUTSIDE');fs.symlinkSync(outside,path.join(p,'AGENTS.md'));expect(()=>readAgentsDirectory(p,'project')).toThrow('regular file');});
+ it('does not silently truncate combined instructions',()=>{const p=root(),repo=path.join(p,'repo'),global=path.join(p,'global');writeAgentsFile(global,'G'.repeat(18000));writeAgentsFile(repo,'P'.repeat(18000));expect(()=>discoverInstructions(global,repo)).toThrow('Combined');});
+ it('preserves assembled plan and rules even when a retired project file exists',()=>{const p=root();fs.writeFileSync(path.join(p,'KAIROPILOT.md'),'OLD_FILE');const prompt=PromptBuilder.buildSystemPrompt({workspace:p,instructions:'GLOBAL_RULE\nPROJECT_RULE\nAPPROVED_PLAN'});expect(prompt).toContain('GLOBAL_RULE');expect(prompt).toContain('APPROVED_PLAN');expect(prompt).not.toContain('OLD_FILE');});
+ it('rebuilds same-length changed history, rules and skill content without stale cached results',()=>{const p=root();const input={workspace:p,systemPrompt:'RULE_A',history:[{role:'user' as const,content:'AAAA'}]};const first=assembleRuntimeContext(input);const second=assembleRuntimeContext({...input,systemPrompt:'RULE_B',history:[{role:'user',content:'BBBB'}]});expect(first.messages.some(m=>m.content==='AAAA')).toBe(true);expect(second.messages.some(m=>m.content==='BBBB')).toBe(true);expect(second.messages[0].content).toBe('RULE_B');});
+ it('fingerprints same-length modifications and changes in the selected override',()=>{const p=root();writeAgentsFile(p,'AAAA');const first=readAgentsDirectory(p,'global')!;writeAgentsFile(p,'BBBB');expect(readAgentsDirectory(p,'global')?.hash).not.toBe(first.hash);fs.writeFileSync(path.join(p,'AGENTS.override.md'),'BBBB');expect(readAgentsDirectory(p,'global')?.path).not.toBe(first.path);});
+ it('can explicitly edit the active override without overwriting the base file',()=>{const p=root();writeAgentsFile(p,'BASE');writeAgentsFile(p,'OVERRIDE','AGENTS.override.md');writeAgentsFile(p,'EDITED','AGENTS.override.md');expect(fs.readFileSync(path.join(p,'AGENTS.md'),'utf8')).toBe('BASE');expect(readAgentsDirectory(p,'global')?.content).toBe('EDITED');});
+});

@@ -155,6 +155,20 @@ const vm = require('node:vm');
 const zodModule = require('zod');
 const z = zodModule.z || zodModule;
 
+function createSafeConsole() {
+  return Object.freeze({
+    log: (...args) => {
+      try { parentPort.postMessage({ __console: 'log', args: JSON.parse(JSON.stringify(args)) }); } catch (_) {}
+    },
+    warn: (...args) => {
+      try { parentPort.postMessage({ __console: 'warn', args: JSON.parse(JSON.stringify(args)) }); } catch (_) {}
+    },
+    error: (...args) => {
+      try { parentPort.postMessage({ __console: 'error', args: JSON.parse(JSON.stringify(args)) }); } catch (_) {}
+    }
+  });
+}
+
 function toJsonSchema(parameters) {
   try {
     if (!parameters || typeof parameters.safeParse !== 'function') {
@@ -174,10 +188,23 @@ function toJsonSchema(parameters) {
   try {
     const sandbox = Object.freeze({
       module: { exports: { tools: [] } },
-      console,
-      z
+      console: createSafeConsole(),
+      z: Object.freeze({ ...z })
     });
     const context = vm.createContext(sandbox);
+    // Block prototype chain escape vectors
+    const globals = [context, context.Object, context.Array, context.Function,
+      context.String, context.Number, context.Boolean, context.Date, context.RegExp,
+      context.Error, context.Promise, context.JSON, context.Math];
+    for (const g of globals) {
+      if (!g || !g.prototype) continue;
+      try { Object.freeze(g.prototype); } catch (_) {}
+      try {
+        Object.defineProperty(g.prototype, 'constructor', {
+          value: g, configurable: false, enumerable: false, writable: false
+        });
+      } catch (_) {}
+    }
     const script = new vm.Script(workerData.code, { filename: workerData.filename });
     script.runInContext(context, { timeout: workerData.loadTimeoutMs });
 
@@ -209,6 +236,20 @@ const { parentPort, workerData } = require('node:worker_threads');
 const vm = require('node:vm');
 const zodModule = require('zod');
 const z = zodModule.z || zodModule;
+
+function createSafeConsole() {
+  return Object.freeze({
+    log: (...args) => {
+      try { parentPort.postMessage({ __console: 'log', args: JSON.parse(JSON.stringify(args)) }); } catch (_) {}
+    },
+    warn: (...args) => {
+      try { parentPort.postMessage({ __console: 'warn', args: JSON.parse(JSON.stringify(args)) }); } catch (_) {}
+    },
+    error: (...args) => {
+      try { parentPort.postMessage({ __console: 'error', args: JSON.parse(JSON.stringify(args)) }); } catch (_) {}
+    }
+  });
+}
 
 function normalizePluginResult(result, maxBytes) {
   if (result === undefined) {
@@ -242,10 +283,23 @@ function formatValidationIssues(error) {
   try {
     const sandbox = Object.freeze({
       module: { exports: { tools: [] } },
-      console,
-      z
+      console: createSafeConsole(),
+      z: Object.freeze({ ...z })
     });
     const context = vm.createContext(sandbox);
+    // Block prototype chain escape vectors
+    const globals = [context, context.Object, context.Array, context.Function,
+      context.String, context.Number, context.Boolean, context.Date, context.RegExp,
+      context.Error, context.Promise, context.JSON, context.Math];
+    for (const g of globals) {
+      if (!g || !g.prototype) continue;
+      try { Object.freeze(g.prototype); } catch (_) {}
+      try {
+        Object.defineProperty(g.prototype, 'constructor', {
+          value: g, configurable: false, enumerable: false, writable: false
+        });
+      } catch (_) {}
+    }
     const script = new vm.Script(workerData.code, { filename: workerData.filename });
     script.runInContext(context, { timeout: workerData.loadTimeoutMs });
 
@@ -279,8 +333,9 @@ function formatValidationIssues(error) {
 })();
 `;
 
+const PluginIdSchema = z.string().trim().max(160).regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/);
 const PluginManifestSchema = z.object({
-  id: z.string().trim().min(1),
+  id: PluginIdSchema,
   name: z.string().trim().min(1),
   description: z.string().trim().min(1),
   version: z.string().trim().min(1),
@@ -405,6 +460,10 @@ async function fetchJson(url: string) {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
+}
+
+function isPluginConsoleMessage(value: unknown): boolean {
+  return isRecord(value) && ['log', 'warn', 'error'].includes(String(value.__console));
 }
 
 function normalizePluginManifest(value: unknown): PluginManifest | null {
@@ -560,7 +619,7 @@ export class PluginManager {
     if (scope === 'public') {
       return true;
     }
-    if (agentId && scope === `agent:${agentId}`) {
+    if (agentId === 'workbench' && scope === 'agent:workbench') {
       return true;
     }
     return !agentId && scope === 'workspace';
@@ -680,6 +739,9 @@ export class PluginManager {
               .join('; ');
             throw new Error(`Invalid plugin tool arguments for ${toolName}: ${issueText}`);
           }
+          const current=(await this.getInstalledPlugins()).find(item=>item.id===plugin.id&&item.scope===plugin.scope);
+          if (!current || current.enabled===false || current.codeHash!==plugin.codeHash || current.version!==plugin.version || (plugin.tools.length>0&&!current.tools.some(tool=>tool.name===toolName)) || this.getPluginPermissionDenials(current,permissions).length || this.getToolPermissionDenials(current,toolName,permissions).length) throw new Error('Plugin was disabled, replaced, or is outside the active permission policy. Search tools again.');
+          if(hashPluginCode(await fs.readFile(codePath,'utf8'))!==hashPluginCode(code)) throw new Error('Plugin code changed after discovery. Review and reinstall before executing.');
           return this.executePluginToolInWorker({
             code,
             codePath,
@@ -726,7 +788,8 @@ export class PluginManager {
         });
       }, PLUGIN_LOAD_TIMEOUT_MS);
 
-      worker.once('message', (message: unknown) => {
+      worker.on('message', (message: unknown) => {
+        if (isPluginConsoleMessage(message)) return;
         finish(() => {
           void worker.terminate();
           const payload = message as { ok?: boolean; tools?: DiscoveredPluginTool[]; error?: string };
@@ -793,7 +856,8 @@ export class PluginManager {
         });
       }, this.executeTimeoutMs);
 
-      worker.once('message', (message: unknown) => {
+      worker.on('message', (message: unknown) => {
+        if (isPluginConsoleMessage(message)) return;
         finish(() => {
           void worker.terminate();
           const payload = message as { ok?: boolean; result?: unknown; error?: string };
@@ -987,8 +1051,12 @@ export class PluginManager {
   }
 
   private getPluginTargetFilePath(id: string, scope: string) {
+    const safeId = PluginIdSchema.parse(id);
     const safeScope = scope.replace(/[^a-zA-Z0-9_-]/g, '_');
-    return path.join(this.pluginsDir, `${id}_${safeScope}.js`);
+    const directory = path.resolve(this.pluginsDir);
+    const target = path.resolve(directory, `${safeId}_${safeScope}.js`);
+    if (path.dirname(target) !== directory) throw new Error('Plugin target must remain inside the plugin directory.');
+    return target;
   }
 
   private findInstalledPlugin(id: string, scope: string) {
@@ -1131,6 +1199,7 @@ export class PluginManager {
       ...params.plugin,
       manifest: manifestValidation.data
     };
+    if (!['public', 'workspace', 'agent:workbench'].includes(params.scope)) throw new Error('Historical Agent plugin scopes are read-only. Import the plugin into the workbench first.');
     const existingPlugin = this.findInstalledPlugin(normalizedPlugin.manifest.id, params.scope);
     if (existingPlugin && !params.allowExisting) {
       throw new Error(`Plugin ${normalizedPlugin.manifest.id} is already installed in scope ${params.scope}.`);
@@ -1248,6 +1317,8 @@ export class PluginManager {
       throw new Error('Plugin install request not found or already handled.');
     }
 
+    const targetFilePath = this.getPluginTargetFilePath(preparedInstall.plugin.manifest.id, preparedInstall.scope);
+    if (targetFilePath !== preparedInstall.targetFilePath) throw new Error('Plugin install target changed after review.');
     await fs.mkdir(this.pluginsDir, { recursive: true });
     let previousVersion: InstalledPlugin['previousVersion'] | undefined;
     if (preparedInstall.existingPlugin) {
@@ -1286,11 +1357,11 @@ export class PluginManager {
       }
     }
 
-    await fs.writeFile(preparedInstall.targetFilePath, preparedInstall.plugin.code, 'utf-8');
+    await fs.writeFile(targetFilePath, preparedInstall.plugin.code, 'utf-8');
     const nextPlugin: InstalledPlugin = {
       ...preparedInstall.plugin.manifest,
       installedAt: preparedInstall.existingPlugin?.installedAt ?? Date.now(),
-      filePath: preparedInstall.targetFilePath,
+      filePath: targetFilePath,
       scope: preparedInstall.scope,
       codeHash: preparedInstall.codeHash,
       source: preparedInstall.plugin.source,
@@ -1362,8 +1433,7 @@ export class PluginManager {
     } catch (e) { /* ignore */ }
 
     // Differentiate filename if scope is agent specific, or just use ID since pluginsDir is flat
-    const safeScope = scope.replace(/[^a-zA-Z0-9_-]/g, '_');
-    const filePath = path.join(targetDir, `${id}_${safeScope}.js`);
+    const filePath = this.getPluginTargetFilePath(id, scope);
     await fs.writeFile(filePath, code, 'utf-8');
 
     const newPlugin: InstalledPlugin = {
@@ -1446,10 +1516,17 @@ export class PluginManager {
     return scopedPlugins.length;
   }
 
-  async loadAllTools(agentId?: string, permissions?: PermissionGuard): Promise<ToolDefinition[]> {
+  /** Registry metadata only: discovery must not evaluate plugin code. */
+  async listToolCatalog(agentId?: string, permissions?: PermissionGuard) {
+    const installed = await this.getInstalledPlugins();
+    return installed.filter(plugin => plugin.enabled !== false && this.isSupportedScope(plugin.scope,agentId) && this.getPluginPermissionDenials(plugin,permissions).length===0)
+      .flatMap(plugin => plugin.tools.filter(tool=>this.getToolPermissionDenials(plugin,tool.name,permissions).length===0).map(tool=>({pluginId:plugin.id,pluginName:plugin.name,scope:plugin.scope,name:tool.name,description:tool.description,pluginDescription:plugin.description})));
+  }
+
+  async loadPluginTools(selection:{pluginId:string;scope:string;names?:string[]}, agentId?: string, permissions?: PermissionGuard): Promise<ToolDefinition[]> {
     await this.init();
     const installed = await this.getInstalledPlugins();
-    const pluginsToLoad = installed.filter((plugin) => this.isSupportedScope(plugin.scope, agentId));
+    const pluginsToLoad = installed.filter(plugin => plugin.id===selection.pluginId && plugin.scope===selection.scope && this.isSupportedScope(plugin.scope, agentId));
     const allTools: ToolDefinition[] = [];
     const seenToolNames = new Set<string>();
 
@@ -1519,7 +1596,7 @@ export class PluginManager {
         }
         const discoveredTools = await this.discoverPluginToolsInWorker({ code, codePath });
         const loadedTools = this.normalizePluginTools(plugin, code, codePath, discoveredTools, permissions);
-        for (const tool of loadedTools) {
+        for (const tool of loadedTools.filter(tool=>!selection.names || selection.names.includes(tool.name))) {
           if (seenToolNames.has(tool.name)) {
             console.warn(`[PluginManager] Skipping duplicate tool name ${tool.name} from plugin ${plugin.id}.`);
             continue;

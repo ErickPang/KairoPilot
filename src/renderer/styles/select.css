@@ -1,0 +1,21 @@
+:root[data-theme] .workbench-app .custom-select { position: relative; min-width: 0; display: block; }
+:root[data-theme] .workbench-app .custom-select .custom-select-trigger { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; min-height: 36px; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--control-radius); background: var(--input-bg); color: var(--foreground); font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+:root[data-theme] .workbench-app .custom-select .custom-select-trigger:hover:enabled { background: var(--surface-muted); }
+:root[data-theme] .workbench-app .custom-select.is-inline .custom-select-trigger { border-color: transparent; background: transparent; min-height: 30px; padding: 4px 6px; }
+:root[data-theme] .workbench-app .custom-select-trigger-content { display: flex; align-items: center; gap: 7px; min-width: 0; }
+:root[data-theme] .workbench-app .custom-select-trigger-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: inherit; font-weight: 500; }
+:root[data-theme] .workbench-app .custom-select-trigger > svg { flex-shrink: 0; color: var(--muted-fg); }
+:root[data-theme] .workbench-app .custom-select-popover { z-index: 1300; display: flex; flex-direction: column; overflow: hidden; padding: 6px; border: 1px solid var(--border); border-radius: var(--popover-radius); color: var(--foreground); background: var(--surface-panel); box-shadow: 0 10px 30px rgb(var(--shadow-rgb) / .16); font-size: 13px; }
+:root[data-theme] .workbench-app .custom-select-popover .custom-select-options { flex: 1; min-height: 0; max-height: none; overflow-y: auto; padding: 0; }
+:root[data-theme] .workbench-app .custom-select-popover .custom-select-option { display: flex; gap: 7px; align-items: flex-start; padding: 9px 10px; min-height: 36px; border-radius: var(--menu-item-radius); color: var(--foreground); cursor: pointer; }
+:root[data-theme] .workbench-app .custom-select-popover .custom-select-option:is(.is-selected,.is-highlighted) { background: var(--surface-muted); color: var(--foreground); }
+:root[data-theme] .workbench-app .custom-select-popover .custom-select-option[aria-disabled='true'] { opacity: .4; cursor: default; }
+.custom-select-popover .custom-select-option-check { order: 2; flex: 0 0 16px; padding-top: 1px; margin-left: auto; }
+.custom-select-popover .custom-select-option-copy { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.custom-select-popover .custom-select-option-label-row { display: flex; gap: 7px; align-items: center; font-weight: 500; }
+.custom-select-popover .custom-select-option-description { display: block; margin-top: 3px; color: var(--muted-fg); font-size: 11px; line-height: 1.5; }
+.custom-select-popover .custom-select-group, .custom-select-popover .custom-select-dropdown-title { padding: 8px; color: var(--muted-fg); font-size: 11px; font-weight: 600; }
+.custom-select-popover .custom-select-empty { padding: 12px; color: var(--muted-fg); }
+.custom-select-popover .select-search { flex-shrink: 0; margin-bottom: 5px; padding: 9px 10px; border: 0; border-bottom: 1px solid var(--border-soft); border-radius: 0; color: var(--foreground); background: transparent; font: inherit; width: 100%; }
+.custom-select-popover .select-footer { border-top: 1px solid var(--border-soft); margin-top: 4px; padding: 5px; }
+.custom-select-popover .select-footer button { width: 100%; justify-content: flex-start; background: transparent; border: 0; padding: 7px; color: var(--muted-fg); }

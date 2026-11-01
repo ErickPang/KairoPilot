@@ -1,3 +1,8 @@
+# Local credentials
+.env
+.env.*
+!.env.example
+
 # Logs
 logs
 *.log
@@ -26,7 +31,6 @@ demo.json
 *.njsproj
 *.sln
 *.sw?
-*.test.ts
 name.md
 guihua.md
 ceshi.md
@@ -35,8 +39,14 @@ ceshi.md
 HARNESS_ANALYSIS.md
 AGENTS.md
 *.AGENTS.md
-docs
-.github
+# Keep scratch docs/workflows local; explicitly ship workbench documentation and verification.
+/docs/*
+!/docs/architecture.md
+!/docs/releases.md
+/.github/*
+!/.github/workflows/
+/.github/workflows/*
+!/.github/workflows/verify.yml
 .qwen
 .trae
 .claude

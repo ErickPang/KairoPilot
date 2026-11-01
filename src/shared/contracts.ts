@@ -1,8 +1,29 @@
 export type ProviderType = 'openai' | 'openrouter' | 'ollama' | 'anthropic' | 'deepseek' | 'zhipu' | 'kimi' | 'qianwen' | 'custom'
 
+export interface OllamaModelInfo {
+  name: string
+  model: string
+  modified_at: string
+  size: number
+  digest: string
+  details: {
+    parent_model: string
+    format: string
+    family: string
+    families: string[]
+    parameter_size: string
+    quantization_level: string
+  }
+}
+
+export interface OllamaListModelsResult {
+  models: OllamaModelInfo[]
+}
+
 export interface ModelOption {
   id: string
   name: string
+  contextWindowTokens?: number
 }
 
 export interface ProviderConfig {
@@ -23,6 +44,7 @@ export interface ModelConfig {
   apiKeyStored?: boolean
   model: string
   availableModels?: ModelOption[]
+  contextWindowTokens?: number
 }
 
 export type ProviderProtocol = 'openai-compatible' | 'native'
@@ -125,9 +147,31 @@ export interface AgentConfig {
   workspace: string
   workspaceName?: string
   systemPrompt: string
-  identityPrompt: string
-  userPrompt: string
-  soulPrompt: string
+  instructionRoot?: string
+  instructionSources?: Array<{path:string;hash:string;scope:'global'|'project'}>
+  model: string
+  permissions: AgentPermissionConfig
+}
+
+/** Unified workbench settings. */
+export interface WorkbenchConfig {
+  version: 2
+  defaultModel: string
+  managementRoot: string
+  instructionRoot?: string
+  permissions: AgentPermissionConfig
+  instructions: string
+  instructionPath?: string
+  instructionsHash?: string
+}
+
+export type WorkbenchSettingsInput = Pick<WorkbenchConfig,'defaultModel'|'permissions'|'instructions'>
+
+export interface TaskExecutionSettings {
+  intelligenceBudget?: IntelligenceBudget
+  delegation?: 'off' | 'auto' | 'manual'
+  workflow?: 'direct' | 'plan'
+  template?: TaskTemplate | null
   model: string
   permissions: AgentPermissionConfig
 }
@@ -223,6 +267,7 @@ export interface MonitoringTokenUsageItem {
 }
 
 export interface MonitoringTokenQuery {
+  projectId?: string
   agentId?: string
   page?: number
   pageSize?: number
@@ -297,11 +342,17 @@ export interface DeleteAttachmentRequest {
 }
 
 export interface AgentChatRequest {
+  sessionId: string
+  referenceIds?: string[]
+  draftRevision?: number
   content: string
   attachments?: ChatAttachment[]
 }
 
-export type RuntimeUpdateEvent =
+export type RuntimeUpdateEvent = { agentId?: string; sessionId?: string } & (
+  | { type: 'session-title-updated'; runId: string; title: string }
+  | {type:'queue-dispatched';runId:string;queueId:string;content:string;attachments?:ChatAttachment[];references?:ContextReference[]}
+  | { type: 'draft-accepted'; runId: string; revision: number; referenceIds: string[]; attachmentIds: string[] }
   | {
       type: 'thinking'
       content: string
@@ -362,12 +413,14 @@ export type RuntimeUpdateEvent =
       status: 'waiting_approval'
     }
   | {
-      type: 'run-paused' | 'run-cancelled'
+      type: 'run-paused' | 'run-cancelled' | 'run-failed'
       runId: string
       stepId?: string
-      status: 'paused' | 'cancelled'
+      status: 'paused' | 'cancelled' | 'failed'
       error?: string
     }
+
+)
 
 export type RunStepType =
   | 'plan'
@@ -395,11 +448,189 @@ export interface RunSummary {
   updatedAt: number
   startedAt?: number
   completedAt?: number
+  executionContext?: RunExecutionContext
+}
+
+export interface ProjectSummary {
+  authorized?: boolean
+  instructionPath?:string
+  rules?: string
+  memory?: string
+  id: string
+  name: string
+  rootPath: string
+  createdAt: number
+  previousProjectId?: string
+}
+
+
+
+export interface SessionSummary extends SessionProjectContext {
+  id: string
+  title: string
+  agentId?: string
+  createdAt: number
+  updatedAt: number
+  runStatus?: RunStatus
+}
+
+export interface SessionListQuery {
+  projectId?: string | null
+  filter?: 'open' | 'archived' | 'unread' | 'all'
+  search?: string
+  limit?: number
+  before?: { updatedAt: number; id: string }
+  includeSessionId?: string
+  includeActiveSession?: boolean
+}
+
+export interface SessionListPage {
+  items: SessionSummary[]
+  total: number
+  nextCursor?: { updatedAt: number; id: string }
+  selectedSession?: SessionSummary
+}
+
+export interface MessagePageQuery {
+  sessionId: string
+  limit?: number
+  before?: { timestamp: number; rowId: number; generation: number }
+}
+
+export interface SessionMessagePage<T> {
+  session: SessionSummary
+  messages: T[]
+  total: number
+  generation: number
+  nextCursor?: { timestamp: number; rowId: number; generation: number }
+}
+
+export interface TaskChangeSummary {
+  path: string
+  artifactIds: string[]
+  runIds: string[]
+  operation: 'created' | 'modified' | 'deleted' | 'no_remaining_file'
+  hasDiscontinuity: boolean
+  diffAvailable: boolean
+  availability: 'available' | 'changed' | 'missing' | 'denied'
+}
+
+export interface SessionProjectContext {
+  executionSettings?: TaskExecutionSettings
+  projectId?: string
+  executionRoot?: string
+  archivedAt?: number
+  activityVersion?: number
+  readVersion?: number
+}
+
+export interface ContextReference {
+  id: string
+  sessionId: string
+  agentId: string
+  projectId?: string
+  path: string
+  name: string
+  kind: 'file' | 'directory'
+  createdAt: number
+  availability?: 'available' | 'missing' | 'denied'
+}
+
+export interface TaskDraftInput {
+  input: string
+  referenceIds: string[]
+  attachmentIds: string[]
+}
+
+export interface QueuedTaskMessage {
+ id:string
+ sessionId:string
+ revision:number
+ position:number
+ createdAt:number
+ status:'queued'|'blocked'|'dispatching'|'sent'
+ data:TaskDraftInput
+ error?:string
+ runId?:string
+}
+
+export interface TaskDraft extends TaskDraftInput {
+  revision: number
+  references: ContextReference[]
+  attachments: ChatAttachment[]
+  missingAttachmentIds: string[]
+}
+
+export interface RunExecutionContext extends SessionProjectContext {
+  instructionVersion?:1
+  instructionSources?: Array<{path:string;hash:string;scope:'global'|'project'}>
+  acceptance?:string
+  intelligenceBudget?: IntelligenceBudget
+  delegation?: 'off' | 'auto' | 'manual'
+  memorySnapshot?: ProjectMemorySnapshot
+  phase?: 'planning' | 'execution'
+  planId?: string
+  planRevision?: number
+  version?: 2
+  sessionId?: string
+  rulesHash?: string
+  agentId: string
+  agentWorkspace: string
+  executionRoot: string
+  model: string
+  provider: ProviderType
+  permissionsHash: string
+  modelConfigHash?: string
+}
+
+export interface TaskArtifact {
+  id: string
+  runId: string
+  sessionId: string
+  toolCallId: string
+  path: string
+  operation: 'created' | 'modified' | 'deleted' | 'written'
+  createdAt: number
+  beforeHash?: string
+  afterHash?: string
+  diffAvailable: boolean
+  availability?: 'available' | 'changed' | 'missing' | 'denied'
+}
+
+export interface VerificationRecord {
+  id: string
+  runId: string
+  sessionId: string
+  toolCallId: string
+  command: string
+  cwd: string
+  status: 'passed' | 'failed' | 'interrupted'
+  exitCode?: number
+  stdout: string
+  stderr: string
+  createdAt: number
+  outputAvailable?: boolean
+}
+
+export interface TaskResults {
+  changes?: TaskChangeSummary[]
+  artifacts: TaskArtifact[]
+  verifications: VerificationRecord[]
+}
+
+export interface ArtifactDiff {
+  oldText: string
+  newText: string
+  path: string
 }
 
 export type RunQueryStatus = 'all' | RunStatus
 
 export interface RunQuery {
+  projectId?: string
+  model?: string
+  startTime?: number
+  endTime?: number
   page?: number
   pageSize?: number
   search?: string
@@ -443,7 +674,7 @@ export interface ApprovalRecord {
   sessionId?: string
   toolName: string
   args: Record<string, unknown>
-  status: 'pending' | 'approved' | 'denied'
+  status: 'pending' | 'approved' | 'denied' | 'invalidated'
   metadata?: Record<string, unknown>
   createdAt: number
   updatedAt: number
@@ -463,7 +694,20 @@ export interface ToolCallRecord {
   updatedAt: number
 }
 
+export interface RequestContextBudget {
+  contextTokens: number
+  outputTokens: number
+  safetyTokens: number
+  inputLimitTokens: number
+  messageTokens: number
+  toolTokens: number
+  estimatedInputTokens: number
+  estimator: 'utf8_bytes_with_vision_reserve'
+  source: 'model_limit' | 'local_fallback'
+}
+
 export interface ContextAssemblyBudget {
+  request?: RequestContextBudget
   maxContextChars: number
   systemPromptChars: number
   supportChars: number
@@ -941,16 +1185,14 @@ export type AppearanceTheme = 'system' | 'light' | 'dark' | 'slate' | 'warm'
 
 export interface AppearanceConfig {
   theme: AppearanceTheme
+  clipboardSuggestions?: boolean
 }
 
 export interface KairoPilotConfig {
+  workbench?: WorkbenchConfig
   version: string
   models: {
     providers: Record<string, ProviderConfig>
-  }
-  agents: {
-    activeAgentId: string
-    list: AgentConfig[]
   }
   plugins: {
     registry: PluginRegistryEntry[]
@@ -960,24 +1202,6 @@ export interface KairoPilotConfig {
   }
   appearance: AppearanceConfig
   webSearch: WebSearchConfig
-}
-
-export interface LegacyAgentConfig {
-  provider: ProviderType
-  apiKey: string
-  apiKeyStored?: boolean
-  baseUrl: string
-  model: string
-  workspace: string
-  systemPrompt: string
-  enableShell: boolean
-  enableNetwork?: boolean
-  enableFileSystemRead?: boolean
-  enableFileSystemWrite?: boolean
-  allowedPaths?: string[]
-  allowedDomains?: string[]
-  allowedCommands?: string[]
-  permissions?: AgentPermissionConfig
 }
 
 export const DEFAULT_SHELL_COMMANDS = [
@@ -1046,4 +1270,86 @@ export function createDefaultAgentPermissions(): AgentPermissionConfig {
       allowedCommands: []
     }
   }
+}
+
+
+
+export interface TaskTemplate {
+  id:string
+  version:number
+  name:string
+  instructions:string
+  output:string
+  acceptance:string
+  builtin:boolean
+}
+export type TaskPlanStatus='planning'|'pending'|'rejected'|'superseded'|'executing'|'completed'|'failed';
+export interface TaskPlan {
+ investigations?:PlanningInvestigation[]
+ memorySnapshot?:ProjectMemorySnapshot
+ id:string
+ sessionId:string
+ revision:number
+ status:TaskPlanStatus
+ goal:string
+ body:string
+ model:string
+ referenceIds:string[]
+ attachmentIds:string[]
+ fingerprint:string
+ scope?:{directory:string;profile:ExecutionProfile}
+ approvedRevision?:number
+ planningRunId?:string
+ executionRunId?:string
+ error?:string
+ createdAt:number
+ updatedAt:number
+}
+
+export interface PlanningInvestigation {tool:string;args:Record<string,unknown>;digest:string}
+
+
+export interface ProjectMemorySnapshot {
+  projectId: string
+  entries: Array<{id: string; revision: number; content: string}>
+}
+export interface ProjectMemoryEntry {
+  id: string
+  projectId: string
+  key: string
+  content: string
+  status: 'active' | 'conflict' | 'forgotten' | 'superseded'
+  forgottenStatus?: 'active' | 'conflict'
+  revision: number
+  sourceSessionId: string
+  sourceRunId: string
+  quote: string
+  updatedAt: number
+}
+export interface ProjectMemoryState {
+  enabled: boolean
+  epoch: number
+  entries: ProjectMemoryEntry[]
+  jobs: Array<{runId: string; status: 'queued'|'running'|'completed'|'failed'|'cancelled'|'skipped'; revision:number;attempt:number; reason?: 'capacity'|'budget'; error?: string}>
+}
+export interface IntelligenceBudget {maxTokens:number;maxRetries:number}
+export interface IntelligenceUsage {charged:number;reported:number;reserved:number;unknownRequests:number}
+export interface IntelligenceBudgetState extends IntelligenceUsage {limit:number;remaining:number}
+export interface DelegationTraceEntry {id:string;time:number;attempt:number;kind:'model'|'tool';name:string;status:'running'|'completed'|'failed';input?:string;output?:string}
+export interface DelegatedTask {
+  id: string
+  sessionId: string
+  parentRunId: string
+  goal: string
+  status: 'running' | 'completed' | 'failed' | 'cancelled'
+  result: string
+  error?: string
+  model: string
+  revision: number
+  createdAt: number
+  updatedAt: number
+  attempt?: number
+  usage?: IntelligenceUsage
+  parentBudget?: IntelligenceBudgetState
+  trace?: DelegationTraceEntry[]
 }

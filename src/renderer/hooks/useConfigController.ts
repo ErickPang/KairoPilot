@@ -1,142 +1,48 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  AppConfirmationOptions,
-  KairoPilotConfig,
-  ModelConfig,
-  SessionContextState,
-  SessionContextUpdate
-} from '../types';
-import { I18nContextValue } from '../components/layout/I18nContext';
-import { canInitAgentFromConfig, toModelList } from './configUtils';
+import { useCallback,useEffect,useMemo,useRef,useState } from 'react';
+import type { AgentConfig,AppConfirmationOptions, KairoPilotConfig,SessionContextState,SessionContextUpdate,WorkbenchSettingsInput } from '../types';
+import type { I18nContextValue } from '../components/layout/I18nContext';
+import { toModelList } from './configUtils';
 import { useModelConfig } from './useModelConfig';
-import { useAgentConfig } from './useAgentConfig';
 import { KAIRO_INVOKE } from '../../shared/ipc';
-import { createErrorNotice, getErrorMessage, logRendererError } from './errorUtils';
-
-interface UseConfigControllerOptions {
-  sessionContext: SessionContextState;
-  requestConfirmation: (request: AppConfirmationOptions) => Promise<boolean>;
-  t: I18nContextValue['t'];
-  updateSessionContext: (patch: SessionContextUpdate) => void;
-  loadActiveSession: () => Promise<void>;
-  loadSessions: () => Promise<void>;
+import { createErrorNotice,getErrorMessage } from './errorUtils';
+interface Options {
+  sessionContext:SessionContextState;
+  requestConfirmation:(request:AppConfirmationOptions)=>Promise<boolean>;
+  t:I18nContextValue['t'];updateSessionContext:(patch:SessionContextUpdate)=>void;
+  loadActiveSession:()=>Promise<void>;loadSessions:()=>Promise<void>;
 }
-
-export function useConfigController(options: UseConfigControllerOptions) {
-  const { sessionContext, requestConfirmation, t, updateSessionContext, loadActiveSession, loadSessions } = options;
-  const [models, setModels] = useState<ModelConfig[]>([]);
-  const [agents, setAgents] = useState<KairoPilotConfig['agents']['list']>([]);
-  const autoInitializedAgentIdRef = useRef<string | null>(null);
-
-  const applyConfigToState = useCallback((fullConfig: KairoPilotConfig) => {
-    setModels(toModelList(fullConfig.models.providers || {}));
-    setAgents(fullConfig.agents.list || []);
-    updateSessionContext({
-      activeAgentId: fullConfig.agents.activeAgentId || null
-    });
-  }, [updateSessionContext]);
-
-  const refreshConfig = useCallback(async () => {
-    const fullConfig = await window.kairo.invoke(KAIRO_INVOKE.configGetAll);
-    applyConfigToState(fullConfig);
-    return fullConfig;
-  }, [applyConfigToState]);
-
-  useEffect(() => {
-    const loadConfig = async () => {
+export function useConfigController({requestConfirmation,t,updateSessionContext,loadActiveSession,loadSessions}:Options) {
+  const [config,setConfig]=useState<KairoPilotConfig|null>(null);
+  const initialization=useRef<Promise<unknown>|null>(null);
+  const [initializing,setInitializing]=useState(true);
+  const refreshConfig=useCallback(async()=> {
+    const value=await window.kairo.invoke(KAIRO_INVOKE.configGetAll);
+    setConfig(value);updateSessionContext({activeAgentId:'workbench'});return value;
+  },[updateSessionContext]);
+  useEffect(()=> {
+    let cancelled=false;
+    const load=async()=> {
       try {
-        const fullConfig = await window.kairo.invoke(KAIRO_INVOKE.configGetAll);
-        if (!fullConfig) {
-          return;
-        }
-
-        applyConfigToState(fullConfig);
-
-        const activeAgentId = fullConfig.agents.activeAgentId || null;
-
-        if (!canInitAgentFromConfig(fullConfig, activeAgentId)) {
-          autoInitializedAgentIdRef.current = null;
-          return;
-        }
-
-        if (autoInitializedAgentIdRef.current === activeAgentId) {
-          return;
-        }
-
-        try {
-          const result = await window.kairo.invoke(KAIRO_INVOKE.agentInit, activeAgentId) as {
-            success?: boolean;
-            error?: string;
-          } | null;
-          if (result?.success) {
-            autoInitializedAgentIdRef.current = activeAgentId;
-            await loadSessions();
-            await loadActiveSession();
-            return;
-          }
-
-          autoInitializedAgentIdRef.current = null;
-          updateSessionContext({
-            appNotice: createErrorNotice(t('app.error.initAgent', { error: result?.error || 'Unknown error' }), 'auto_init')
-          });
-        } catch (error) {
-          autoInitializedAgentIdRef.current = null;
-          logRendererError('Auto-init failed', error);
-          updateSessionContext({
-            appNotice: createErrorNotice(t('app.error.initAgent', { error: getErrorMessage(error) }), 'auto_init')
-          });
-        }
-      } catch (error) {
-        logRendererError('Failed to load config', error);
-        updateSessionContext({
-          appNotice: createErrorNotice(t('app.error.loadConfig', { error: getErrorMessage(error) }), 'load_config')
-        });
-      }
+        await refreshConfig();
+        initialization.current ||= window.kairo.invoke(KAIRO_INVOKE.workbenchInit).finally(()=> {initialization.current=null;});
+        const result=await initialization.current as {success?:boolean;error?:string};
+        if(cancelled)return;
+        if(!result.success)throw new Error(result.error || 'Workbench initialization failed.');
+        updateSessionContext(current=>current.appNotice?.source==='auto_init'?{appNotice:null}:{});
+        await loadSessions();await loadActiveSession();
+      } catch(error) {if(!cancelled)updateSessionContext({appNotice:createErrorNotice(getErrorMessage(error),'auto_init')});}
+      finally {if(!cancelled)setInitializing(false);}
     };
-
-    loadConfig();
-  }, [applyConfigToState, loadActiveSession, loadSessions, t, updateSessionContext]);
-
-  const { availableModels, describeProvider, fetchModels, handleDeleteModel, handleSaveModel } = useModelConfig({
-    requestConfirmation,
-    refreshConfig: async () => {
-      await refreshConfig();
-    },
-    reportConfigError: (message, source) => {
-      updateSessionContext({
-        appNotice: createErrorNotice(message, source)
-      });
-    },
-    t
-  });
-  const { activeAgentName, handleDeleteAgent, handleSaveAgent, handleSetActiveAgent } = useAgentConfig({
-    agents,
-    models,
-    refreshConfig,
-    sessionContext,
-    requestConfirmation,
-    t,
-    updateSessionContext,
-    loadActiveSession,
-    loadSessions,
-    reportConfigError: (message, source) => {
-      updateSessionContext({
-        appNotice: createErrorNotice(message, source)
-      });
-    }
-  });
-
-  return {
-    activeAgentName,
-    agents,
-    availableModels,
-    describeProvider,
-    fetchModels,
-    handleDeleteAgent,
-    handleDeleteModel,
-    handleSaveAgent,
-    handleSaveModel,
-    handleSetActiveAgent,
-    models
-  };
+    void load();return()=>{cancelled=true;};
+  },[refreshConfig,loadActiveSession,loadSessions,updateSessionContext,t]);
+  const models=useMemo(()=>toModelList(config?.models.providers || {}),[config]);
+  const workbench=config?.workbench;
+  const agent=useMemo<AgentConfig|null>(()=>workbench?{id:'workbench',name:'KairoPilot',workspace:workbench.managementRoot,model:workbench.defaultModel,permissions:workbench.permissions,systemPrompt:workbench.instructions}:null,[workbench]);
+  const modelActions=useModelConfig({requestConfirmation,refreshConfig:async()=>{await refreshConfig();},reportConfigError:(message,source)=>updateSessionContext({appNotice:createErrorNotice(message,source)}),t});
+  const handleSaveWorkbench=useCallback(async(value:WorkbenchSettingsInput)=> {
+    const result=await window.kairo.invoke(KAIRO_INVOKE.configSaveWorkbench,{defaultModel:value.defaultModel,permissions:value.permissions,instructions:value.instructions});
+    if(!result.success)throw new Error(result.error || 'Unable to save workbench settings.');
+    await refreshConfig();
+  },[refreshConfig]);
+  return {...modelActions,models,workbench,handleSaveWorkbench,refreshWorkbenchConfig:refreshConfig,initializing,agents:agent?[agent]:[],activeAgentName:'KairoPilot'};
 }
