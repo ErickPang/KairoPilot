@@ -20,7 +20,7 @@ describe('agent handler execution boundaries', () => {
     const sender = {};
     services.runApprovalResponse.mockResolvedValue({ success: true });
     expect(await handlers.get(KAIRO_INVOKE.agentConfirmResponse)!({ sender }, { id: 'approval-1', approved: false })).toEqual({ success: true });
-    expect(services.runApprovalResponse).toHaveBeenCalledWith('approval-1', false, sender);
+    expect(services.runApprovalResponse).toHaveBeenCalledWith('approval-1', false, sender, 'once');
   });
   it.each([KAIRO_INVOKE.agentPauseRun, KAIRO_INVOKE.agentCancelRun])('does not persist unrelated history when %s fails', async (channel) => {
     services.controlStoredRun.mockRejectedValue(new Error('wrong run'));

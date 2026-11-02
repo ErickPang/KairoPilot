@@ -19,7 +19,7 @@ export class QuitDraftCoordinator {
   }
 }
 
-export function installQuitDraftProtection(getWindow: () => BrowserWindow | null, options: { onSaveFailure?: () => void } = {}) {
+export function installQuitDraftProtection(getWindow: () => BrowserWindow | null, options: { onSaveFailure?: () => void; beforeQuit?: () => Promise<void> } = {}) {
   let response: { id: string; senderId: number; finish: (saved: boolean) => void } | null = null;
   ipcMain.handle(KAIRO_INVOKE.appQuitDraftResponse, (event, value: unknown) => {
     if (!value || typeof value !== 'object') return false;
@@ -30,8 +30,7 @@ export function installQuitDraftProtection(getWindow: () => BrowserWindow | null
   });
   const coordinator = new QuitDraftCoordinator(async () => {
     const window = getWindow();
-    if (!window || window.isDestroyed()) return;
-    await new Promise<void>((resolve, reject) => {
+    if (window && !window.isDestroyed()) await new Promise<void>((resolve, reject) => {
       const id = randomUUID();
       const finish = (saved: boolean) => {
         clearTimeout(timer);
@@ -42,6 +41,7 @@ export function installQuitDraftProtection(getWindow: () => BrowserWindow | null
       response = { id, senderId: window.webContents.id, finish };
       window.webContents.send(KAIRO_EVENT.appBeforeQuit, { id });
     });
+    await options.beforeQuit?.();
   }, () => app.quit(), () => {
     const window = getWindow();
     window?.show(); window?.focus();

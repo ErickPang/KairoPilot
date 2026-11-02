@@ -26,6 +26,7 @@ import {memorySnapshotPrompt} from './projectMemoryService';
 import {withTaskExecution} from './workbenchExecution';
 
 const workers=new Map<string,AbortController>();
+export function stopAllDelegatedTasks() { for (const controller of workers.values()) controller.abort(); }
 function patchChild(id:string,patch:Partial<DelegatedTask>){
  const current=getDelegate(id);if(!current||!getRunById(current.parentRunId))throw new Error('Subtask no longer exists.');
  const next={...current,...patch,revision:current.revision+1,updatedAt:Date.now()};putDelegate(next);return next;

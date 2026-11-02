@@ -1,3 +1,4 @@
+import { recordConversationUpdate, setConversationUser } from '../../store/conversation';
 import {memorySnapshot,scheduleProjectMemory} from '../../services/projectMemoryService';
 import {PLANNING_PROMPT} from '../../../shared/taskTemplates';
 import {type TaskPlan} from '../../../shared/contracts';
@@ -19,7 +20,7 @@ import { executionAgentForTask } from '../../services/projectService';
 import { requireTask,settingsForTask } from '../../services/taskSettingsService';
 import { strictTaskModel } from '../../services/workbenchConfigService';
 import { getApprovalRecord, getRunById, getSessionById, updateRun, updateSessionMessages } from '../../store/chat';
-import { withTaskExecution, isTaskExecuting,isWorkbenchBusy } from '../../services/workbenchExecution';
+import { withTaskExecution, isTaskExecuting,isWorkbenchBusy,isWorkbenchShuttingDown } from '../../services/workbenchExecution';
 import type { AgentRuntime } from '../../core/agent/runtime';
 import type { ChatMessage } from '../../core/llm/types';
 import type { RuntimeExecutionResult, RuntimeUpdate } from '../../core/agent/runEngine';
@@ -80,6 +81,7 @@ export function createRuntimeUpdateForwarder(sender: WebContents, sessionId?: st
     if (owner?.id !== update.runId) {
       owner = getRunById(update.runId);
     }
+    recordConversationUpdate(update);
     if (sender.isDestroyed()) return;
     sender.send(KAIRO_EVENT.agentUpdate, {
       ...update,
@@ -178,11 +180,13 @@ async function runTaskChatWithinLease(request:AgentChatRequest,sender:WebContent
   if(approvedPlan)executionAgent.systemPrompt+=approvedPlanPrompt(approvedPlan);
   const executionContext={...executionContextForSession(session,executionAgent),memorySnapshot:selectedMemory,phase:planning?'planning' as const:'execution' as const,...(plan?{planId:plan.id,planRevision:plan.approvedRevision || plan.revision}:{})};
   const agent=await ensureAgentRuntime({agent:executionAgent,model:strictTaskModel(executionAgent.model),executionContext},sender);
+  if (isWorkbenchShuttingDown()) throw new Error('Application is quitting.');
   agent.setHistory(session.messages);
   try {
     const result=await agent.chat(request.content,createRuntimeUpdateForwarder(sender,session.id),{
       sessionId:session.id,agentId:WORKBENCH_OWNER,attachments,references,executionContext,
       onAccepted:()=>{
+        setConversationUser(agent.getActiveRunId()!, request.content, attachments, references);
         if (!queueId && request.draftRevision === undefined) persistAgentSessionHistory(agent, session.id);
         if(queueId){
           getDb().transaction(()=>{persistAgentSessionHistory(agent,session.id);acceptQueuedMessage(queueId,agent.getActiveRunId()!);})();
@@ -236,8 +240,10 @@ export async function runStoredAgentAction(
 ) {
   const run = getRunById(runId);
   if (!run) throw new Error(`Run not found: ${runId}`);
+  if (run.status === 'cancelled') throw new Error('This execution has ended. Start a new conversation.');
   try{return await withTaskExecution(run.sessionId, async () => {
     const { agent } = await resolveRuntimeForRun(runId, sender,false,planningApproval);
+    if (isWorkbenchShuttingDown()) throw new Error('Application is quitting.');
     try {
       const result=await operation(agent);
       persistAgentSessionHistory(agent,run.sessionId);
@@ -277,13 +283,15 @@ export function scheduleQueuedMessages(sender:WebContents){
  },0);
 }
 
-export async function runApprovalResponse(approvalId: string, approved: boolean, sender: WebContents) {
+export async function runApprovalResponse(approvalId: string, approved: boolean, sender: WebContents, scope: import('../../../shared/contracts').ApprovalDecisionScope = 'once') {
   const approval = getApprovalRecord(approvalId);
   if (!approval) throw new Error(`Approval record not found: ${approvalId}`);
+  const run = getRunById(approval.runId);
+  if (approval.status !== 'pending' || run?.status !== 'waiting_approval' || run.waitingApprovalId !== approval.id) throw new Error('Approval has expired. Start a new conversation.');
   const planning=getRunById(approval.runId)?.executionContext?.phase==='planning';
   if(planning&&!PLANNING_TOOLS.has(approval.toolName))throw new Error('Planning approval only permits read-only investigation.');
   return runStoredAgentAction(approval.runId, sender, (agent) => agent.resumeRun(
-    approvalId, approved, createRuntimeUpdateForwarder(sender, approval.sessionId)
+    approvalId, approved, createRuntimeUpdateForwarder(sender, approval.sessionId), scope
   ),planning);
 }
 

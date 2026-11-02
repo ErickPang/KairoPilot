@@ -1,36 +1,5 @@
-import type { RuntimeUpdateEvent, RunStep, RunSummary } from '../types';
-import type { ConfirmationRequest, Message, SessionContextState } from '../types';
-
-export function appendRuntimeMessage(previous: Message[], nextMessage: Message) {
-  const withoutTrailingThinking = previous[previous.length - 1]?.role === 'thinking'
-    ? previous.slice(0, -1)
-    : previous;
-  return [...withoutTrailingThinking, nextMessage];
-}
-
-export function upsertThinkingMessage(previous: Message[], content: string): Message[] {
-  const lastMessage = previous[previous.length - 1];
-  if (lastMessage?.role === 'thinking') {
-    return [...previous.slice(0, -1), { role: 'thinking' as const, content }];
-  }
-
-  return [...previous, { role: 'thinking' as const, content }];
-}
-
-export function upsertAssistantStreamMessage(previous: Message[], content: string): Message[] {
-  const withoutTrailingThinking = previous[previous.length - 1]?.role === 'thinking'
-    ? previous.slice(0, -1)
-    : previous;
-  const lastMessage = withoutTrailingThinking[withoutTrailingThinking.length - 1];
-  if (lastMessage?.role === 'assistant') {
-    return [...withoutTrailingThinking.slice(0, -1), {
-      ...lastMessage,
-      content
-    }];
-  }
-
-  return [...withoutTrailingThinking, { role: 'assistant' as const, content }];
-}
+import type { RuntimeUpdateEvent, RunSummary } from '../types';
+import type { ConfirmationRequest, SessionContextState } from '../types';
 
 export function isRuntimeUpdateForSession(current: SessionContextState, update: RuntimeUpdateEvent): boolean {
   if (current.latestRun && isRunUnsettled(current.latestRun) && current.latestRun.id !== update.runId) return false;
@@ -38,7 +7,7 @@ export function isRuntimeUpdateForSession(current: SessionContextState, update: 
   return Boolean(current.latestRun && current.latestRun.id === update.runId);
 }
 
-export function isRunUnsettled(run: RunSummary | null | undefined): boolean {
+export function isRunUnsettled(run: Pick<RunSummary, 'status'> | null | undefined): boolean {
   return Boolean(run && ['running', 'waiting_approval', 'paused'].includes(run.status));
 }
 
@@ -102,69 +71,9 @@ function patchRunSummary(current: RunSummary | null, update: RuntimeUpdateEvent)
   return current;
 }
 
-function patchRunSteps(currentSteps: RunStep[], update: RuntimeUpdateEvent): RunStep[] {
-  if (!('stepId' in update) || !update.stepId) {
-    return currentSteps;
-  }
-
-  let changed = false;
-  const nextSteps: RunStep[] = currentSteps.map((step): RunStep => {
-    if (step.id !== update.stepId) {
-      return step;
-    }
-
-    changed = true;
-
-    if (update.type === 'tool-error') {
-      return {
-        ...step,
-        status: 'failed',
-        error: update.error,
-        updatedAt: Date.now()
-      };
-    }
-
-    if (update.type === 'approval-required') {
-      return {
-        ...step,
-        status: 'waiting_approval',
-        updatedAt: Date.now()
-      };
-    }
-
-    if (update.type === 'run-paused' || update.type === 'run-cancelled') {
-      return {
-        ...step,
-        status: update.status === 'paused' ? 'completed' : 'cancelled',
-        error: update.error,
-        updatedAt: Date.now()
-      };
-    }
-
-    if (update.type === 'thinking' || update.type === 'assistant-delta' || update.type === 'tool-call') {
-      return {
-        ...step,
-        status: 'running',
-        updatedAt: Date.now()
-      };
-    }
-
-    if (update.type === 'tool-result') {
-      return {
-        ...step,
-        status: 'completed',
-        updatedAt: Date.now()
-      };
-    }
-
-    return step;
-  });
-
-  return changed ? nextSteps : currentSteps;
-}
-
 export function mapRuntimeApprovalToConfirmationRequest(update: Extract<RuntimeUpdateEvent, { type: 'approval-required' }>): ConfirmationRequest {
   return {
+    sessionApproval: update.sessionApproval,
     id: update.approvalId,
     tool: update.tool,
     args: update.args,
@@ -185,7 +94,6 @@ export function applyRuntimeUpdateToSessionContext(
   if (current.latestRun && current.latestRun.id !== update.runId) return {};
   const patch: Partial<SessionContextState> = {
     latestRun: patchRunSummary(current.latestRun, update),
-    activeRunSteps: patchRunSteps(current.activeRunSteps, update)
   };
 
   if (update.type === 'approval-required') {

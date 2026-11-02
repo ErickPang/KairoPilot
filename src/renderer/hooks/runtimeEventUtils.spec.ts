@@ -8,7 +8,6 @@ function createSessionContext(overrides: Partial<SessionContextState> = {}): Ses
     activeSessionId: 'session-1',
     appNotice: null,
     confirmationRequest: null,
-    latestContextSummary: null,
     latestRun: {
       id: 'run-1',
       sessionId: 'session-1',
@@ -20,7 +19,6 @@ function createSessionContext(overrides: Partial<SessionContextState> = {}): Ses
       createdAt: 1,
       updatedAt: 1
     },
-    activeRunSteps: [],
     ...overrides
   };
 }
@@ -62,12 +60,12 @@ describe('runtimeEventUtils', () => {
     expect(patch.latestRun?.status).toBe('completed');
   });
 
-  it('a tool result completes a step without completing the entire run', () => {
-    const patch = applyRuntimeUpdateToSessionContext(createSessionContext({ activeRunSteps: [{ id: 'step-1', runId: 'run-1', stepIndex: 0, type: 'tool_call', title: 'Read', status: 'running', createdAt: 1, updatedAt: 1 }] }), {
+  it('a tool result keeps the run active without rebuilding internal steps', () => {
+    const patch = applyRuntimeUpdateToSessionContext(createSessionContext(), {
       type: 'tool-result', runId: 'run-1', stepId: 'step-1', tool: 'read_file', result: 'text', status: 'completed'
     });
     expect(patch.latestRun?.status).toBe('running');
-    expect(patch.activeRunSteps?.[0].status).toBe('completed');
+    expect(Object.keys(patch)).not.toContain('activeRunSteps');
   });
   it('恢复执行后的进度事件会将 run 状态切回 running', () => {
     vi.useFakeTimers();

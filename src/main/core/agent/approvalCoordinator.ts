@@ -9,7 +9,7 @@ import {
   updateRunStep,
   updateToolCallRecord
 } from '../../store/chat';
-import type { RuntimeUpdateEvent } from '../../../shared/contracts';
+import type { RuntimeUpdateEvent, SessionApprovalScope } from '../../../shared/contracts';
 import type { ContextAssemblyMetadata } from '../context/assembler';
 import type { ChatMessage } from '../llm/types';
 import type { LoadedSkillCapability } from './capabilityOrchestrator';
@@ -46,6 +46,7 @@ interface RuntimeSnapshotPatch {
 }
 
 interface CreateApprovalRequestParams {
+  sessionApproval?: SessionApprovalScope;
   runId: string;
   sessionId?: string;
   toolName: string;
@@ -79,6 +80,7 @@ export function createApprovalRequest(params: CreateApprovalRequestParams) {
     approvalMode,
     policyTags,
     redacted,
+    sessionApproval,
     callId,
     toolRecordId,
     toolStepId,
@@ -111,6 +113,7 @@ export function createApprovalRequest(params: CreateApprovalRequestParams) {
       toolRecordId,
       toolStepId,
       redactedArgs: displayArgs,
+      sessionApproval,
       riskLevel,
       approvalMode,
       policyTags,
@@ -130,6 +133,7 @@ export function createApprovalRequest(params: CreateApprovalRequestParams) {
       toolStepId,
       approvalStepId: approvalStep.id,
       redactedArgs: displayArgs,
+      sessionApproval,
       riskLevel,
       approvalMode,
       policyTags,
@@ -159,6 +163,7 @@ export function createApprovalRequest(params: CreateApprovalRequestParams) {
 
   emitUpdate({
     type: 'approval-required',
+    sessionApproval,
     tool: toolName,
     args: displayArgs,
     sessionId,

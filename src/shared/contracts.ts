@@ -76,6 +76,8 @@ export type ExecutionProfile =
 export type RiskLevel = 'low' | 'medium' | 'high' | 'critical'
 
 export type ApprovalMode = 'never' | 'on_write' | 'on_external' | 'always'
+export type ApprovalDecisionScope = 'once' | 'session'
+export interface SessionApprovalScope { kind: 'tool' | 'origin' | 'directory' | 'command'; target: string }
 
 export type EnvironmentScope = 'workspace' | 'allowed_paths' | 'isolated_env'
 
@@ -349,7 +351,8 @@ export interface AgentChatRequest {
   attachments?: ChatAttachment[]
 }
 
-export type RuntimeUpdateEvent = { agentId?: string; sessionId?: string } & (
+export type RuntimeUpdateEvent = { agentId?: string; sessionId?: string; callId?: string } & (
+  | { type: 'assistant-message'; runId: string; stepId: string; content: string; phase: 'commentary' | 'draft' }
   | { type: 'session-title-updated'; runId: string; title: string }
   | {type:'queue-dispatched';runId:string;queueId:string;content:string;attachments?:ChatAttachment[];references?:ContextReference[]}
   | { type: 'draft-accepted'; runId: string; revision: number; referenceIds: string[]; attachmentIds: string[] }
@@ -400,6 +403,7 @@ export type RuntimeUpdateEvent = { agentId?: string; sessionId?: string } & (
     }
   | {
       type: 'approval-required'
+      sessionApproval?: SessionApprovalScope
       tool: string
       args: Record<string, unknown>
       runId: string
@@ -624,34 +628,6 @@ export interface ArtifactDiff {
   path: string
 }
 
-export type RunQueryStatus = 'all' | RunStatus
-
-export interface RunQuery {
-  projectId?: string
-  model?: string
-  startTime?: number
-  endTime?: number
-  page?: number
-  pageSize?: number
-  search?: string
-  status?: RunQueryStatus
-  sessionId?: string
-  agentId?: string
-}
-
-export interface RunQueryAggregations {
-  totalRuns: number
-  runningRuns: number
-  waitingApprovalRuns: number
-  pausedRuns: number
-  completedRuns: number
-  failedRuns: number
-  cancelledRuns: number
-  statuses: QueryFacet[]
-}
-
-export type RunQueryResult = PagedQueryResult<RunSummary, RunQueryAggregations>
-
 export interface RunStep {
   id: string
   runId: string
@@ -743,43 +719,6 @@ export interface RunContextSummary {
   omittedMessageCount: number
   budget: ContextAssemblyBudget
   createdAt: number
-}
-
-export interface RunTraceQuery {
-  runId: string
-  page?: number
-  pageSize?: number
-  includeToolCalls?: boolean
-  includeApprovalRecords?: boolean
-  includeAuditLogs?: boolean
-  includeContextSummary?: boolean
-}
-
-export interface RunTraceAggregations {
-  totalSteps: number
-  completedSteps: number
-  failedSteps: number
-  waitingApprovalSteps: number
-  toolCallCount: number
-  successfulToolCallCount: number
-  approvalCount: number
-  approvedCount: number
-  auditLogCount: number
-  auditErrorCount: number
-}
-
-export interface RunTrace {
-  run: RunSummary
-  steps: RunStep[]
-  total: number
-  page: number
-  pageSize: number
-  totalPages: number
-  aggregations: RunTraceAggregations
-  toolCalls: ToolCallRecord[]
-  approvals: ApprovalRecord[]
-  auditLogs: AuditLogEntry[]
-  latestContextSummary: RunContextSummary | null
 }
 
 export type SkillScope = 'public' | 'agent'
@@ -1353,3 +1292,23 @@ export interface DelegatedTask {
   parentBudget?: IntelligenceBudgetState
   trace?: DelegationTraceEntry[]
 }
+
+export interface ConversationActivity {
+  action: 'files' | 'search' | 'read' | 'write' | 'command' | 'tool';
+  target: string;
+  icon: 'search' | 'read' | 'terminal' | 'tool';
+}
+export type ConversationRun = Pick<RunSummary, 'id' | 'status' | 'createdAt' | 'startedAt' | 'updatedAt' | 'completedAt' | 'error'>;
+export interface ConversationItem {
+  id: string;
+  runId: string;
+  sequence: number;
+  activity?: ConversationActivity;
+  kind: 'user' | 'commentary' | 'draft' | 'tool' | 'final';
+  content: string;
+  status: string;
+  attachments?: ChatAttachment[];
+  references?: ContextReference[];
+}
+export interface ConversationRound { run: ConversationRun; items: ConversationItem[] }
+export interface ConversationPage { rounds: ConversationRound[]; before?: number }

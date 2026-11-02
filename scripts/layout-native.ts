@@ -2,6 +2,7 @@ import fs from 'node:fs';import path from 'node:path';import type {BrowserWindow
 import {KAIRO_INVOKE as C} from '../src/shared/ipc';import type {AgentRuntimeInvokeResult,SessionSummary,WorkbenchConfig,ChatAttachment} from '../src/shared/contracts';
 import {saveTaskDraft} from '../src/main/services/taskOrganizationService';
 import {getRunById,getDb} from '../src/main/store/chat';
+import {verifySessionApproval} from './session-approval-native';
 export async function verifyInlineApproval(window:BrowserWindow,invoke:<T=unknown>(channel:string,...args:unknown[])=>Promise<T>,output:string,assert:(ok:unknown,label:string)=>void){
  const js=(code:string)=>window.webContents.executeJavaScript(code);const wait=(condition:string)=>js(`new Promise(resolve=>{const end=Date.now()+10000;const timer=setInterval(()=>{if(${condition}){clearInterval(timer);resolve(true);}else if(Date.now()>end){clearInterval(timer);resolve(false);}},25);})`);
  const config=await invoke<WorkbenchConfig>(C.configGetWorkbench);assert(config.instructionPath===path.join(path.dirname(config.managementRoot),'AGENTS.md'),'layout: global settings expose AGENTS.md directly under the application data root');
@@ -29,4 +30,5 @@ export async function verifyInlineApproval(window:BrowserWindow,invoke:<T=unknow
  assert(await wait(`!document.querySelector('[data-inline-approval]') && !document.querySelector('[data-composer-stop]')`),'approval: stopping removes the decision card and restores the input');
  assert(getRunById(stopped.runId!)!.status==='cancelled'&&!fs.existsSync(stopPath)&&(getDb().prepare('SELECT status FROM approval_records WHERE id=?').get(stopped.approvalId) as {status:string}).status==='denied','approval: stop cancels the run, resolves the pending approval and never executes the write');
 
+ await verifySessionApproval(window,invoke,output,assert);
 }

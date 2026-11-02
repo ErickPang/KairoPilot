@@ -9,6 +9,7 @@ import { getOwnedSessionSummary } from '../store/taskPages';
 import { getWorkbenchConfig, strictTaskModel } from './workbenchConfigService';
 import { assertTaskMutable } from './workbenchExecution';
 import {intelligenceBudget} from '../../shared/intelligencePolicy';
+import {clearSessionApprovalGrants} from '../store/approvalGrants';
 
 export function requireTask(id: string) {
   const task = getOwnedSessionSummary(undefined,id);
@@ -38,6 +39,7 @@ export function updateTaskSettings(id: string, value: {model?:string;executionPr
   if (value.model !== undefined) { strictTaskModel(value.model); settings.model=value.model; }
   if (value.executionProfile) { settings.permissions={...structuredClone(getWorkbenchConfig().permissions),executionProfile:value.executionProfile,policy:createDefaultPolicyConfig(value.executionProfile)}; }
   getDb().prepare('UPDATE sessions SET execution_settings=? WHERE id=?').run(JSON.stringify(settings),id);
+  if (JSON.stringify(settings.permissions)!==JSON.stringify(settingsForTask(task).permissions)) clearSessionApprovalGrants(id);
   if(JSON.stringify(settings)!==JSON.stringify(settingsForTask(task))) {
     const pending=latestTaskPlan(id);
     if(pending?.status==='pending')updateTaskPlan(pending.id,pending.revision,{status:'superseded'});

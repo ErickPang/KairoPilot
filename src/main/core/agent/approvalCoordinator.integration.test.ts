@@ -306,39 +306,6 @@ vi.mock('../../store/chat', () => ({
     return summaries[0] ? clone(summaries[0]) : null;
   },
 
-  getRunTrace(query: { runId: string }) {
-    const run = chatState.runs.get(query.runId);
-    if (!run) {
-      return null;
-    }
-
-    const steps = getRunStepsForRun(query.runId).map((step) => clone(step));
-    const toolCalls = [...chatState.toolCallRecords.values()]
-      .filter((record) => record.runId === query.runId)
-      .map((record) => clone(record));
-    const approvals = [...chatState.approvals.values()]
-      .filter((approval) => approval.runId === query.runId)
-      .map((approval) => clone(approval));
-
-    return {
-      run: clone(run),
-      steps,
-      total: steps.length,
-      page: 1,
-      pageSize: steps.length || 1,
-      totalPages: 1,
-      toolCalls,
-      approvals,
-      auditLogs: [],
-      latestContextSummary: [...chatState.contextSummaries.values()]
-        .filter((entry) => entry.runId === query.runId)
-        .sort((left, right) => Number(right.createdAt) - Number(left.createdAt))[0] || null,
-      aggregations: {
-        toolCallCount: toolCalls.length,
-        approvalCount: approvals.length
-      }
-    };
-  }
 }));
 
 import * as chat from '../../store/chat';
@@ -483,41 +450,12 @@ describe('approvalCoordinator integration', () => {
     expect(chat.getApprovalRecord(approvalId)?.status).toBe('approved');
     expect(chat.getPendingApproval(session.id)).toBeNull();
 
-    const trace = chat.getRunTrace({
-      runId: run.id,
-      page: 1,
-      pageSize: 20,
-      includeToolCalls: true,
-      includeApprovalRecords: true,
-      includeAuditLogs: false,
-      includeContextSummary: true
-    });
-
-    expect(trace).toEqual(expect.objectContaining({
-      run: expect.objectContaining({
-        id: run.id,
-        status: 'running'
-      }),
-      toolCalls: [
-        expect.objectContaining({
-          id: toolRecordId,
-          status: 'waiting_approval'
-        })
-      ],
-      approvals: [
-        expect.objectContaining({
-          id: approvalId,
-          status: 'approved'
-        })
-      ],
-      latestContextSummary: expect.objectContaining({
-        runId: run.id,
-        unresolvedApprovals: 'delete_file /tmp/demo.txt'
-      }),
-      aggregations: expect.objectContaining({
-        toolCallCount: 1,
-        approvalCount: 1
-      })
+    expect(chat.getToolCallRecords(run.id)).toEqual([
+      expect.objectContaining({ id: toolRecordId, status: 'waiting_approval' })
+    ]);
+    expect(chat.getApprovalRecord(approvalId)).toEqual(expect.objectContaining({ id: approvalId, status: 'approved' }));
+    expect(chat.getLatestRunContextSummary(run.id)).toEqual(expect.objectContaining({
+      runId: run.id, unresolvedApprovals: 'delete_file /tmp/demo.txt'
     }));
   });
 

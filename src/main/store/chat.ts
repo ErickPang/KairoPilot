@@ -6,8 +6,6 @@ import Database from 'better-sqlite3';
 import path from 'path';
 import { app } from 'electron';
 import fs from 'fs';
-import { queryAuditLogs } from './audit';
-import { buildRunTraceAggregations, normalizeRunTraceQuery, paginateRunSteps } from './chat_trace_utils';
 import { initializeChatDatabase } from './chatDb';
 import type { RunExecutionContext, SessionProjectContext } from '../../shared/contracts';
 import {
@@ -22,7 +20,6 @@ import {
 } from './attachments';
 import {
   buildMonitoringWhereClause,
-  buildRunQueryWhere,
   buildTokenMetricFacets,
   getSharedMessagePrefixLength,
   mapApprovalRowToRecord,
@@ -41,17 +38,11 @@ import type {
   ChatAttachment,
   MonitoringTokenQuery,
   MonitoringTokenQueryResult,
-  QueryFacet,
   RunContextSummary,
-  RunQuery,
-  RunQueryResult,
   RunStatus,
   RunStep,
   RunStepStatus,
   RunStepType,
-  RunTrace,
-  RunTraceAggregations,
-  RunTraceQuery,
   RunSummary,
   ToolCallRecord
 } from '../../shared/contracts';
@@ -69,7 +60,6 @@ export type SessionSummary = import('../../shared/contracts').SessionSummary;
 
 let db: Database.Database | null = null;
 const DEFAULT_AGENT_ID = 'workbench';
-const MAX_RUN_QUERY_PAGE_SIZE = 100;
 const RUN_TERMINAL_STATUSES = new Set<RunStatus>(['completed', 'failed', 'cancelled']);
 const ALLOWED_RUN_STATUS_TRANSITIONS: Record<RunStatus, RunStatus[]> = {
   running: ['running', 'waiting_approval', 'paused', 'completed', 'failed', 'cancelled'],
@@ -527,119 +517,30 @@ export function getLatestRun(sessionId: string): RunSummary | null {
 
 export const RESTART_INTERRUPTED_ERROR = 'RUN_INTERRUPTED_BY_RESTART: Previous execution was interrupted. Inspect files and external processes before starting a new run; no operation was rolled back.';
 
-export function recoverInterruptedRuns(): number {
+export function recoverInterruptedRuns(reason = RESTART_INTERRUPTED_ERROR): number {
   const database = getDb();
   return database.transaction(() => {
-    const runs = database.prepare("SELECT id, session_id FROM runs WHERE status = 'running'").all() as Array<{ id: string; session_id: string }>;
+    const runs = database.prepare("SELECT id, session_id FROM runs WHERE status IN ('running','waiting_approval','paused')").all() as Array<{ id: string; session_id: string }>;
     const now = Date.now();
     for (const run of runs) {
-      database.prepare("UPDATE runs SET status = 'failed', error = ?, waiting_approval_id = NULL, completed_at = ?, updated_at = ? WHERE id = ? AND status = 'running'").run(RESTART_INTERRUPTED_ERROR, now, now, run.id);
-      database.prepare("UPDATE run_steps SET status = 'failed', error = ?, updated_at = ? WHERE run_id = ? AND status IN ('running', 'pending')").run(RESTART_INTERRUPTED_ERROR, now, run.id);
-      database.prepare("UPDATE tool_call_records SET status = 'failed', error = ?, updated_at = ? WHERE run_id = ? AND status IN ('running', 'pending')").run(RESTART_INTERRUPTED_ERROR, now, run.id);
+      database.prepare("UPDATE runs SET status = 'cancelled', error = ?, waiting_approval_id = NULL, completed_at = ?, updated_at = ? WHERE id = ?").run(reason, now, now, run.id);
+      database.prepare("UPDATE run_steps SET status = 'cancelled', error = ?, updated_at = ? WHERE run_id = ? AND status IN ('running', 'pending', 'waiting_approval')").run(reason, now, run.id);
+      database.prepare("UPDATE tool_call_records SET status = 'cancelled', error = ?, updated_at = ? WHERE run_id = ? AND status IN ('running', 'pending', 'waiting_approval')").run(reason, now, run.id);
       database.prepare("UPDATE approval_records SET status = 'denied', resolved_at = ?, updated_at = ? WHERE run_id = ? AND status = 'pending'").run(now, now, run.id);
       database.prepare('UPDATE sessions SET updated_at = ? WHERE id = ?').run(now, run.session_id);
+      database.prepare("UPDATE conversation_items SET status='cancelled' WHERE run_id=? AND status IN ('running','pending','waiting_approval')").run(run.id);
+    }
+    // Also expire orphaned pending approvals; a stale identifier must never resume a tool.
+    database.prepare("UPDATE approval_records SET status='denied',resolved_at=?,updated_at=? WHERE status='pending'").run(now, now);
+    const plans = database.prepare("SELECT id, data FROM task_plans WHERE status IN ('planning','executing')").all() as Array<{ id: string; data: string }>;
+    for (const row of plans) {
+      const plan = JSON.parse(row.data);
+      if (!runs.some(run => run.id === plan.planningRunId || run.id === plan.executionRunId)) continue;
+      const next = { ...plan, status: 'failed', error: reason, revision: plan.revision + 1, updatedAt: now };
+      database.prepare("UPDATE task_plans SET status='failed',revision=?,data=? WHERE id=?").run(next.revision, JSON.stringify(next), row.id);
     }
     return runs.length;
   })();
-}
-
-export function queryRuns(query: RunQuery = {}): RunQueryResult {
-  const database = getDb();
-  const page = Number.isFinite(query.page) && Number(query.page) > 0 ? Math.floor(Number(query.page)) : 1;
-  const pageSize = Number.isFinite(query.pageSize) && Number(query.pageSize) > 0
-    ? Math.min(Math.floor(Number(query.pageSize)), MAX_RUN_QUERY_PAGE_SIZE)
-    : 20;
-  const { whereClause, params } = buildRunQueryWhere(query);
-  const totalRow = database.prepare(`
-    SELECT COUNT(*) as count
-    FROM runs
-    ${whereClause}
-  `).get(...params) as { count: number };
-  const total = totalRow?.count ?? 0;
-  const totalPages = total === 0 ? 1 : Math.ceil(total / pageSize);
-  const safePage = Math.min(page, totalPages);
-  const offset = (safePage - 1) * pageSize;
-  const runRows = database.prepare(`
-    SELECT
-      id,
-      session_id,
-      agent_id,
-      goal,
-      user_input,
-      status,
-      final_response,
-      error,
-      waiting_approval_id,
-      created_at,
-      updated_at,
-      started_at,
-      completed_at,
-      execution_context
-    FROM runs
-    ${whereClause}
-    ORDER BY updated_at DESC, created_at DESC
-    LIMIT ? OFFSET ?
-  `).all(...params, pageSize, offset) as Array<{
-    id: string;
-    session_id: string;
-    agent_id: string;
-    goal: string;
-    user_input: string;
-    status: RunStatus;
-    final_response: string | null;
-    error: string | null;
-    waiting_approval_id: string | null;
-    created_at: number;
-    updated_at: number;
-    started_at: number | null;
-    completed_at: number | null;
-  }>;
-  const items = runRows.map(mapRunRowToSummary);
-  const aggregateStats = database.prepare(`
-    SELECT
-      COUNT(*) as total_runs,
-      SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) as running_runs,
-      SUM(CASE WHEN status = 'waiting_approval' THEN 1 ELSE 0 END) as waiting_approval_runs,
-      SUM(CASE WHEN status = 'paused' THEN 1 ELSE 0 END) as paused_runs,
-      SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed_runs,
-      SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed_runs,
-      SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) as cancelled_runs
-    FROM runs
-    ${whereClause}
-  `).get(...params) as {
-    total_runs: number | null;
-    running_runs: number | null;
-    waiting_approval_runs: number | null;
-    paused_runs: number | null;
-    completed_runs: number | null;
-    failed_runs: number | null;
-    cancelled_runs: number | null;
-  };
-  const statusRows = database.prepare(`
-    SELECT status as value, COUNT(*) as count
-    FROM runs
-    ${whereClause}
-    GROUP BY status
-    ORDER BY count DESC, value ASC
-  `).all(...params) as QueryFacet[];
-
-  return {
-    items,
-    total,
-    page: safePage,
-    pageSize,
-    totalPages,
-    aggregations: {
-      totalRuns: aggregateStats?.total_runs ?? 0,
-      runningRuns: aggregateStats?.running_runs ?? 0,
-      waitingApprovalRuns: aggregateStats?.waiting_approval_runs ?? 0,
-      pausedRuns: aggregateStats?.paused_runs ?? 0,
-      completedRuns: aggregateStats?.completed_runs ?? 0,
-      failedRuns: aggregateStats?.failed_runs ?? 0,
-      cancelledRuns: aggregateStats?.cancelled_runs ?? 0,
-      statuses: statusRows
-    }
-  };
 }
 
 export function updateRun(
@@ -855,14 +756,6 @@ export function getRunSteps(runId: string): RunStep[] {
   }>;
 
   return rows.map(mapRunStepRow);
-}
-
-export function getLatestRunSteps(sessionId: string): RunStep[] {
-  const latestRun = getLatestRun(sessionId);
-  if (!latestRun) {
-    return [];
-  }
-  return getRunSteps(latestRun.id);
 }
 
 export function getRetryableRunStepIds(runId: string): string[] {
@@ -1130,38 +1023,6 @@ export function getApprovalRecords(runId: string): ApprovalRecord[] {
   }>;
 
   return rows.map(mapApprovalRowToRecord);
-}
-
-export function getRunTrace(query: RunTraceQuery | string): RunTrace | null {
-  const normalizedQuery = normalizeRunTraceQuery(query);
-  const { runId, page, pageSize, includeToolCalls, includeApprovalRecords, includeAuditLogs, includeContextSummary } = normalizedQuery;
-  const run = getRunById(runId);
-  if (!run) {
-    return null;
-  }
-
-  const allSteps = getRunSteps(runId);
-  const pagination = paginateRunSteps(allSteps, page, pageSize);
-  const toolCalls = includeToolCalls ? getToolCallRecords(runId) : [];
-  const approvals = includeApprovalRecords ? getApprovalRecords(runId) : [];
-  const auditLogs = includeAuditLogs
-    ? queryAuditLogs({ runId, page: 1, pageSize: 1000 }).items.sort((left, right) => left.timestamp - right.timestamp)
-    : [];
-  const aggregations: RunTraceAggregations = buildRunTraceAggregations(allSteps, toolCalls, approvals, auditLogs);
-
-  return {
-    run,
-    steps: pagination.steps,
-    total: pagination.total,
-    page: pagination.page,
-    pageSize: pagination.pageSize,
-    totalPages: pagination.totalPages,
-    aggregations,
-    toolCalls,
-    approvals,
-    auditLogs,
-    latestContextSummary: includeContextSummary ? getLatestRunContextSummary(runId) : null
-  };
 }
 
 export function saveContextSnapshot(runId: string, snapshot: unknown, stepId?: string) {

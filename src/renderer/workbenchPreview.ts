@@ -1,4 +1,4 @@
-import { createDefaultAgentPermissions, type AgentConfig, type RunStatus, type RunSummary, type RunStep, type RuntimeUpdateEvent, type TaskExecutionSettings, type TaskPlan, type TaskTemplate } from '../shared/contracts';
+import { createDefaultAgentPermissions, type AgentConfig, type RunStatus, type RunSummary, type RuntimeUpdateEvent, type TaskExecutionSettings, type TaskPlan, type TaskTemplate } from '../shared/contracts';
 import { KAIRO_EVENT, KAIRO_INVOKE } from '../shared/ipc';
 import { BUILTIN_TASK_TEMPLATES } from '../shared/taskTemplates';
 import type { Session } from './types';
@@ -31,14 +31,14 @@ export function installWorkbenchPreview() {
   const listeners = new Set<(event: RuntimeUpdateEvent) => void>();
   const emit = (event: RuntimeUpdateEvent) => listeners.forEach((listener) => listener({ ...event, agentId: agent.id, sessionId: activeId }));
   const getSession = () => sessions.find((session) => session.id === activeId)!;
-  const stepList = (id: string): RunStep[] => {
-    const run = runs.get(id);
-    if (!run) return [];
-    return [{ id: 'preview-step-1', runId: run.id, stepIndex: 0, type: 'tool_call', title: '检查资料目录与文件', status: 'completed', createdAt: now - 60000, updatedAt: now - 50000 }, { id: 'preview-step-2', runId: run.id, stepIndex: 1, type: 'summary', title: '整理主题、来源与待核验事项', status: run.status === 'failed' ? 'failed' : run.status === 'completed' ? 'completed' : 'running', createdAt: now - 50000, updatedAt: now }];
-  };
   window.kairo = {
     invoke: (async (channel: string, ...args: unknown[]) => {
       const run = runs.get(activeId);
+      if (channel === KAIRO_INVOKE.chatConversation) {
+        const run = runs.get(getSession().id);
+        return { rounds: run ? [{ run, items: getSession().messages.map((message,index) => ({ id: `${run.id}:preview:${index}`, runId: run.id, sequence: index, kind: message.role === 'user' ? 'user' : run.status === 'completed' && index === getSession().messages.length - 1 ? 'final' : 'commentary', content: message.content || '', status: 'completed' })) }] : [] };
+      }
+      if (channel === KAIRO_INVOKE.chatConversationDetails) return {};
       if (channel === KAIRO_INVOKE.chatQuerySessions) {
         const query = (args[0] || {}) as import('../shared/contracts').SessionListQuery;
         const items = sessions.filter((session) => query.filter !== 'archived' && query.filter !== 'unread' && (!query.search || session.title.toLowerCase().includes(query.search.toLowerCase())))
@@ -116,8 +116,6 @@ export function installWorkbenchPreview() {
       }
       if (channel === KAIRO_INVOKE.chatUpdateSessionTitle) { const data = args[0] as { sessionId: string; title: string }; const session = sessions.find((item) => item.id === data.sessionId); if (session) session.title = data.title; return { success: true }; }
       if (channel === KAIRO_INVOKE.chatGetLatestRun) return runs.get(String(args[0])) || null;
-      if (channel === KAIRO_INVOKE.chatGetSessionRuns) return stepList(String(args[0]));
-      if (channel === KAIRO_INVOKE.chatGetLatestContextSummary) return null;
       if (channel === KAIRO_INVOKE.chatGetPendingApproval) { const target = runs.get(String(args[0])); return target?.status === 'waiting_approval' ? { id: 'preview-approval', runId: target.id, sessionId: activeId, toolName: 'write_file', args: { path: '/demo/workspace/研究摘要.md' }, status: 'pending', createdAt: now, updatedAt: now } : null; }
       if (channel === KAIRO_INVOKE.agentPauseRun || channel === KAIRO_INVOKE.agentCancelRun) { if (run) { run.status = channel === KAIRO_INVOKE.agentPauseRun ? 'paused' : 'cancelled'; emit({ type: run.status === 'paused' ? 'run-paused' : 'run-cancelled', runId: run.id, status: run.status }); } return { success: true }; }
       if (channel === KAIRO_INVOKE.agentConfirmResponse && !(args[0] as { approved: boolean }).approved) { if (run) { run.status = 'cancelled'; emit({ type: 'run-cancelled', runId: run.id, status: 'cancelled' }); } return { success: true, status: 'cancelled' }; }
@@ -133,6 +131,7 @@ export function installWorkbenchPreview() {
       if (channel === KAIRO_INVOKE.systemListDirectory) return { children: [{ name: '研究摘要.md', path: '/demo/workspace/研究摘要.md', isDirectory: false, size: 640 }] };
       if (channel === KAIRO_INVOKE.systemReadFilePreview) return { kind: 'markdown', path: String(args[0]), name: '研究摘要.md', size: 640, extension: 'md', content: '# 项目研究摘要\n\n这是模拟文件，供工作台交互验收使用。\n\n## 待核验\n\n- 核对来源的发布时间\n- 确认资料覆盖范围' };
       if (channel === KAIRO_INVOKE.systemSelectFiles) return [];
+      if (channel === KAIRO_INVOKE.skillsGetAll) return { public: [], workbench: [] };
       if (channel === KAIRO_INVOKE.configGetModels || channel === KAIRO_INVOKE.skillsGetRegistry || channel === KAIRO_INVOKE.pluginsGetInstalled) return [];
       return null;
     }) as KairoBridge['invoke'],

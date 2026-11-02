@@ -14,7 +14,7 @@ function validView(value: unknown): TaskViewState {
     scrollTop: typeof view.scrollTop === 'number' && Number.isFinite(view.scrollTop) ? Math.max(0, view.scrollTop) : undefined,
     previewFilePath: typeof view.previewFilePath === 'string' ? view.previewFilePath : undefined,
     directoryPath: typeof view.directoryPath === 'string' ? view.directoryPath : undefined,
-    auxiliaryPanel: view.auxiliaryPanel && ['files', 'results', 'details'].includes(view.auxiliaryPanel) ? view.auxiliaryPanel : null
+    auxiliaryPanel: view.auxiliaryPanel && ['files', 'results'].includes(view.auxiliaryPanel) ? view.auxiliaryPanel : null
   };
 }
 

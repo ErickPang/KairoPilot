@@ -1,18 +1,11 @@
 import type { ContextReference } from '../../shared/contracts';
-import { Dispatch, RefObject, SetStateAction, useCallback, useEffect, useRef, useState } from 'react';
-import { AppConfirmationOptions, ChatAttachment, Message, SessionContextState, SessionContextUpdate, SessionSummary } from '../types';
+import { Dispatch, SetStateAction, useCallback, useEffect, useRef, useState } from 'react';
+import { AppConfirmationOptions, ChatAttachment, SessionContextState, SessionContextUpdate, SessionSummary } from '../types';
 import { I18nContextValue } from '../components/layout/I18nContext';
 import { KAIRO_EVENT, KAIRO_INVOKE } from '../../shared/ipc';
 import type { RuntimeUpdateEvent } from '../types';
 import { createErrorNotice, getErrorMessage, logRendererError, withActionableErrorHint } from './errorUtils';
-import {
-  appendRuntimeMessage,
-  applyRuntimeUpdateToSessionContext,
-  isRuntimeUpdateForSession,
-  isRunUnsettled,
-  upsertAssistantStreamMessage,
-  upsertThinkingMessage
-} from './runtimeEventUtils';
+import { applyRuntimeUpdateToSessionContext, isRuntimeUpdateForSession, isRunUnsettled } from './runtimeEventUtils';
 
 interface UseChatControllerOptions {
   beforeNavigate?: () => Promise<void>;
@@ -20,11 +13,8 @@ interface UseChatControllerOptions {
   loadActiveSession: () => Promise<void>;
   loadRunState: (sessionId?: string | null) => Promise<void>;
   loadSessions: () => Promise<void>;
-  messages: Message[];
-  messagesEndRef: RefObject<HTMLDivElement>;
   requestConfirmation: (request: AppConfirmationOptions) => Promise<boolean>;
   sessionContext: SessionContextState;
-  setMessages: Dispatch<SetStateAction<Message[]>>;
   setSessions: Dispatch<SetStateAction<SessionSummary[]>>;
   t: I18nContextValue['t'];
   updateSessionContext: (patch: SessionContextUpdate) => void;
@@ -37,11 +27,8 @@ export function useChatController(options: UseChatControllerOptions) {
     loadActiveSession,
     loadRunState,
     loadSessions,
-    messages,
-    messagesEndRef,
     requestConfirmation,
     sessionContext,
-    setMessages,
     setSessions,
     t,
     updateSessionContext
@@ -79,14 +66,7 @@ export function useChatController(options: UseChatControllerOptions) {
   const activeSessionIdRef = useRef<string | null>(sessionContext.activeSessionId);
   useEffect(()=>{setLoading(sessionContext.latestRun?.status==='running');},[sessionContext.activeSessionId,sessionContext.latestRun?.status]);
   const runStateRefreshTimerRef = useRef<number | null>(null);
-  const bufferedOwnerRef = useRef<RuntimeUpdateEvent | null>(null);
-  const latestStreams=useRef(new Map<string,{assistant?:string;thinking?:string}>());
   const selectionVersionRef = useRef(0);
-  const bufferedAssistantContentRef = useRef<string | null>(null);
-  const bufferedThinkingContentRef = useRef<string | null>(null);
-  const messageFlushTimerRef = useRef<number | null>(null);
-  const contextFlushTimerRef = useRef<number | null>(null);
-  const pendingProgressUpdateRef = useRef<RuntimeUpdateEvent | null>(null);
 
   useEffect(() => {
     activeSessionIdRef.current = sessionContext.activeSessionId;
@@ -137,73 +117,6 @@ export function useChatController(options: UseChatControllerOptions) {
     }, 250);
   }, [flushRunStateRefresh, loadRunState]);
 
-  const flushBufferedMessages = useCallback(() => {
-    if (messageFlushTimerRef.current !== null) {
-      window.clearTimeout(messageFlushTimerRef.current);
-      messageFlushTimerRef.current = null;
-    }
-
-    const thinkingContent = bufferedThinkingContentRef.current;
-    const assistantContent = bufferedAssistantContentRef.current;
-    bufferedThinkingContentRef.current = null;
-    bufferedAssistantContentRef.current = null;
-
-    if (!bufferedOwnerRef.current || !isRuntimeUpdateForSession(getSessionContext(), bufferedOwnerRef.current)) return;
-
-    if (thinkingContent === null && assistantContent === null) {
-      return;
-    }
-
-    setMessages((prev) => {
-      let next = prev;
-      if (thinkingContent !== null) {
-        next = upsertThinkingMessage(next, thinkingContent);
-      }
-      if (assistantContent !== null) {
-        next = upsertAssistantStreamMessage(next, assistantContent);
-      }
-      return next;
-    });
-  }, [getSessionContext, setMessages]);
-
-  const scheduleBufferedMessageFlush = useCallback(() => {
-    if (messageFlushTimerRef.current !== null) {
-      return;
-    }
-
-    messageFlushTimerRef.current = window.setTimeout(() => {
-      messageFlushTimerRef.current = null;
-      flushBufferedMessages();
-    }, 33);
-  }, [flushBufferedMessages]);
-
-  const flushProgressContextUpdate = useCallback(() => {
-    if (contextFlushTimerRef.current !== null) {
-      window.clearTimeout(contextFlushTimerRef.current);
-      contextFlushTimerRef.current = null;
-    }
-
-    const update = pendingProgressUpdateRef.current;
-    pendingProgressUpdateRef.current = null;
-    if (!update) {
-      return;
-    }
-
-    updateSessionContext((current) => applyRuntimeUpdateToSessionContext(current, update));
-  }, [updateSessionContext]);
-
-  const scheduleProgressContextUpdate = useCallback((update: RuntimeUpdateEvent) => {
-    pendingProgressUpdateRef.current = update;
-    if (contextFlushTimerRef.current !== null) {
-      return;
-    }
-
-    contextFlushTimerRef.current = window.setTimeout(() => {
-      contextFlushTimerRef.current = null;
-      flushProgressContextUpdate();
-    }, 250);
-  }, [flushProgressContextUpdate]);
-
   useEffect(() => {
     const removeListener = window.kairo.on(KAIRO_EVENT.agentUpdate, (rawUpdate) => {
       const update = rawUpdate as RuntimeUpdateEvent;
@@ -211,80 +124,23 @@ export function useChatController(options: UseChatControllerOptions) {
         setSessions(previous => previous.map(session => session.id === update.sessionId ? { ...session, title: update.title } : session));
         return;
       }
-      if(update.type==='queue-dispatched'){
-        if(update.sessionId===getSessionContext().activeSessionId){
-          flushBufferedMessages();flushProgressContextUpdate();
-          updateSessionContext({latestRun:null,latestContextSummary:null,activeRunSteps:[]});
-          setMessages(previous=>appendRuntimeMessage(previous,{role:'user',content:update.content,attachments:update.attachments,references:update.references}));
-          setLoading(true);scheduleRunStateRefresh('immediate');
+      if (update.type === 'queue-dispatched') {
+        if (update.sessionId === getSessionContext().activeSessionId) {
+          updateSessionContext({ latestRun: null });
+          setLoading(true);
+          scheduleRunStateRefresh('immediate');
         }
-        void loadSessions();return;
-      }
-      if(update.sessionId && (update.type==='assistant-delta' || update.type==='thinking')) {
-        const current=latestStreams.current.get(update.sessionId)||{};
-        latestStreams.current.set(update.sessionId,{...current,...(update.type==='assistant-delta'?{assistant:update.content,thinking:undefined}:{thinking:update.content})});
-        if(latestStreams.current.size>20)latestStreams.current.delete(latestStreams.current.keys().next().value!);
+        void loadSessions();
+        return;
       }
       if (!isRuntimeUpdateForSession(getSessionContext(), update)) {
-        if(['assistant-response','run-failed','run-cancelled','approval-required','run-paused'].includes(update.type))void loadSessions();
+        if (['assistant-response', 'run-failed', 'run-cancelled', 'approval-required', 'run-paused'].includes(update.type)) void loadSessions();
         return;
       }
-      bufferedOwnerRef.current = update;
-
-      if (update.type === 'thinking') {
-        bufferedThinkingContentRef.current = update.content || '';
-        scheduleBufferedMessageFlush();
-        scheduleProgressContextUpdate(update);
-        scheduleRunStateRefresh();
-        return;
-      }
-
-      if (update.type === 'assistant-delta') {
-        bufferedAssistantContentRef.current = update.content || '';
-        bufferedThinkingContentRef.current = null;
-        scheduleBufferedMessageFlush();
-        scheduleProgressContextUpdate(update);
-        scheduleRunStateRefresh();
-        return;
-      }
-
-      flushBufferedMessages();
-      flushProgressContextUpdate();
-      updateSessionContext((current) => applyRuntimeUpdateToSessionContext(current, update));
-
-      if (update.type === 'tool-call') {
-        setMessages((prev) => appendRuntimeMessage(prev, {
-          role: 'tool',
-          content: t('app.toolCall', { tool: update.tool || 'unknown' }),
-          details: update.args
-        }));
-        scheduleRunStateRefresh();
-        return;
-      }
-
-      if (update.type === 'tool-result') {
-        setMessages((prev) => appendRuntimeMessage(prev, {
-          role: 'tool',
-          content: t('app.toolResult', { tool: update.tool || 'unknown' }),
-          details: (update.result as Record<string, unknown>) || {}
-        }));
-        scheduleRunStateRefresh();
-        return;
-      }
-
-      if (update.type === 'tool-error') {
-        setMessages((prev) => appendRuntimeMessage(prev, {
-          role: 'tool',
-          content: t('app.toolError', { tool: update.tool || 'unknown' }),
-          details: { error: update.error }
-        }));
-        scheduleRunStateRefresh();
-        return;
-      }
-
+      updateSessionContext(current => applyRuntimeUpdateToSessionContext(current, update));
+      scheduleRunStateRefresh();
       if (update.type === 'assistant-response') {
         void loadSessions();
-        setMessages((prev) => upsertAssistantStreamMessage(prev, String(update.content || '')));
         setLoading(false);
         scheduleRunStateRefresh('immediate');
         return;
@@ -309,16 +165,8 @@ export function useChatController(options: UseChatControllerOptions) {
         window.clearTimeout(runStateRefreshTimerRef.current);
         runStateRefreshTimerRef.current = null;
       }
-      if (messageFlushTimerRef.current !== null) {
-        window.clearTimeout(messageFlushTimerRef.current);
-        messageFlushTimerRef.current = null;
-      }
-      if (contextFlushTimerRef.current !== null) {
-        window.clearTimeout(contextFlushTimerRef.current);
-        contextFlushTimerRef.current = null;
-      }
     };
-  }, [getSessionContext, loadSessions, flushBufferedMessages, flushProgressContextUpdate, scheduleBufferedMessageFlush, scheduleProgressContextUpdate, scheduleRunStateRefresh, setMessages, setSessions, t, updateSessionContext]);
+  }, [getSessionContext, loadSessions, scheduleRunStateRefresh, setSessions, updateSessionContext]);
 
   useEffect(() => {
     if (sessionContext.latestRun?.status !== 'running' || !sessionContext.activeSessionId) return;
@@ -338,13 +186,12 @@ export function useChatController(options: UseChatControllerOptions) {
       if (version !== selectionVersionRef.current) return;
       setSessions((prev) => [newSession, ...prev]);
       activeSessionIdRef.current = newSession.id;
-      updateSessionContext({ activeSessionId: newSession.id, latestContextSummary: null, latestRun: null, activeRunSteps: [], confirmationRequest: null, appNotice: null });
-      setMessages([]);
+      updateSessionContext({ activeSessionId: newSession.id, latestRun: null, confirmationRequest: null, appNotice: null });
     } catch (error) {
       logRendererError('Failed to create session', error);
       reportChatError(t('app.error.createSession', { error: getErrorMessage(error) }), 'create_session');
     } finally { navigationPendingRef.current=false; }
-  }, [beforeNavigate, canNavigate, clearChatError, reportChatError, setMessages, setSessions, t, updateSessionContext]);
+  }, [beforeNavigate, canNavigate, clearChatError, reportChatError, setSessions, t, updateSessionContext]);
 
   const handleSelectSession = useCallback(async (sessionId: string) => {
     if (!canNavigate()) return;
@@ -362,30 +209,16 @@ export function useChatController(options: UseChatControllerOptions) {
 
       if (!isCurrent()) return;
       activeSessionIdRef.current = sessionId;
-      updateSessionContext({ activeSessionId: sessionId, latestRun: null, latestContextSummary: null, activeRunSteps: [], confirmationRequest: null });
-      setMessages([]);
-
-      const active = await window.kairo.invoke(KAIRO_INVOKE.chatGetMessagePage, { sessionId, limit: 100 });
-      if (!isCurrent()) return;
-      if (active) {
-        setMessages(active.messages);
-        setSessions((items) => items.some((item) => item.id === active.session.id) ? items : [...items, active.session]);
-      } else {
-        setMessages([]);
-      }
+      updateSessionContext({ activeSessionId: sessionId, latestRun: null, confirmationRequest: null });
 
       await loadRunState(sessionId);
-      if(isCurrent() && getSessionContext().latestRun?.status==='running') {
-        const stream=latestStreams.current.get(sessionId);
-        if(stream)setMessages(previous=>stream.assistant?upsertAssistantStreamMessage(previous,stream.assistant):stream.thinking?upsertThinkingMessage(previous,stream.thinking):previous);
-        setLoading(true);
-      }
+      if (isCurrent() && getSessionContext().latestRun?.status === 'running') setLoading(true);
       await loadSessions();
     } catch (error) {
       logRendererError('Failed to switch session', error);
       reportChatError(t('app.error.selectSession', { error: getErrorMessage(error) }), 'select_session');
     } finally { navigationPendingRef.current=false; }
-  }, [beforeNavigate, canNavigate, getSessionContext, clearChatError, loadRunState, loadSessions, reportChatError, setMessages, setSessions, t, updateSessionContext]);
+  }, [beforeNavigate, canNavigate, getSessionContext, clearChatError, loadRunState, loadSessions, reportChatError, t, updateSessionContext]);
 
   const handleDeleteSession = useCallback(async (e: React.MouseEvent, sessionId: string) => {
     if (!canNavigate()) return;
@@ -423,7 +256,7 @@ export function useChatController(options: UseChatControllerOptions) {
     }
   }, [clearChatError, reportChatError, setSessions, t]);
 
-  const handleConfirm = useCallback(async () => {
+  const handleConfirm = useCallback(async (scope: import('../../shared/contracts').ApprovalDecisionScope = 'once') => {
     const confirmationRequest = sessionContext.confirmationRequest;
     if (!confirmationRequest) {
       return;
@@ -435,7 +268,8 @@ export function useChatController(options: UseChatControllerOptions) {
       updateSessionContext({ confirmationRequest: null });
       const result = await window.kairo.invoke(KAIRO_INVOKE.agentConfirmResponse, {
         id: confirmationRequest.id,
-        approved: true
+        approved: true,
+        scope
       });
       if (!result.success) {
         throw new Error(result.error || 'Failed to confirm approval');
@@ -483,54 +317,6 @@ export function useChatController(options: UseChatControllerOptions) {
     }
   }, [beginRequest, finishRequest, clearChatError, loadRunState, loadSessions, reportChatError, sessionContext.activeSessionId, sessionContext.confirmationRequest, t, updateSessionContext]);
 
-  const handlePauseRun = useCallback(async () => {
-    const runId = sessionContext.latestRun?.id;
-    if (!runId) {
-      return;
-    }
-
-    try {
-      clearChatError();
-      const result = await window.kairo.invoke(KAIRO_INVOKE.agentPauseRun, { runId });
-      if (!result.success) {
-        throw new Error(result.error || 'Failed to pause run');
-      }
-      setLoading(false);
-      await loadRunState(sessionContext.activeSessionId);
-      await loadSessions();
-      return true;
-    } catch (error) {
-      logRendererError('Failed to pause run', error);
-      reportChatError(t('app.error.pauseRun', { error: getErrorMessage(error) }), 'pause_run');
-      return false;
-    }
-  }, [clearChatError, loadRunState, loadSessions, reportChatError, sessionContext.activeSessionId, sessionContext.latestRun?.id, t]);
-
-  const handleResumeRun = useCallback(async () => {
-    const runId = sessionContext.latestRun?.id;
-    if (!runId) {
-      return;
-    }
-
-    if (!beginRequest()) return;
-    try {
-      clearChatError();
-      setLoading(true);
-      const result = await window.kairo.invoke(KAIRO_INVOKE.agentResumeRun, { runId });
-      if (!result.success) {
-        throw new Error(result.error || 'Failed to resume run');
-      }
-      await loadRunState(sessionContext.activeSessionId);
-      await loadSessions();
-    } catch (error) {
-      logRendererError('Failed to resume run', error);
-      reportChatError(t('app.error.resumeRun', { error: getErrorMessage(error) }), 'resume_run');
-    } finally {
-      finishRequest();
-      setLoading(false);
-    }
-  }, [beginRequest, finishRequest, clearChatError, loadRunState, loadSessions, reportChatError, sessionContext.activeSessionId, sessionContext.latestRun?.id, t]);
-
   const handleCancelRun = useCallback(async () => {
     const runId = sessionContext.latestRun?.id;
     if (!runId) {
@@ -555,31 +341,6 @@ export function useChatController(options: UseChatControllerOptions) {
     }
   }, [clearChatError, loadRunState, loadSessions, reportChatError, sessionContext.activeSessionId, sessionContext.latestRun?.id, t, updateSessionContext]);
 
-  const handleRetryStep = useCallback(async (stepId: string) => {
-    const runId = sessionContext.latestRun?.id;
-    if (!runId || !stepId) {
-      return;
-    }
-
-    if (!beginRequest()) return;
-    try {
-      clearChatError();
-      setLoading(true);
-      const result = await window.kairo.invoke(KAIRO_INVOKE.agentRetryStep, { runId, stepId });
-      if (!result.success) {
-        throw new Error(result.error || 'Failed to retry step');
-      }
-      await loadRunState(sessionContext.activeSessionId);
-      await loadSessions();
-    } catch (error) {
-      logRendererError('Failed to retry step', error);
-      reportChatError(t('app.error.retryStep', { error: getErrorMessage(error) }), 'retry_step');
-    } finally {
-      finishRequest();
-      setLoading(false);
-    }
-  }, [beginRequest, finishRequest, clearChatError, loadRunState, loadSessions, reportChatError, sessionContext.activeSessionId, sessionContext.latestRun?.id, t]);
-
   const handleSend = useCallback(async (attachments: ChatAttachment[] = [], references: ContextReference[] = [], draftRevision?: number) => {
     if (requestPendingRef.current || isRunUnsettled(getSessionContext().latestRun)) return;
     if (!input.trim() && attachments.length === 0 && references.length === 0) {
@@ -588,26 +349,20 @@ export function useChatController(options: UseChatControllerOptions) {
 
     const pendingInput = input.trim() || (references.length ? 'Please review the referenced context.' : 'Please review the attached file(s).');
 
-    const userMessage: Message = { role: 'user', content: pendingInput, attachments, references };
-
     if (!beginRequest()) return;
     let wasAccepted = false;
     let sendingSessionId=sessionContext.activeSessionId;
     try {
       clearChatError();
       let targetSessionId = sessionContext.activeSessionId;
-      let createdNewSession = false;
 
       if (!targetSessionId) {
         const newSession = await window.kairo.invoke(KAIRO_INVOKE.chatCreateSession);
         targetSessionId = newSession.id;
-        createdNewSession = true;
         setSessions((prev) => [newSession, ...prev.filter((session) => session.id !== newSession.id)]);
         updateSessionContext({
           activeSessionId: newSession.id,
-          latestContextSummary: null,
           latestRun: null,
-          activeRunSteps: [],
           confirmationRequest: null,
           appNotice: null
         });
@@ -615,8 +370,7 @@ export function useChatController(options: UseChatControllerOptions) {
 
       sendingSessionId=targetSessionId;
       activeSessionIdRef.current = targetSessionId;
-      updateSessionContext({latestRun:null,latestContextSummary:null,activeRunSteps:[],confirmationRequest:null});
-      setMessages((prev) => createdNewSession ? [userMessage] : [...prev, userMessage]);
+      updateSessionContext({latestRun:null,confirmationRequest:null});
       setInput('');
       setLoading(true);
 
@@ -644,7 +398,7 @@ export function useChatController(options: UseChatControllerOptions) {
       finishRequest();
       if(activeSessionIdRef.current===sendingSessionId)setLoading(false);
     }
-  }, [beginRequest, finishRequest, getSessionContext, setInput, clearChatError, input, loadRunState, loadSessions, reportChatError, sessionContext.activeSessionId, setMessages, setSessions, t, updateSessionContext]);
+  }, [beginRequest, finishRequest, getSessionContext, setInput, clearChatError, input, loadRunState, loadSessions, reportChatError, sessionContext.activeSessionId, setSessions, t, updateSessionContext]);
 
   return {
     handleCancelRun,
@@ -652,17 +406,12 @@ export function useChatController(options: UseChatControllerOptions) {
     handleCreateSession,
     handleDeleteSession,
     handleDeny,
-    handlePauseRun,
-    handleResumeRun,
-    handleRetryStep,
     handleSelectSession,
     handleSend,
     handleUpdateSessionTitle,
     input,
     isRequestPending,
     loading,
-    messages,
-    messagesEndRef,
     setInput
   };
 }

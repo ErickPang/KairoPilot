@@ -38,7 +38,7 @@ function registerAgentHandlers() {
   ipcMain.handle(KAIRO_INVOKE.agentConfirmResponse, async (event, input) => {
     try {
       const payload = parseIpcInput(ApprovalResponseInputSchema, input, 'approval response');
-      return await runApprovalResponse(payload.id, payload.approved, event.sender);
+      return await runApprovalResponse(payload.id, payload.approved, event.sender, payload.scope);
     } catch (error) { return mapRuntimeHandlerFailure(error); }
   });
 

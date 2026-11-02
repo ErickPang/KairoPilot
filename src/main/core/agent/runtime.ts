@@ -7,6 +7,7 @@ import {
   getLatestContextSnapshotByStep,
   getRecentSessionContextSummaries,
   getPendingApproval,
+  getApprovalRecord,
   getRunById,
   getRunSteps,
   saveContextSnapshot,
@@ -28,7 +29,8 @@ import {
   RuntimeSnapshotPatch,
   RuntimeUpdate
 } from './runEngine';
-import { createPermissionGuardedTool } from './toolPipeline';
+import { checkPermission, createPermissionGuardedTool } from './toolPipeline';
+import type { ApprovalDecisionScope } from '../../../shared/contracts';
 import {
   SkillCatalogSnapshot,
   shouldBlockSensitiveDisclosure
@@ -301,8 +303,13 @@ export class AgentRuntime {
   async resumeRun(
     approvalId: string,
     approved: boolean,
-    onUpdate?: (update: RuntimeUpdate) => void
+    onUpdate?: (update: RuntimeUpdate) => void,
+    scope: ApprovalDecisionScope = 'once'
   ): Promise<RuntimeExecutionResult> {
+    if (scope === 'session') {
+      const approval = getApprovalRecord(approvalId);
+      if (!approved || !approval || !this.permissionGuard.getSessionApprovalScope(approval.toolName, approval.args)) throw new Error('This approval does not support conversation permission.');
+    }
     const resumeState = prepareApprovalResume(approvalId, approved);
     if (resumeState.status === 'failed') {
       return resumeState;
@@ -314,6 +321,11 @@ export class AgentRuntime {
     this.activeRunId = run.id;
     this.activeSessionId = run.sessionId || this.activeSessionId;
     this.runControl.start(run.id);
+
+    if (scope === 'session' && this.tools.has(pendingToolCall.toolName) && checkPermission(this.permissionGuard, pendingToolCall.toolName, approval.args).kind !== 'deny') {
+      this.permissionGuard.rememberSessionApproval(pendingToolCall.toolName, approval.args, approval.id);
+      this.auditLog?.({ tool: pendingToolCall.toolName, args: approval.args, sessionId: run.sessionId, runId: run.id, policyTags: ['approval:session_granted'], result: { approvalId: approval.id } });
+    }
 
     await resumePendingToolCall({
       tools: this.tools,

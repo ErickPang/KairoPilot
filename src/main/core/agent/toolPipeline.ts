@@ -126,7 +126,7 @@ export async function executeApprovedTool(params: ExecuteApprovedToolParams) {
     : args;
 
   emitUpdate(onUpdate, {
-    type: 'tool-call',
+    type: 'tool-call', callId,
     tool: toolName,
     args: redactedArgs,
     runId,
@@ -233,7 +233,7 @@ export async function executeApprovedTool(params: ExecuteApprovedToolParams) {
       });
     }
     emitUpdate(onUpdate, {
-      type: 'tool-result',
+      type: 'tool-result', callId,
       tool: toolName,
       result: redactedOutput,
       runId,
@@ -339,7 +339,7 @@ export async function recordToolFailure(params: ToolFailureParams) {
   }
 
   emitUpdate(onUpdate, {
-    type: 'tool-error',
+    type: 'tool-error', callId,
     tool: toolName,
     error: redactedErrorMessage,
     runId,
