@@ -6,6 +6,7 @@ export function initializeChatDatabase(database: Database.Database) {
   if(!tables.some(table=>table.name==='workbench_schema'))throw new Error('Unsupported database schema. Use a fresh data directory.');
   const version=database.prepare('SELECT version FROM workbench_schema').get() as {version:number}|undefined;
   if(version?.version!==7)throw new Error('Unsupported database schema. Use a fresh data directory.');
+  initializeConversationStorage(database);
   return;
  }
  database.transaction(()=>{database.exec(`
@@ -204,5 +205,18 @@ CREATE TABLE task_message_queue(id TEXT PRIMARY KEY,session_id TEXT NOT NULL REF
       ON context_summaries(run_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_context_summaries_session_created_at
       ON context_summaries(session_id, created_at DESC);
-  `);})();
+  `);initializeConversationStorage(database);})();
+}
+
+function initializeConversationStorage(database: Database.Database) {
+  database.exec(`CREATE TABLE IF NOT EXISTS conversation_items (
+    id TEXT PRIMARY KEY, run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+    sequence INTEGER NOT NULL, kind TEXT NOT NULL, content TEXT NOT NULL, status TEXT NOT NULL,
+    details TEXT, metadata TEXT, UNIQUE(run_id, sequence));
+    CREATE INDEX IF NOT EXISTS idx_conversation_items_run ON conversation_items(run_id, sequence);`);
+  database.exec(`CREATE TABLE IF NOT EXISTS session_approval_grants (
+    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    context TEXT NOT NULL, operation TEXT NOT NULL,
+    approval_id TEXT NOT NULL REFERENCES approval_records(id) ON DELETE CASCADE,
+    PRIMARY KEY(session_id,context,operation));`);
 }

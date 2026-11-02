@@ -1,3 +1,4 @@
+vi.mock('../../store/conversation',()=>({recordConversationUpdate:vi.fn(),setConversationUser:vi.fn()}));
 vi.mock('../../store/taskQueue',()=>({queuedMessages:()=>[]}));
 vi.mock('../../services/taskQueueService',()=>({holdTaskQueue:vi.fn(),holdQueueAfterRun:vi.fn(),nextTaskQueueMessage:()=>undefined}));
 vi.mock('../../services/projectMemoryService',()=>({memorySnapshot:()=>undefined,scheduleProjectMemory:vi.fn()}));
@@ -35,7 +36,7 @@ vi.mock('../../store/chat', () => ({
 
 vi.mock('../../services/taskSettingsService',()=>({requireTask:(id:string)=>({id}),settingsForTask:()=>({workflow:'direct'})}));
 vi.mock('../../services/workbenchConfigService',()=>({strictTaskModel:()=>({provider:'custom',model:'synthetic'})}));
-vi.mock('../../services/workbenchExecution',()=>({isTaskExecuting:()=>false,isWorkbenchBusy:()=>true,withTaskExecution:async(_id:string,operation:()=>Promise<unknown>)=>operation()}));
+vi.mock('../../services/workbenchExecution',()=>({isTaskExecuting:()=>false,isWorkbenchBusy:()=>true,isWorkbenchShuttingDown:()=>false,withTaskExecution:async(_id:string,operation:()=>Promise<unknown>)=>operation()}));
 vi.mock('../../core/agent/cancelSuspendedRun',()=>({cancelSuspendedRun:vi.fn()}));
 vi.mock('../../services/projectService', () => ({
   executionAgentForTask:(task:{id:string})=>({id:`task:${task.id}`,model:'fixture/model'}),
@@ -43,7 +44,7 @@ vi.mock('../../services/projectService', () => ({
   executionContextForSession: vi.fn(() => ({ executionRoot: '/tmp/synthetic' }))
 }));
 
-import { controlStoredRun, createRuntimeUpdateForwarder, mapRuntimeExecutionResult, mapRuntimeHandlerFailure, persistAgentSessionHistory, resolveRuntimeForApproval, runActiveAgentChat } from './agentHandlerService';
+import { controlStoredRun, createRuntimeUpdateForwarder, mapRuntimeExecutionResult, mapRuntimeHandlerFailure, persistAgentSessionHistory, resolveRuntimeForApproval, runActiveAgentChat, runApprovalResponse, runStoredAgentAction } from './agentHandlerService';
 
 describe('agentHandlerService', () => {
   beforeEach(() => {
@@ -57,6 +58,15 @@ describe('agentHandlerService', () => {
     ]) {
       mock.mockReset();
     }
+  });
+
+  it('rejects stale approvals and cancelled checkpoints before initializing a runtime', async () => {
+    chatStoreMocks.getApprovalRecord.mockReturnValue({id:'old',runId:'r',status:'denied'});
+    chatStoreMocks.getRunById.mockReturnValue({id:'r',sessionId:'s',status:'cancelled'});
+    await expect(runApprovalResponse('old',true,{} as never)).rejects.toThrow('expired');
+    const operation=vi.fn();
+    await expect(runStoredAgentAction('r',{} as never,operation)).rejects.toThrow('ended');
+    expect(agentRuntimeMocks.ensureAgentRuntime).not.toHaveBeenCalled();expect(operation).not.toHaveBeenCalled();
   });
 
   it('does not overwrite another session with an uninitialized runtime history', () => {

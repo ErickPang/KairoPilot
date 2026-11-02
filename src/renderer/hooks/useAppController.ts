@@ -66,7 +66,7 @@ export function useAppController(beforeNavigate?: () => Promise<void>) {
     resolve?.(confirmed);
   }, []);
 
-  const { loadActiveSession, loadRunState, loadSessions, messages, messagesEndRef, sessions, setMessages, setSessions } = useSessionData(
+  const { loadActiveSession, loadRunState, loadSessions, sessions, setSessions } = useSessionData(
     updateSessionContext,
     {
       getSessionContext,
@@ -103,9 +103,6 @@ export function useAppController(beforeNavigate?: () => Promise<void>) {
     handleCreateSession,
     handleDeleteSession,
     handleDeny,
-    handlePauseRun,
-    handleResumeRun,
-    handleRetryStep,
     handleSelectSession,
     handleSend,
     handleUpdateSessionTitle,
@@ -119,11 +116,8 @@ export function useAppController(beforeNavigate?: () => Promise<void>) {
     loadActiveSession,
     loadRunState,
     loadSessions,
-    messages,
-    messagesEndRef,
     requestConfirmation,
     sessionContext,
-    setMessages,
     setSessions,
     t,
     updateSessionContext
@@ -180,9 +174,6 @@ export function useAppController(beforeNavigate?: () => Promise<void>) {
     handleDeleteModel,
     handleDeleteSession,
     handleDeny,
-    handlePauseRun,
-    handleResumeRun,
-    handleRetryStep,
     handleSaveModel,
     handleSelectSession,
     handleSend,
@@ -195,8 +186,6 @@ export function useAppController(beforeNavigate?: () => Promise<void>) {
     input,
     loading: chatLoading,
     isRequestPending,
-    messages,
-    messagesEndRef,
     models,
     clearAppNotice,
     sessionContext,

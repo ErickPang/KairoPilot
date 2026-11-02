@@ -4,7 +4,7 @@ import { createRunStatePatchForSession, mapApprovalToConfirmationRequest } from 
 
 describe('mapApprovalToConfirmationRequest', () => {
   it('ignores a delayed run response after switching to another task or clearing selection', () => {
-    const result = { targetSessionId: 'old-session', latestRun: null, latestContextSummary: null, activeRunSteps: [], confirmationRequest: null };
+    const result = { targetSessionId: 'old-session', latestRun: null, confirmationRequest: null };
     expect(createRunStatePatchForSession({ ...result, activeSessionId: 'new-session' })).toBeNull();
     expect(createRunStatePatchForSession({ ...result, activeSessionId: null })).toBeNull();
   });

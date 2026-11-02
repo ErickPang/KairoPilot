@@ -153,7 +153,7 @@ async function nativeGrep(
   }
 ): Promise<GrepMatch[]> {
   const flags = options.caseInsensitive ? 'iu' : 'u';
-  const effectiveFlags = options.multiline ? flags + 'm' : flags;
+  const effectiveFlags = options.multiline ? flags + 'gms' : flags;
   let regex: RegExp;
   try {
     regex = new RegExp(pattern, effectiveFlags);
@@ -186,6 +186,29 @@ async function nativeGrep(
     }
 
     const lines = content.split('\n');
+    if (options.multiline) {
+      const lineStarts: number[] = [];
+      let offset = 0;
+      for (const line of lines) {
+        lineStarts.push(offset);
+        offset += line.length + 1;
+      }
+      let firstLine = 0;
+      let lastEmittedLine = -1;
+      // matchAll advances past zero-length matches, including Unicode characters.
+      for (const match of content.matchAll(regex)) {
+        while (firstLine + 1 < lines.length && lineStarts[firstLine + 1] <= match.index) firstLine++;
+        const end = match.index + Math.max(0, match[0].length - 1);
+        for (let line = firstLine; line < lines.length && lineStarts[line] <= end; line++) {
+          if (line <= lastEmittedLine) continue;
+          results.push({ file, line: line + 1, content: lines[line] });
+          lastEmittedLine = line;
+          if (results.length >= limit) break;
+        }
+        if (results.length >= limit) break;
+      }
+      continue;
+    }
     for (let i = 0; i < lines.length; i++) {
       if (results.length >= limit) break;
       if (regex.test(lines[i])) {
@@ -445,7 +468,7 @@ async function editExecute(rawArgs: Record<string, unknown>) {
 
   const newContent = args.replace_all
     ? content.split(args.old_string).join(args.new_string)
-    : content.replace(args.old_string, args.new_string);
+    : content.replace(args.old_string, () => args.new_string);
 
   try {
     await fs.writeFile(filePath, newContent, 'utf-8');

@@ -1,3 +1,4 @@
+import { getConversationPage, getConversationDetails } from '../../store/conversation';
 import { updateTaskSettings } from '../../services/taskSettingsService';
 import {IntelligenceBudgetSchema} from '../../../shared/intelligencePolicy';
 import { getActiveSessionSummary, getSessionMessagePage, querySessionPage } from '../../store/taskPages';
@@ -11,6 +12,14 @@ const session = z.object({ sessionId: id });
 const draft = session.extend({ revision: z.number().int().nonnegative(), data: z.object({ input: z.string().max(1_000_000), referenceIds: z.array(id).max(50), attachmentIds: z.array(id).max(50) }) });
 
 export function registerTaskOrganizationHandlers() {
+  ipcMain.handle(KAIRO_INVOKE.chatConversation, (_, value) => {
+    const query = session.extend({ before: z.number().int().positive().optional() }).strict().parse(value);
+    return getConversationPage(query.sessionId, query.before);
+  });
+  ipcMain.handle(KAIRO_INVOKE.chatConversationDetails, (_, value) => {
+    const query = session.extend({ itemId: id }).strict().parse(value);
+    return getConversationDetails(query.sessionId, query.itemId);
+  });
   ipcMain.handle(KAIRO_INVOKE.chatUpdateTaskSettings,(_,value)=> {
     const input=z.object({sessionId:id,model:z.string().min(1).max(500).optional(),executionProfile:z.enum(['chat_only','read_only_workspace','approved_execution','trusted_automation']).optional(),templateId:id.nullable().optional(),workflow:z.enum(['direct','plan']).optional(),delegation:z.enum(['off','auto','manual']).optional(),intelligenceBudget:IntelligenceBudgetSchema.optional()}).strict().parse(value);
     return updateTaskSettings(input.sessionId,input);

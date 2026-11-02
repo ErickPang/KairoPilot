@@ -1,6 +1,7 @@
 import {createDelegationTool} from '../services/delegationService';
 import {createPlanningTools} from '../core/agent/planningTools';
 import {getRunById} from '../store/chat';
+import {sessionApprovalPolicy} from '../store/approvalGrants';
 import {getTaskPlan,updateTaskPlan} from '../store/taskPlans';
 import {memorySnapshotPrompt} from '../services/projectMemoryService';
 import {requireTask,settingsForTask} from '../services/taskSettingsService';
@@ -635,6 +636,7 @@ async function initializeAgent(config: ResolvedAgentConfig, sender?: WebContents
   const signature = createRuntimeSignature(config);
   const workspace = config.executionContext?.executionRoot || path.resolve(agent.workspace);
   const permissions = guardForExecution(agent, config.executionContext);
+  if (config.executionContext?.sessionId) permissions.bindSessionApprovals(sessionApprovalPolicy(config.executionContext.sessionId, permissions.getApprovalContextKey()));
 
   const llm = createLLMProvider({
     provider: model.provider || 'openai',
@@ -759,6 +761,13 @@ function removeAgentRuntime(agentId: string) {
 }
 
 export function clearAgentRuntimes() { runtimeRegistry.clear(); pendingRuntimeInitializations.clear(); }
+
+export async function cancelActiveAgentRuntimes() {
+  await Promise.all([...runtimeRegistry.values()].map(async ({ runtime }) => {
+    const id = runtime.getActiveRunId();
+    if (id && getRunById(id)?.status === 'running') await runtime.cancelRun(id);
+  }));
+}
 
 export {
   ensureAgentRuntime,

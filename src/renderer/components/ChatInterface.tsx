@@ -1,3 +1,6 @@
+import { useConversationFeed } from '../hooks/useConversationFeed';
+import { useSkillCompletion } from '../hooks/useSkillCompletion';
+import { SkillCompletionMenu } from './SkillCompletionMenu';
 import {ApprovalCard} from './ApprovalCard';
 import type {ConfirmationRequest} from '../types';
 import {Select} from './Select';
@@ -8,15 +11,13 @@ import {TaskPlanPanel} from './TaskPlanPanel';
 import {TaskQueuePanel} from './TaskQueuePanel';
 import {useAdaptiveResource} from '../hooks/useAdaptiveResource';
 import { InputRecoveryNotice } from './InputRecoveryNotice';
-import { buildMessageGroups } from './chatMessagePresentation';
 import { AttachmentList } from './AttachmentList';
-import { ChatMessagesPanel, type SetupStep } from './ChatMessagesPanel';
-import { TaskHistoryPanel } from './TaskHistoryPanel';
+import { ChatMessagesPanel } from './ChatMessagesPanel';
 import { useTaskDraft, type ComposerHandle } from '../hooks/useTaskDraft';
-import type { ExecutionProfile,ContextReference,TaskExecutionSettings,QueuedTaskMessage,RunSummary,RunStep } from '../../shared/contracts';
+import type { ExecutionProfile,ContextReference,TaskExecutionSettings,QueuedTaskMessage,RunSummary } from '../../shared/contracts';
 import React, { useEffect, useState } from 'react';
-import { AgentConfig, ChatAttachment, Message, ModelConfig } from '../types';
-import { IconX } from './Icons';
+import { AgentConfig, ChatAttachment, ModelConfig } from '../types';
+import { IconSkill, IconX } from './Icons';
 import { ArrowUp, Square } from 'lucide-react';
 import { useTranslation } from '../hooks/useTranslation';
 import type { TaskViewState } from './taskViewState';
@@ -25,14 +26,11 @@ import { KAIRO_INVOKE } from '../../shared/ipc';
 
 interface ChatInterfaceProps {
   run: RunSummary | null;
-  runSteps: RunStep[];
   onCancelRun: () => Promise<boolean | void>;
-  onViewRun: () => void;
   approvalRequest?:ConfirmationRequest|null;
-  onApprove:()=>void;
+  onApprove:(scope?:import('../../shared/contracts').ApprovalDecisionScope)=>void;
   onDeny:()=>void;
   approvalBusy:boolean;
-  messages: Message[];
   input: string;
   setInput: (input: string | ((prev: string) => string)) => void;
   loading: boolean;
@@ -40,11 +38,9 @@ interface ChatInterfaceProps {
   composerRef: React.MutableRefObject<ComposerHandle | null>;
   isQuitPending: boolean;
   onViewReference: (reference: ContextReference) => void;
-  messagesEndRef: React.RefObject<HTMLDivElement>;
   models: ModelConfig[];
   activeAgent: AgentConfig | null;
   activeModelId: string | null;
-  activeAgentName: string;
   focusInputToken: number;
   onModelChange: (modelId: string) => void;
   onOpenModelSettings?: () => void;
@@ -61,18 +57,15 @@ interface ChatInterfaceProps {
 type PendingAttachmentFile = { path: string; name?: string; mimeType?: string };
 
 export const ChatInterface = React.memo(function ChatInterface({
-  run,runSteps,onCancelRun,onViewRun,
+  run,onCancelRun,
   approvalRequest,onApprove,onDeny,approvalBusy,
-  messages,
   input,
   setInput,
   loading,
   handleSend,
-  messagesEndRef,
   models,
   activeAgent,
   activeModelId,
-  activeAgentName,
   focusInputToken,
   onModelChange,
   onOpenModelSettings,
@@ -89,6 +82,9 @@ export const ChatInterface = React.memo(function ChatInterface({
   onViewReference
 }: ChatInterfaceProps) {
   const { t } = useTranslation();
+  const messagesEndRef = React.useRef<HTMLDivElement>(null);
+  const conversation = useConversationFeed(sessionId, run, loading);
+  const hasMessages = Boolean(conversation.data?.rounds.length);
   const currentRun = run?.sessionId === sessionId ? run : null;
   const isExecuting = loading || isRunUnsettled(currentRun);
   const [isStopping, setIsStopping] = useState(false);
@@ -134,37 +130,12 @@ export const ChatInterface = React.memo(function ChatInterface({
   const dragCounter = React.useRef(0);
   const messagesContainerRef = React.useRef<HTMLDivElement>(null);
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
+  const skillCompletion = useSkillCompletion(input, setInput, textareaRef, !draft.ready || draft.isRecovering || isQuitPending || Boolean(approvalRequest));
   const shouldAutoScrollRef = React.useRef(true);
   const autoScrollFrameRef = React.useRef<number | null>(null);
   const autoScrollTimeoutRef = React.useRef<number | null>(null);
   const lastAutoScrollAtRef = React.useRef(0);
   const activeProfile = activeAgent?.permissions.executionProfile;
-  const setupSteps = React.useMemo<SetupStep[]>(() => {
-    const hasModel = models.length > 0 && Boolean(activeModelId);
-    const hasAgent = Boolean(activeAgent);
-    const profileLabel = activeProfile
-      ? t(`config.executionProfile.${activeProfile}` as Parameters<typeof t>[0])
-      : t('chat.setupPermissionPending');
-
-    return [
-      {
-        key: 'model',
-        state: hasModel ? 'done' : 'pending',
-        label: hasModel ? t('chat.setupModelReady') : t('chat.setupModelPending')
-      },
-      {
-        key: 'permission',
-        state: hasAgent ? 'done' : 'pending',
-        label: hasAgent ? t('chat.setupPermissionReady', { profile: profileLabel }) : t('chat.setupPermissionPending')
-      },
-      {
-        key: 'start',
-        state: hasModel && hasAgent ? 'done' : 'pending',
-        label: t('chat.setupStart')
-      }
-    ];
-  }, [activeAgent, activeModelId, activeProfile, models.length, t]);
-
   const addAttachmentsFromPaths = React.useCallback(async (files: PendingAttachmentFile[]) => {
     const filteredFiles = files.filter((file) => file.path);
     if (filteredFiles.length === 0) {
@@ -325,19 +296,6 @@ export const ChatInterface = React.memo(function ChatInterface({
     [t, toRenderableUri]
   );
 
-  const recentMessages = React.useMemo(() => messages.slice(-100), [messages]);
-  const groupedMessages = React.useMemo(() => buildMessageGroups(recentMessages), [recentMessages]);
-  const [isHistoryVisible, setIsHistoryVisible] = useState(false);
-  const wasHistoryVisible = React.useRef(false);
-  useEffect(() => {
-    if (wasHistoryVisible.current && !isHistoryVisible && messagesContainerRef.current) {
-      shouldAutoScrollRef.current = true;
-      messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
-    }
-    wasHistoryVisible.current = isHistoryVisible;
-  }, [isHistoryVisible]);
-
-
   const updateAutoScrollState = React.useCallback(() => {
     const container = messagesContainerRef.current;
     if (!container) {
@@ -368,8 +326,8 @@ export const ChatInterface = React.memo(function ChatInterface({
   }, [updateAutoScrollState, viewCache, viewKey]);
 
   useEffect(() => {
-    if (messages.length === 0) return;
-    if (!hasRestoredScroll.current && messages.length > 0) {
+    if (!hasMessages) return;
+    if (!hasRestoredScroll.current && hasMessages) {
       hasRestoredScroll.current = true;
       const savedScroll = viewCache.get(viewKey)?.scrollTop;
       if (savedScroll !== undefined && messagesContainerRef.current) {
@@ -378,7 +336,7 @@ export const ChatInterface = React.memo(function ChatInterface({
         return;
       }
     }
-    if (messages.length > 0 && !shouldAutoScrollRef.current) {
+    if (hasMessages && !shouldAutoScrollRef.current) {
       return;
     }
 
@@ -405,7 +363,7 @@ export const ChatInterface = React.memo(function ChatInterface({
         autoScrollFrameRef.current = null;
       });
     }, waitMs);
-  }, [loading, messages, messagesEndRef, viewCache, viewKey]);
+  }, [loading, conversation.data, hasMessages, viewCache, viewKey]);
 
   useEffect(() => {
     return () => {
@@ -522,7 +480,7 @@ export const ChatInterface = React.memo(function ChatInterface({
 
   return (
     <div
-      className={`chat-interface ${messages.length === 0 ? 'is-empty-session' : ''}`}
+      className={`chat-interface ${!hasMessages ? 'is-empty-session' : ''}`}
       data-session-id={sessionId || ''} data-save-state={draft.status}
       onDragEnter={handleDragEnter}
       onDragOver={handleDragOver}
@@ -532,23 +490,17 @@ export const ChatInterface = React.memo(function ChatInterface({
       <InputRecoveryNotice draft={draft} disabled={isQuitPending}/>
       {isDragging && <div className="drag-overlay">{t('chat.dropFiles')}</div>}
 
-      {sessionId && (isHistoryVisible || messages.length >= 100) && <div className="workbench-history-toolbar"><span>{t(isHistoryVisible ? 'workbench.historyMode' : 'workbench.recentWindow')}</span><button type="button" aria-pressed={isHistoryVisible} onClick={() => setIsHistoryVisible((value) => !value)}>{t(isHistoryVisible ? 'workbench.returnRecent' : 'workbench.viewHistory')}</button></div>}
-      {isHistoryVisible && sessionId ? <TaskHistoryPanel sessionId={sessionId} activeAgentName={activeAgentName} markdownComponents={markdownComponents} onViewReference={onViewReference} toRenderableMarkdown={toRenderableMarkdown}/> : (
+
       <ChatMessagesPanel
         onViewReference={onViewReference}
-        activeAgentName={activeAgentName}
         containerRef={messagesContainerRef}
-        groupedMessages={groupedMessages}
-        run={currentRun} runSteps={runSteps} onViewRun={onViewRun}
+        sessionId={sessionId} run={currentRun} feed={conversation}
         loading={loading}
         markdownComponents={markdownComponents}
-        messages={recentMessages}
         messagesEndRef={messagesEndRef}
-        setupSteps={setupSteps}
         t={t}
         toRenderableMarkdown={toRenderableMarkdown}
       />
-      )}
 
       {sessionId&&<DelegationPanel sessionId={sessionId} loading={loading}/>}
       {sessionId&&<TaskPlanPanel sessionId={sessionId} onChanged={onTaskChanged}/>}
@@ -557,13 +509,21 @@ export const ChatInterface = React.memo(function ChatInterface({
       <div className="input-container">
         {approvalCard}
         <div className="input-box" style={{display:approvalRequest?'none':undefined}} aria-hidden={Boolean(approvalRequest)}>
+          <SkillCompletionMenu completion={skillCompletion}/>
+          <div className="composer-text-row">
+          {skillCompletion.selected.map((skill, index) => <span className="composer-skill-token" data-selected-skill={skill.id} key={`${skill.id}-${index}`} title={`/${skill.id}`}>
+            <IconSkill size={18}/><span>{skill.name}</span>
+            <button type="button" disabled={!draft.ready || draft.isRecovering || isQuitPending} aria-label={`${t('chat.removeSkill')} ${skill.name}`} onClick={() => skillCompletion.remove(index)}><IconX size={12}/></button>
+          </span>)}
           <textarea
             ref={textareaRef}
+            {...skillCompletion.inputProps}
             className="input-textarea"
-            value={input}
+            value={skillCompletion.text}
             disabled={!draft.ready || draft.isRecovering || isQuitPending}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={(e) => { skillCompletion.setText(e.target.value); skillCompletion.syncCaret(); }}
             onKeyDown={(e) => {
+              if (e.nativeEvent.isComposing || e.keyCode === 229 || skillCompletion.keyDown(e)) return;
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
                 submitMessage();
@@ -577,6 +537,7 @@ export const ChatInterface = React.memo(function ChatInterface({
               target.style.height = `${Math.min(target.scrollHeight, 160)}px`;
             }}
           />
+          </div>
           <AttachmentList attachments={attachments} onRemove={removeAttachment} disabled={isQuitPending} />
           <div className="context-reference-list">
             {references.map((reference) => <span key={reference.id} className="context-reference-chip">

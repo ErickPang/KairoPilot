@@ -35,4 +35,22 @@ describe('quit draft protection', () => {
     await request; expect(electron.app.quit).toHaveBeenCalledOnce();
     expect(response({ sender: { id: 17 } }, { id, saved: true })).toBe(false);
   });
+  it('waits for draft acknowledgement and execution cleanup before approving a real quit', async () => {
+    const send=vi.fn();let finish!:()=>void;
+    const cleanup=vi.fn(()=>new Promise<void>(resolve=>{finish=resolve;}));
+    const coordinator=installQuitDraftProtection(()=>({isDestroyed:()=>false,webContents:{id:17,send}} as never),{beforeQuit:cleanup});
+    const pending=coordinator.request();await Promise.resolve();
+    expect(cleanup).not.toHaveBeenCalled();
+    const response=electron.ipcMain.handle.mock.calls[0][1];
+    response({sender:{id:17}},{id:send.mock.calls[0][1].id,saved:true});
+    await Promise.resolve();await Promise.resolve();
+    expect(cleanup).toHaveBeenCalledOnce();expect(coordinator.isApproved()).toBe(false);expect(electron.app.quit).not.toHaveBeenCalled();
+    finish();await pending;
+    expect(coordinator.isApproved()).toBe(true);expect(electron.app.quit).toHaveBeenCalledOnce();
+  });
+  it('also cleans up execution when quitting without an available window', async () => {
+    const cleanup=vi.fn().mockResolvedValue(undefined);
+    const coordinator=installQuitDraftProtection(()=>null,{beforeQuit:cleanup});
+    await coordinator.request();expect(cleanup).toHaveBeenCalledOnce();expect(coordinator.isApproved()).toBe(true);
+  });
 });

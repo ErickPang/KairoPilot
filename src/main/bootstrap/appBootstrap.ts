@@ -1,4 +1,4 @@
-import {recoverIntelligenceWork} from '../store/intelligence';
+import { startApplicationConversation, stopApplicationExecution } from '../services/applicationExecutionLifecycle';
 import { installQuitDraftProtection } from '../services/quitDraftProtection';
 import { app, BrowserWindow } from 'electron';
 import path from 'node:path';
@@ -6,7 +6,6 @@ import { skillsManager } from '../core/skills/manager';
 import { setupHandlers } from '../bridge/ipc/setupHandlers';
 import { ensureAppPaths, seedBuiltinSkills } from '../services/appRuntime';
 import { registerKairopilotProtocol } from '../services/protocolService';
-import { recoverInterruptedRuns } from '../store/chat';
 import { getAppearanceConfig, initializeKairoPilotConfig } from '../store/config';
 import { createMainWindow } from '../services/windowService';
 import { initSentry } from '../services/sentryInit';
@@ -40,7 +39,7 @@ function createWindowFromContext(context: BootstrapContext) {
 }
 
 export function bindAppLifecycle(context: BootstrapContext) {
-  const quitDrafts = installQuitDraftProtection(getMainWindow);
+  const quitDrafts = installQuitDraftProtection(getMainWindow, { beforeQuit: stopApplicationExecution });
   // When all windows are closed, don't quit — keep running in tray
   app.on('window-all-closed', () => {
     // On macOS it's standard to keep the app open without windows
@@ -103,8 +102,7 @@ export function bootstrapMainProcess(context: BootstrapContext) {
   app.whenReady().then(async () => {
     if (!process.env.KAIROPILOT_TEST_ROOT) initSentry();
     initializeKairoPilotConfig();
-    recoverInterruptedRuns();
-    recoverIntelligenceWork();
+    startApplicationConversation();
 
     registerKairopilotProtocol(() => appPaths.allowedProtocolRoots);
 

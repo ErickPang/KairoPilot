@@ -247,6 +247,7 @@ export async function executeRunEngine(params: ExecuteRunEngineParams): Promise<
       });
     }
 
+    emitUpdate(onUpdate, { type: 'assistant-message', runId, stepId: modelStep.id, content: response.content || '', phase: response.tool_calls?.length ? 'commentary' : 'draft' });
     pushHistory(response);
     context.push(response);
     updateRunStep(modelStep.id, {

@@ -19,10 +19,9 @@ import { WorkbenchFiles } from './components/WorkbenchFiles';
 import { useWorkbenchViewState, useWorkbenchPreference } from './hooks/useWorkbenchViewState';
 import type { ComposerHandle } from './hooks/useTaskDraft';
 import type { ContextReference } from '../shared/contracts';
-import { RunDetailsPanel } from './components/RunDetailsPanel';
 import { TaskResultsPanel } from './components/TaskResultsPanel';
 import { isRunUnsettled } from './hooks/runtimeEventUtils';
-import { Menu, FolderOpen, ListTree, FileCheck2, X } from 'lucide-react';
+import { Menu, FolderOpen, FileCheck2, X } from 'lucide-react';
 import { useAppController } from './hooks/useAppController';
 import { useTranslation } from './hooks/useTranslation';
 import { KAIRO_EVENT, KAIRO_INVOKE } from '../shared/ipc';
@@ -53,9 +52,6 @@ function App() {
     handleDeleteModel,
     handleDeleteSession,
     handleDeny,
-    handlePauseRun,
-    handleResumeRun,
-    handleRetryStep,
     handleSaveModel,
     handleSelectSession,
     handleSend,
@@ -68,8 +64,6 @@ function App() {
     input,
     loading,
     isRequestPending,
-    messages,
-    messagesEndRef,
     models,
     reportAppError,
     reportAppNotice,
@@ -370,7 +364,7 @@ function App() {
           {activeSession&&<TaskTitleMenu key={activeSession.id} task={activeSession} disabled={navigationLocked} onRename={async title=>{const result=await window.kairo.invoke(KAIRO_INVOKE.chatUpdateSessionTitle,{sessionId:activeSession.id,title});if(!result.success)throw new Error(result.error);await refreshTasks();}} onArchive={()=>void handleArchiveTaskWithFilter(activeSession.id,!activeSession.archivedAt)} onDelete={event=>void handleDeleteSession(event,activeSession.id)}/>}</div>
           <span className="titlebar-spacer"/>
           <div className="workbench-panel-buttons">{([
-            ['files',FolderOpen,t('workbench.files')],['results',FileCheck2,t('workbench.results')],['details',ListTree,t('workbench.details')]
+            ['files',FolderOpen,t('workbench.files')],['results',FileCheck2,t('workbench.results')]
           ] as const).map(([id,Icon,label])=><button key={id} type="button" aria-label={label} aria-controls={auxiliaryPanel===id?'workbench-auxiliary-panel':undefined} aria-expanded={auxiliaryPanel===id} aria-pressed={auxiliaryPanel===id} onClick={()=>{setPreviewExpanded(false);setAuxiliaryPanel(current=>current===id?null:id);}} title={label}><Icon size={18}/></button>)}</div>
           </div>
         </>}
@@ -386,14 +380,13 @@ function App() {
           {activeSession?.archivedAt && <div className="workbench-archive-banner"><span>{t('workbench.archivedHint')}</span><button type="button" disabled={navigationLocked} onClick={() => void handleArchiveTaskWithFilter(activeSession.id, false)}>{t('workbench.restoreTask')}</button></div>}
           <div ref={chatWorkspaceRef} className={`chat-workspace ${hasPreview ? 'has-preview' : ''} ${hasPreview && previewExpanded ? 'is-preview-expanded' : ''}`} style={{ ['--preview-width' as string]: `${previewWidth}px` }}>
             <div className="chat-workspace-main">
-              <ChatInterface run={sessionContext.latestRun} runSteps={sessionContext.activeRunSteps} onCancelRun={handleCancelRun} onViewRun={()=>{setPreviewExpanded(false);setAuxiliaryPanel('details');}} approvalRequest={confirmationRequest?.sessionId===activeSessionId?confirmationRequest:null} onApprove={handleConfirm} onDeny={handleDeny} approvalBusy={isRequestPending} canQueue={!navigationLocked&&!isQuitPending&&!activeSession?.archivedAt} taskSettings={activeSession?.executionSettings} onTaskChanged={refreshTasks} isQuitPending={isQuitPending} composerRef={composerRef} onViewReference={handleViewReference} key={`${activeAgentId}:${activeSessionId}`} messages={messages} input={input} setInput={setInput} loading={loading} handleSend={handleSend} messagesEndRef={messagesEndRef} models={models} activeAgent={activeAgent} activeModelId={activeAgent?.model || null} activeAgentName={activeAgentName} focusInputToken={focusChatInputToken} onModelChange={model=>void updateTaskConfig({model})} onOpenModelSettings={() => openConfig('model')} onProfileChange={executionProfile=>void updateTaskConfig({executionProfile})} sessionId={activeSessionId} isRunBlocked={navigationLocked || isRequestPending || sessions.some(item=>['running','waiting_approval','paused'].includes(item.runStatus||'')) || isRunUnsettled(sessionContext.latestRun) || Boolean(activeSession?.archivedAt)} viewKey={taskKey} viewCache={taskViews.current} />
+              <ChatInterface run={sessionContext.latestRun} onCancelRun={handleCancelRun} approvalRequest={confirmationRequest?.sessionId===activeSessionId?confirmationRequest:null} onApprove={handleConfirm} onDeny={handleDeny} approvalBusy={isRequestPending} canQueue={!navigationLocked&&!isQuitPending&&!activeSession?.archivedAt} taskSettings={activeSession?.executionSettings} onTaskChanged={refreshTasks} isQuitPending={isQuitPending} composerRef={composerRef} onViewReference={handleViewReference} key={`${activeAgentId}:${activeSessionId}`} input={input} setInput={setInput} loading={loading} handleSend={handleSend} models={models} activeAgent={activeAgent} activeModelId={activeAgent?.model || null} focusInputToken={focusChatInputToken} onModelChange={model=>void updateTaskConfig({model})} onOpenModelSettings={() => openConfig('model')} onProfileChange={executionProfile=>void updateTaskConfig({executionProfile})} sessionId={activeSessionId} isRunBlocked={navigationLocked || isRequestPending || sessions.some(item=>['running','waiting_approval','paused'].includes(item.runStatus||'')) || isRunUnsettled(sessionContext.latestRun) || Boolean(activeSession?.archivedAt)} viewKey={taskKey} viewCache={taskViews.current} />
             </div>
             {hasPreview && !previewExpanded && <div className="workspace-divider workspace-divider-preview" onMouseDown={() => setResizeTarget('preview')} />}
             {hasPreview && <aside id="workbench-auxiliary-panel" className="workbench-auxiliary">
               <div className="workbench-auxiliary-header"><strong>{t(`workbench.${auxiliaryPanel}`)}</strong><button type="button" className="workbench-icon-button" onClick={() => setAuxiliaryPanel(null)} aria-label={t('common.close')}><X size={16} /></button></div>
               {auxiliaryPanel === 'files' && <WorkbenchFiles taskKey={taskKey} workspacePath={workspacePath} directoryPath={view.directoryPath} filePath={previewFilePath} expanded={previewExpanded} disabled={navigationLocked || !activeSessionId || Boolean(activeSession?.archivedAt)} onSelectFile={(path) => { setPreviewFilePath(path); setPreviewExpanded(false); }} onReference={handleReference} onRoot={() => updateView({ directoryPath: undefined })} onToggleExpand={() => setPreviewExpanded((value) => !value)}/>}
               {auxiliaryPanel === 'results' && <TaskResultsPanel onReference={navigationLocked||activeSession?.archivedAt?undefined:async(path)=>{await handleReference(path);setFocusChatInputToken(token=>token+1);}} acceptance={sessionContext.latestRun?.executionContext?.acceptance} key={taskKey} run={sessionContext.latestRun} sessionId={activeSessionId} onOpenFile={(path) => { setPreviewFilePath(path); setAuxiliaryPanel('files'); }} />}
-              {auxiliaryPanel === 'details' && <RunDetailsPanel onPause={handlePauseRun} onResume={handleResumeRun} context={sessionContext} onRetryStep={handleRetryStep} disabled={isRequestPending} />}
             </aside>}
           </div>
         </main>}

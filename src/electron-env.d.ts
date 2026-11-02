@@ -92,7 +92,7 @@ interface KairoBridge {
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.agentResumeRun, args: { runId: string }): Promise<import('./shared/contracts').AgentRuntimeInvokeResult>;
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.agentCancelRun, args: { runId: string }): Promise<InvokeSuccess>;
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.agentRetryStep, args: { runId: string; stepId: string }): Promise<import('./shared/contracts').AgentRuntimeInvokeResult>;
-  invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.agentConfirmResponse, args: { id: string; approved: boolean }): Promise<import('./shared/contracts').AgentRuntimeInvokeResult>;
+  invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.agentConfirmResponse, args: { id: string; approved: boolean; scope?: import('./shared/contracts').ApprovalDecisionScope }): Promise<import('./shared/contracts').AgentRuntimeInvokeResult>;
   invoke(
     channel: typeof import('./shared/ipc').KAIRO_INVOKE.auditGet,
     query?: import('./renderer/types').AuditLogQuery | number
@@ -102,19 +102,9 @@ interface KairoBridge {
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.chatDeleteSession, sessionId: string): Promise<InvokeSuccess>;
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.chatGetActiveSession): Promise<import('./renderer/types').Session | null>;
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.chatGetAgentStats): Promise<import('./renderer/types').AgentStats[]>;
-  invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.chatGetLatestContextSummary, sessionId: string): Promise<import('./renderer/types').RunContextSummary | null>;
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.chatGetLatestRun, sessionId?: string): Promise<import('./renderer/types').RunSummary | null>;
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.chatGetPendingApproval, sessionId?: string): Promise<import('./renderer/types').ApprovalRecord | null>;
-  invoke(
-    channel: typeof import('./shared/ipc').KAIRO_INVOKE.chatQueryRuns,
-    query?: import('./renderer/types').RunQuery
-  ): Promise<import('./renderer/types').RunQueryResult>;
-  invoke(
-    channel: typeof import('./shared/ipc').KAIRO_INVOKE.chatGetRunTrace,
-    runId: string | import('./renderer/types').RunTraceQuery
-  ): Promise<import('./renderer/types').RunTrace | null>;
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.chatGetSession, sessionId: string): Promise<import('./renderer/types').Session | null>;
-  invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.chatGetSessionRuns, sessionId: string): Promise<import('./renderer/types').RunStep[]>;
   invoke(
     channel: typeof import('./shared/ipc').KAIRO_INVOKE.chatGetTokenUsageDetails,
     args?: import('./renderer/types').MonitoringTokenQuery

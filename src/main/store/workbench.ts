@@ -16,6 +16,7 @@ export function listProjects(_agentId?: string): ProjectSummary[] {
 export function authorizeProject(projectId: string, enabled = true) {
   const project=getProject(projectId); if (!project) throw new Error('Project not found.');
   getDb().prepare('INSERT INTO project_authorizations(project_id,root_path,enabled) VALUES (?,?,?) ON CONFLICT(project_id) DO UPDATE SET enabled=excluded.enabled').run(projectId,project.rootPath,enabled?1:0);
+  if (!enabled) getDb().prepare('DELETE FROM session_approval_grants WHERE session_id IN (SELECT id FROM sessions WHERE project_id=?)').run(projectId);
 }
 export function isProjectAuthorized(projectId: string) { return Boolean(getDb().prepare('SELECT 1 FROM project_authorizations WHERE project_id=? AND enabled=1').get(projectId)); }
 export function getProject(id: string): ProjectSummary | undefined {

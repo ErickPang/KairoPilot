@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3';
 import {initializeChatDatabase} from '../src/main/store/chatDb';
 import {verifyInlineApproval} from './layout-native';
+import {verifySessionApprovalRestart} from './session-approval-native';
 import {capabilitiesFixture,verifyCapabilities} from './capabilities-native';
 import {instructionsFixture,verifyInstructions} from './instructions-native';
 import {verifyWebBoundaries} from './web-boundary-native';
@@ -8,6 +9,9 @@ import {verifyUIUnification} from './ui-unification-native';
 import {batch1Fixture,verifyBatch1} from './batch1-native';
 import {intelligenceFixture,verifyIntelligence} from './intelligence-native';
 import {verifyTaskWorkflow} from './task-workflow-native';
+import {verifyFreshStartup,quitWithExecutionCleanup,prepareAbruptExit,verifyAbruptRestart} from './execution-lifecycle-native';
+import {startApplicationConversation} from '../src/main/services/applicationExecutionLifecycle';
+import {getActiveSessionSummary} from '../src/main/store/taskPages';
 import {app,BrowserWindow} from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -33,6 +37,7 @@ const checks:string[]=[];
 const assert=(ok:unknown,label:string)=>{if(!ok)throw new Error(label);checks.push(label);};
 let receivedSlow=false;
 const fixture=http.createServer(async(request,response)=>{
+ if(request.url?.startsWith('/search?')){fs.appendFileSync(path.join(output,'session-search-queries.jsonl'),JSON.stringify(new URL(request.url,'http://fixture').searchParams.get('q'))+'\n');response.writeHead(200,{'Content-Type':'application/json'});response.end(JSON.stringify({results:[{title:'Synthetic insurance policy',url:'https://example.invalid/policy',content:'Synthetic policy result for session approval verification.'}]}));return;}
  let body='';for await(const part of request)body+=part;
  const input=JSON.parse(body);if(capabilitiesFixture(input,response))return;if(instructionsFixture(input,response))return;if(await batch1Fixture(input,response))return;if(await intelligenceFixture(input,response))return;const last=input.messages.filter((item:{role:string})=>item.role==='user').at(-1)?.content || '';
  if(last.includes('SLOW'))receivedSlow=true;
@@ -43,6 +48,15 @@ const fixture=http.createServer(async(request,response)=>{
  if(!planning&&last.includes('W43_DELEGATE')&&!input.messages.slice(lastUser+1).some((item:{role:string})=>item.role==='tool')){
   response.write(`data: ${JSON.stringify({id:'fixture',object:'chat.completion.chunk',created:1,model:'local-a',choices:[{index:0,delta:{role:'assistant',tool_calls:[{index:0,id:'delegation-fixture',type:'function',function:{name:'delegate_readonly',arguments:JSON.stringify({tasks:JSON.parse(last.split('JOBS=')[1])})}}]},finish_reason:'tool_calls'}]})}\n\n`);
  }else if(planning&&!last.includes('W4_MALICIOUS_TOOL')){if(last.includes('W4_SLOW_PLANNER'))await new Promise(resolve=>setTimeout(resolve,1800));emit('# 实施计划\n1. 核对用户目标。\n2. 按确认内容实施。\n3. 验证交付物并报告结果。','stop');}
+ else if(last.includes('SESSION_SEARCH')&&!input.messages.slice(lastUser+1).some((item:{role:string})=>item.role==='tool')){
+  response.write(`data: ${JSON.stringify({id:'fixture',object:'chat.completion.chunk',created:1,model:'local-a',choices:[{index:0,delta:{role:'assistant',tool_calls:[{index:0,id:'synthetic-search',type:'function',function:{name:'web_search',arguments:JSON.stringify({query:last.split('QUERY=')[1],maxResults:last.includes('NEW')?7:3})}}]},finish_reason:'tool_calls'}]})}\n\n`);
+ }
+ else if(last.includes('SESSION_COMMAND')&&!input.messages.slice(lastUser+1).some((item:{role:string})=>item.role==='tool')){
+  response.write(`data: ${JSON.stringify({id:'fixture',object:'chat.completion.chunk',created:1,model:'local-a',choices:[{index:0,delta:{role:'assistant',tool_calls:[{index:0,id:'synthetic-command',type:'function',function:{name:'execute_command',arguments:JSON.stringify({command:'node',args:last.includes('SESSION_COMMAND_CODE')?['-e','console.log("synthetic")']:[last.includes('SESSION_COMMAND_NEW')?'--help':'--version']})}}]},finish_reason:'tool_calls'}]})}\n\n`);
+ }
+ else if(last.includes('EDIT_APPROVAL')&&!input.messages.slice(lastUser+1).some((item:{role:string})=>item.role==='tool')){
+  response.write(`data: ${JSON.stringify({id:'fixture',object:'chat.completion.chunk',created:1,model:'local-a',choices:[{index:0,delta:{role:'assistant',tool_calls:[{index:0,id:'synthetic-edit',type:'function',function:{name:'edit_file',arguments:JSON.stringify({file_path:last.split('TARGET=')[1],old_string:'BEFORE_EDIT',new_string:'AFTER_EDIT'})}}]},finish_reason:'tool_calls'}]})}\n\n`);
+ }
  else if((last.includes('WRITE_APPROVAL')||last.includes('W4_WRITE')||last.includes('W4_MALICIOUS_TOOL'))&&!input.messages.slice(lastUser+1).some((item:{role:string})=>item.role==='tool')){
   response.write(`data: ${JSON.stringify({id:'fixture',object:'chat.completion.chunk',created:1,model:'local-a',choices:[{index:0,delta:{role:'assistant',tool_calls:[{index:0,id:'synthetic-write',type:'function',function:{name:'write_file',arguments:JSON.stringify({path:last.split('TARGET=')[1],content:'APPROVED_TASK_PROOF'})}}]},finish_reason:'tool_calls'}]})}\n\n`);
  }else{emit('SYNTHETIC_');if(last.includes('SLOW'))await new Promise(resolve=>setTimeout(resolve,1500));emit('DONE','stop');}
@@ -50,8 +64,9 @@ const fixture=http.createServer(async(request,response)=>{
 });
 function seed(port:number){
  const config=structuredClone(DEFAULT_CONFIG);
+ config.webSearch={...config.webSearch,providers:{...config.webSearch.providers,searxng:{enabled:true,baseUrl:`http://127.0.0.1:${port}`}}};
  config.models.providers={fixture:{provider:'custom',baseUrl:`http://127.0.0.1:${port}/v1`,apiKey:'synthetic-only',model:[{id:'local-a',name:'Local A'},{id:'local-b',name:'Local B'}]}};
- config.workbench={version:2,defaultModel:'fixture/local-a',managementRoot:path.join(paths.userDataPath,'workbench'),instructionRoot:paths.userDataPath,instructions:'',permissions:{...createDefaultAgentPermissions(),executionProfile:'approved_execution',policy:{...createDefaultPolicyConfig('approved_execution'),approvalMode:'on_write'},fileSystem:{read:true,write:true,allowedPaths:[]},shell:{enabled:true,allowedCommands:['node']},network:{enabled:true,allowedDomains:['example.invalid']}}};
+ config.workbench={version:2,defaultModel:'fixture/local-a',managementRoot:path.join(paths.userDataPath,'workbench'),instructionRoot:paths.userDataPath,instructions:'',permissions:{...createDefaultAgentPermissions(),executionProfile:'approved_execution',policy:{...createDefaultPolicyConfig('approved_execution'),approvalMode:'on_write'},fileSystem:{read:true,write:true,allowedPaths:[]},shell:{enabled:true,allowedCommands:['node']},network:{enabled:true,allowedDomains:['example.invalid',`http://127.0.0.1:${port}/search`]}}};
  fs.writeFileSync(path.join(paths.userDataPath,'kairopilot.json'),JSON.stringify(config));
 }
 let window:BrowserWindow;
@@ -61,6 +76,8 @@ async function run(){
  if(stage==='1')seed(port);
  else {const configPath=path.join(paths.userDataPath,'kairopilot.json');const stored=JSON.parse(fs.readFileSync(configPath,'utf8'));stored.models.providers.fixture.baseUrl=`http://127.0.0.1:${port}/v1`;fs.writeFileSync(configPath,JSON.stringify(stored));}
  initializeKairoPilotConfig();const db=getDb();
+ const previousSelection=getActiveSessionSummary(undefined)?.id;
+ const freshConversation=startApplicationConversation();
  assert((db.prepare('SELECT version FROM workbench_schema').get() as {version:number}).version===7,'schema v7 is ready');
  assert((db.pragma('foreign_key_check') as unknown[]).length===0,'foreign key integrity');
  if(stage==='1'){
@@ -79,11 +96,14 @@ async function run(){
  const invoke=(channel:string,...args:unknown[])=>js(`window.kairo.invoke(${JSON.stringify(channel)},...${JSON.stringify(args)})`);
  const wait=(condition:string)=>js(`new Promise(resolve=>{const until=Date.now()+12000;const timer=setInterval(()=>{if(${condition}){clearInterval(timer);resolve(true);}else if(Date.now()>until){clearInterval(timer);resolve(false);}},25);})`);
  assert(await wait(`document.querySelector('.chat-input') || document.querySelector('textarea')`),'real React workbench mounts');
+ await verifyFreshStartup(window,invoke,freshConversation.id,previousSelection,assert);
+ if(stage==='3'){await verifyAbruptRestart(invoke,output,freshConversation.id,assert);return;}
  const before=(db.prepare('SELECT COUNT(*) AS count FROM sessions').get() as {count:number}).count;
  const initialized=await Promise.all(Array.from({length:8},()=>invoke(C.workbenchInit)));
  assert(initialized.every(item=>item.success),'eight concurrent workbench startup requests succeed');assert((db.prepare('SELECT COUNT(*) AS count FROM sessions').get() as {count:number}).count===before,'startup is idempotent without acquiring an execution lease');
  assert(await js(`!document.querySelector('.agent-selector') && !document.querySelector('.agent-select')`),'no agent switcher in workbench');
  if(phase==='4')await verifyCapabilities(window,invoke,output,phase,assert);
+ if(phase==='4')await verifySessionApprovalRestart(invoke,output,assert);
  if(phase==='3'||phase==='4'){await verifyTaskWorkflow(window,invoke,output,phase,assert);await verifyIntelligence(window,invoke,output,phase,assert);await verifyBatch1(window,invoke,output,phase,assert);}
 
  if(stage==='1'){
@@ -160,5 +180,8 @@ async function run(){
  assert(await wait(`!document.querySelector('.is-settings-page') && document.querySelector('textarea')`),'returning to workbench retains task selection');
  fs.writeFileSync(path.join(output,`renderer-errors-${stage}.json`),JSON.stringify(errors));
  assert(errors.filter(item=>!item.includes('Electron Security Warning')&&!item.includes('Download the React DevTools')&&!item.includes('net::ERR_FILE_NOT_FOUND')).length===0,'no unexpected renderer errors');
+ if(stage==='1')await quitWithExecutionCleanup(window,invoke,output,assert,()=>{writeReport();fixture.close();});
+ if(stage==='2')await prepareAbruptExit(invoke,output,assert);
 }
-run().then(()=>{fs.writeFileSync(path.join(output,`report-${stage}.json`),JSON.stringify({success:true,checks,checkCount:checks.length}));fixture.close();window?.destroy();app.exit(0);}).catch(error=>{fs.writeFileSync(path.join(output,`report-${stage}.json`),JSON.stringify({success:false,error:error instanceof Error?error.message:String(error),checks,checkCount:checks.length}));app.exit(1);});
+function writeReport(){fs.writeFileSync(path.join(output,`report-${stage}.json`),JSON.stringify({success:true,checks,checkCount:checks.length}));}
+run().then(()=>{if(stage==='1')return;writeReport();fixture.close();window?.destroy();app.exit(0);}).catch(error=>{fs.writeFileSync(path.join(output,`report-${stage}.json`),JSON.stringify({success:false,error:error instanceof Error?error.message:String(error),checks,checkCount:checks.length}));app.exit(1);});

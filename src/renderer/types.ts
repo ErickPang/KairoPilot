@@ -29,15 +29,9 @@ export type {
   ProviderConfig,
   ProviderType,
   RunContextSummary,
-  RunQuery,
-  RunQueryResult,
-  RunQueryStatus,
   RiskLevel,
   RuntimeUpdateEvent,
   RunStep,
-  RunTraceAggregations,
-  RunTraceQuery,
-  RunTrace,
   RunSummary,
   SkillSummary,
   ToolCallRecord,
@@ -85,6 +79,7 @@ export interface Session extends SessionProjectContext {
 export type SessionSummary = import('../shared/contracts').SessionSummary;
 
 export interface ConfirmationRequest {
+  sessionApproval?: import('../shared/contracts').SessionApprovalScope;
   id: string;
   tool: string;
   args: Record<string, unknown>;
@@ -115,9 +110,7 @@ export interface SessionContextState {
   activeSessionId: string | null;
   appNotice: AppNotice | null;
   confirmationRequest: ConfirmationRequest | null;
-  latestContextSummary: import('../shared/contracts').RunContextSummary | null;
   latestRun: import('../shared/contracts').RunSummary | null;
-  activeRunSteps: import('../shared/contracts').RunStep[];
 }
 
 export type SessionContextUpdate =

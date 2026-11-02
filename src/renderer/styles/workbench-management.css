@@ -9,6 +9,7 @@
 :root[data-theme] .workbench-app .workspace-panel-main { overflow: auto; background: var(--background); }
 :root[data-theme] .workbench-app .main-content { padding: 24px 28px; min-width: 0; }
 :root[data-theme] .workbench-app .main-content-settings { padding: 0; }
+:root[data-theme] .workbench-app .config-content-standalone > .model-config-list { padding: 0; border: 0; background: transparent; box-shadow: none; }
 :root[data-theme] .workbench-app .settings-menu-item { min-height: 36px; padding: 8px 10px; border: 0; border-radius: var(--control-radius); justify-content: flex-start; font-size: 12px; background: transparent; color: var(--muted-fg); box-shadow: none; }
 :root[data-theme] .workbench-app .settings-menu-item.active,
 :root[data-theme] .workbench-app .settings-menu-item:hover { background: var(--sidebar-accent); color: var(--foreground); box-shadow: none; }
@@ -30,7 +31,7 @@
 :root[data-theme] .workbench-app .btn-secondary { background: var(--surface-panel); color: var(--foreground); border-color: var(--border); }
 :root[data-theme] .workbench-app .btn-danger { background: var(--danger); color: var(--destructive-fg); border-color: var(--danger); }
 :root[data-theme] .workbench-app :is(.custom-select-option, .model-editor-select-option).is-selected { background: var(--surface-muted); color: var(--foreground); }
-:root[data-theme] .workbench-app :is(.workbench-results, .workbench-run-details) > h3 { font-size: 12px; margin: 24px 0 12px; }
+:root[data-theme] .workbench-app .workbench-results > h3 { font-size: 12px; margin: 24px 0 12px; }
 :root[data-theme] .workbench-app .diff-viewer { border: 1px solid var(--border-soft); border-radius: var(--control-radius); background: var(--background); }
 :root[data-theme] .workbench-app .diff-viewer-header { background: var(--surface-muted); padding: 10px; }
 :root[data-theme] .workbench-app .diff-viewer-mode-toggle { display: flex; gap: 4px; }

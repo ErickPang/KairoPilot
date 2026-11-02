@@ -7,9 +7,7 @@ function createDefaultSessionContext(): SessionContextState {
     activeSessionId: null,
     appNotice: null,
     confirmationRequest: null,
-    latestContextSummary: null,
     latestRun: null,
-    activeRunSteps: []
   };
 }
 

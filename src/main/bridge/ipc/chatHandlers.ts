@@ -12,12 +12,8 @@ import {
   updateActiveAgentSessionTitle
 } from '../../services/chatService';
 import {
-  getLatestContextSummaryForActiveAgentSession,
   getLatestRunForActiveAgentSession,
-  getPendingApprovalForActiveAgentSession,
-  getRunStepsForActiveAgentSession,
-  getRunTraceForActiveAgent,
-  queryRunsForActiveAgent
+  getPendingApprovalForActiveAgentSession
 } from '../../services/chatRunService';
 import {
   deleteAttachmentForActiveSession,
@@ -36,8 +32,6 @@ import {
   DeleteAttachmentInputSchema,
   MonitoringTokenQueryInputSchema,
   PrepareAttachmentsInputSchema,
-  RunQueryInputSchema,
-  RunTraceInputSchema,
   SessionIdInputSchema,
   UpdateSessionTitleInputSchema
 } from './chatSystemValidation';
@@ -77,38 +71,12 @@ function registerChatHandlers() {
     return getLatestRunForActiveAgentSession(payload.data);
   });
 
-  ipcMain.handle(KAIRO_INVOKE.chatGetLatestContextSummary, async (_, sessionId) => {
-    const payload = SessionIdInputSchema.safeParse(sessionId);
-    if (!payload.success) {
-      return null;
-    }
-    return getLatestContextSummaryForActiveAgentSession(payload.data);
-  });
-
-  ipcMain.handle(KAIRO_INVOKE.chatGetSessionRuns, async (_, sessionId) => {
-    const payload = SessionIdInputSchema.safeParse(sessionId);
-    if (!payload.success) {
-      return [];
-    }
-    return getRunStepsForActiveAgentSession(payload.data);
-  });
-
   ipcMain.handle(KAIRO_INVOKE.chatGetPendingApproval, async (_, sessionId) => {
     const payload = SessionIdInputSchema.safeParse(sessionId);
     if (payload.success) {
       return getPendingApprovalForActiveAgentSession(payload.data);
     }
     return getPendingApprovalForActiveAgentSession();
-  });
-
-  ipcMain.handle(KAIRO_INVOKE.chatQueryRuns, async (_, input) => {
-    const query = parseIpcInput(RunQueryInputSchema, input, 'run query');
-    return queryRunsForActiveAgent(query);
-  });
-
-  ipcMain.handle(KAIRO_INVOKE.chatGetRunTrace, async (_, input) => {
-    const query = parseIpcInput(RunTraceInputSchema, input, 'run trace query');
-    return getRunTraceForActiveAgent(query);
   });
 
   ipcMain.handle(KAIRO_INVOKE.chatSetActiveSession, async (_, sessionId) => {

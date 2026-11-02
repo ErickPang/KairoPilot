@@ -3,7 +3,6 @@ import type {
   ApprovalRecord,
   MonitoringTokenQuery,
   RunContextSummary,
-  RunQuery,
   RunStatus,
   RunStep,
   RunStepStatus,
@@ -260,52 +259,6 @@ export function mapContextSummaryRow(row: {
       totalChars: parsedSummary.budget?.totalChars || 0
     },
     createdAt: row.created_at
-  };
-}
-
-export function buildRunQueryWhere(query: RunQuery) {
-  const clauses: string[] = [];
-  const params: Array<string | number> = [];
-  if (query.projectId) { clauses.push('session_id IN (SELECT id FROM sessions WHERE project_id=?)'); params.push(query.projectId); }
-  if (query.model) { clauses.push("json_valid(execution_context) AND json_extract(execution_context,'$.model')=?"); params.push(query.model); }
-  if (query.startTime !== undefined) { clauses.push('created_at>=?'); params.push(query.startTime); }
-  if (query.endTime !== undefined) { clauses.push('created_at<=?'); params.push(query.endTime); }
-  const search = query.search?.trim().toLowerCase();
-  const status = query.status ?? 'all';
-  const sessionId = query.sessionId?.trim();
-  const agentId = query.agentId?.trim();
-
-  if (status !== 'all') {
-    clauses.push('status = ?');
-    params.push(status);
-  }
-
-  if (sessionId) {
-    clauses.push('session_id = ?');
-    params.push(sessionId);
-  }
-
-  if (agentId) {
-    clauses.push('agent_id = ?');
-    params.push(agentId);
-  }
-
-  if (search) {
-    const keyword = `%${search}%`;
-    clauses.push(`(
-      LOWER(id) LIKE ?
-      OR LOWER(goal) LIKE ?
-      OR LOWER(user_input) LIKE ?
-      OR LOWER(COALESCE(final_response, '')) LIKE ?
-      OR LOWER(COALESCE(error, '')) LIKE ?
-      OR LOWER(session_id) LIKE ?
-    )`);
-    params.push(keyword, keyword, keyword, keyword, keyword, keyword);
-  }
-
-  return {
-    whereClause: clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '',
-    params
   };
 }
 

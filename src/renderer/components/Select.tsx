@@ -7,9 +7,9 @@ import '../styles/select.css';
 export interface SelectOption {value:string;label:React.ReactNode;description?:string;icon?:React.ReactNode;group?:string;disabled?:boolean;searchText?:string}
 export interface SelectProps extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>,'value'|'onChange'|'size'> {
  value:string;onChange:(value:string)=>void;options:SelectOption[];placeholder?:string;placement?:'top'|'bottom';align?:'start'|'end';icon?:React.ReactNode;
- dropdownTitle?:string;size?:'sm'|'md';variant?:'field'|'inline';searchable?:boolean;footer?:React.ReactNode;displayValue?:React.ReactNode;
+ dropdownTitle?:string;size?:'sm'|'md';variant?:'field'|'inline';searchable?:boolean;footer?:React.ReactNode;displayValue?:React.ReactNode;popoverClassName?:string;
 }
-export function Select({value,onChange,options,placeholder,disabled=false,placement='bottom',align='start',icon,className='',style,dropdownTitle,size='md',variant='field',searchable=false,footer,displayValue,...buttonProps}:SelectProps){
+export function Select({value,onChange,options,placeholder,disabled=false,placement='bottom',align='start',icon,className='',style,dropdownTitle,size='md',variant='field',searchable=false,footer,displayValue,popoverClassName='',...buttonProps}:SelectProps){
  const {t}=useTranslation();const [open,setOpen]=useState(false);const [query,setQuery]=useState('');const [active,setActive]=useState(-1);
  const trigger=useRef<HTMLButtonElement>(null);const panel=useRef<HTMLDivElement>(null);const search=useRef<HTMLInputElement>(null);const id=useId();
  const [position,setPosition]=useState<ReturnType<typeof selectPosition>>();const [portal,setPortal]=useState<Element|null>(null);
@@ -44,7 +44,7 @@ export function Select({value,onChange,options,placeholder,disabled=false,placem
    className={`custom-select-trigger custom-select-trigger-${size} ${open?'is-open':''}`} onClick={()=>open?close():show()} onKeyDown={keyDown}>
    <span className="custom-select-trigger-content">{(icon||selected?.icon)&&<span className="custom-select-trigger-icon">{icon||selected?.icon}</span>}<span className="custom-select-trigger-label">{displayValue||selected?.label||placeholder||t('ui.selectPlaceholder')}</span></span><IconChevronDown size={14}/>
   </button>
-  {open&&portal&&position&&createPortal(<div ref={panel} className="custom-select-popover" data-select-popover data-placement={position.placement} style={{position:'fixed',left:position.left,top:position.top,bottom:position.bottom,width:position.width,maxHeight:position.maxHeight}} onKeyDown={keyDown}>
+  {open&&portal&&position&&createPortal(<div ref={panel} className={`custom-select-popover ${popoverClassName}`} data-select-popover data-placement={position.placement} style={{position:'fixed',left:position.left,top:position.top,bottom:position.bottom,width:position.width,maxHeight:position.maxHeight}} onKeyDown={keyDown}>
    {dropdownTitle&&<div className="custom-select-dropdown-title">{dropdownTitle}</div>}
    {searchable&&<input ref={search} className="select-search" role="combobox" aria-label={t('ui.searchOptions')} aria-expanded="true" aria-controls={id} aria-activedescendant={active>=0?`${id}-${active}`:undefined} value={query} onChange={event=>{setQuery(event.target.value);setActive(-1);}} placeholder={t('ui.searchOptions')}/>}
    <div id={id} role="listbox" aria-label={buttonProps['aria-label']||dropdownTitle||t('ui.selectPlaceholder')} className="custom-select-options">

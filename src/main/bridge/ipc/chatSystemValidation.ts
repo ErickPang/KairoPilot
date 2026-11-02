@@ -32,7 +32,6 @@ function createPositiveIntegerInputSchema(max: number) {
 
 const PageNumberSchema = createPositiveIntegerInputSchema(100000);
 const RunQueryPageSizeSchema = createPositiveIntegerInputSchema(100);
-const RunTracePageSizeSchema = createPositiveIntegerInputSchema(50);
 const AuditLogPageSizeSchema = createPositiveIntegerInputSchema(1000);
 export const SessionIdInputSchema = NonEmptyStringSchema.max(200);
 
@@ -51,31 +50,6 @@ export const RunIdInputSchema = z.object({
 export const RetryStepInputSchema = RunIdInputSchema.extend({
   stepId: NonEmptyStringSchema.max(200)
 });
-
-export const RunQueryInputSchema = z.object({
-  projectId: NonEmptyStringSchema.max(200).optional(),
-  model: NonEmptyStringSchema.max(500).optional(),
-  startTime:z.number().finite().nonnegative().optional(),
-  endTime:z.number().finite().nonnegative().optional(),
-  page: PageNumberSchema,
-  pageSize: RunQueryPageSizeSchema,
-  search: SearchTextSchema,
-  status: z.enum(['all', 'running', 'waiting_approval', 'paused', 'completed', 'failed', 'cancelled']).optional(),
-  sessionId: SessionIdInputSchema.optional(),
-  agentId: NonEmptyStringSchema.max(200).optional()
-}).strict().optional().default({});
-
-const RunTraceObjectInputSchema = z.object({
-  runId: NonEmptyStringSchema.max(200),
-  page: PageNumberSchema,
-  pageSize: RunTracePageSizeSchema,
-  includeToolCalls: z.boolean().optional(),
-  includeApprovalRecords: z.boolean().optional(),
-  includeAuditLogs: z.boolean().optional(),
-  includeContextSummary: z.boolean().optional()
-}).strict();
-
-export const RunTraceInputSchema = RunTraceObjectInputSchema;
 
 export const MonitoringTokenQueryInputSchema = z.object({
   projectId: NonEmptyStringSchema.max(200).optional(),
@@ -106,8 +80,9 @@ export const AuditLogQueryInputSchema = z.object({
 
 export const ApprovalResponseInputSchema = z.object({
   id: NonEmptyStringSchema.max(200),
-  approved: z.boolean()
-});
+  approved: z.boolean(),
+  scope: z.enum(['once', 'session']).default('once')
+}).strict().refine(value => value.approved || value.scope === 'once', 'Denied operations cannot grant conversation permission');
 
 export const PrepareAttachmentInputSchema = z.object({
   path: NonEmptyStringSchema.max(3000),

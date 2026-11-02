@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from 'react';
-import { ApprovalRecord, ConfirmationRequest, Message, SessionContextState, SessionContextUpdate, SessionSummary } from '../types';
+import { ApprovalRecord, ConfirmationRequest, SessionContextState, SessionContextUpdate, SessionSummary } from '../types';
 import { KAIRO_INVOKE } from '../../shared/ipc';
 import type { I18nContextValue } from '../components/layout/I18nContext';
 import { getErrorMessage, logRendererError } from './errorUtils';
@@ -29,13 +29,12 @@ interface RunStatePatchInput {
   activeSessionId: string | null;
   targetSessionId: string;
   latestRun: SessionContextState['latestRun'];
-  latestContextSummary: SessionContextState['latestContextSummary'];
-  activeRunSteps: SessionContextState['activeRunSteps'];
   confirmationRequest: SessionContextState['confirmationRequest'];
 }
 
 export function mapApprovalToConfirmationRequest(approval: ApprovalRecord): ConfirmationRequest {
   return {
+    sessionApproval: approval.metadata?.sessionApproval as ConfirmationRequest['sessionApproval'],
     id: approval.id,
     tool: approval.toolName,
     args: getDisplayArgs(approval),
@@ -56,9 +55,7 @@ export function createRunStatePatchForSession(input: RunStatePatchInput): Partia
   }
 
   return {
-    latestContextSummary: input.latestContextSummary,
     latestRun: input.latestRun,
-    activeRunSteps: input.activeRunSteps,
     confirmationRequest: input.confirmationRequest
   };
 }
@@ -85,9 +82,7 @@ export function useSessionData(
   const sessionLoadVersion = useRef(0);
   const runLoadVersion = useRef(0);
   const listLoadVersion = useRef(0);
-  const [messages, setMessages] = useState<Message[]>([]);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const loadSessions = useCallback(async (options?: { throwOnError?: boolean }) => {
     const version = ++listLoadVersion.current;
@@ -119,30 +114,21 @@ export function useSessionData(
       const session = await window.kairo.invoke(KAIRO_INVOKE.chatGetActiveSummary);
       if (!isCurrent()) return;
       if (session) {
-        const [latestRun, latestContextSummary, activeRunSteps, confirmationRequest, messagePage] = await Promise.all([
+        const [latestRun, confirmationRequest] = await Promise.all([
           window.kairo.invoke(KAIRO_INVOKE.chatGetLatestRun, session.id),
-          window.kairo.invoke(KAIRO_INVOKE.chatGetLatestContextSummary, session.id),
-          window.kairo.invoke(KAIRO_INVOKE.chatGetSessionRuns, session.id),
-          window.kairo.invoke(KAIRO_INVOKE.chatGetPendingApproval, session.id),
-          window.kairo.invoke(KAIRO_INVOKE.chatGetMessagePage, { sessionId: session.id, limit: 100 })
+          window.kairo.invoke(KAIRO_INVOKE.chatGetPendingApproval, session.id)
         ]);
         if (!isCurrent()) return;
-        setMessages(messagePage.messages);
         setSessions((items) => items.some((item) => item.id === session.id) ? items : [...items, session]);
         updateSessionContext({
           activeSessionId: session.id,
-          latestContextSummary,
           latestRun,
-          activeRunSteps,
           confirmationRequest: confirmationRequest ? mapApprovalToConfirmationRequest(confirmationRequest) : null
         });
       } else {
-        setMessages([]);
         updateSessionContext({
           activeSessionId: null,
-          latestContextSummary: null,
           latestRun: null,
-          activeRunSteps: [],
           confirmationRequest: null
         });
       }
@@ -158,28 +144,22 @@ export function useSessionData(
     const agentId = getSessionContext().activeAgentId;
     if (!sessionId) {
       updateSessionContext({
-        latestContextSummary: null,
         latestRun: null,
-        activeRunSteps: [],
         confirmationRequest: null
       });
       return;
     }
 
     try {
-      const [latestRun, latestContextSummary, activeRunSteps, confirmationRequest] = await Promise.all([
+      const [latestRun, confirmationRequest] = await Promise.all([
         window.kairo.invoke(KAIRO_INVOKE.chatGetLatestRun, sessionId),
-        window.kairo.invoke(KAIRO_INVOKE.chatGetLatestContextSummary, sessionId),
-        window.kairo.invoke(KAIRO_INVOKE.chatGetSessionRuns, sessionId),
         window.kairo.invoke(KAIRO_INVOKE.chatGetPendingApproval, sessionId)
       ]);
       if (version !== runLoadVersion.current || agentId !== getSessionContext().activeAgentId) return;
       updateSessionContext((current) => createRunStatePatchForSession({
         activeSessionId: current.activeSessionId,
         targetSessionId: sessionId,
-        latestContextSummary,
         latestRun,
-        activeRunSteps,
         confirmationRequest: confirmationRequest ? mapApprovalToConfirmationRequest(confirmationRequest) : null
       }) ?? {});
     } catch (error) {
@@ -193,10 +173,7 @@ export function useSessionData(
     loadActiveSession,
     loadRunState,
     loadSessions,
-    messages,
-    messagesEndRef,
     sessions,
-    setMessages,
     setSessions
   };
 }

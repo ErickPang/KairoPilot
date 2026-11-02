@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildMonitoringWhereClause,
-  buildRunQueryWhere,
   buildTokenMetricFacets,
   getSharedMessagePrefixLength,
   getSessionTitle,
@@ -89,31 +88,6 @@ describe('chatStoreUtils', () => {
       },
       createdAt: 123
     });
-  });
-
-  it('构建 run 查询条件时会组合状态、会话、Agent 和搜索词', () => {
-    const result = buildRunQueryWhere({
-      status: 'failed',
-      sessionId: 'session-1',
-      agentId: 'agent-1',
-      search: 'Timeout'
-    });
-
-    expect(result.whereClause).toContain('status = ?');
-    expect(result.whereClause).toContain('session_id = ?');
-    expect(result.whereClause).toContain('agent_id = ?');
-    expect(result.whereClause).toContain('LOWER(goal) LIKE ?');
-    expect(result.params).toEqual([
-      'failed',
-      'session-1',
-      'agent-1',
-      '%timeout%',
-      '%timeout%',
-      '%timeout%',
-      '%timeout%',
-      '%timeout%',
-      '%timeout%'
-    ]);
   });
 
   it('构建 token 查询条件时默认带可见消息过滤，并附加筛选项', () => {

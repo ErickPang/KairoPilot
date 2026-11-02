@@ -126,7 +126,7 @@ export const Sidebar = React.memo(function Sidebar(props: SidebarProps) {
         if (event.key !== 'Escape') return;
         if (props.searchText) { event.preventDefault(); props.setSearchText(''); } else event.currentTarget.blur();
       }}/>{props.searchText && <button type="button" className="icon-btn sidebar-search-clear" onClick={() => props.setSearchText('')} title={t('common.clear')}><IconX size={14}/></button>}</div>
-      <label className="sidebar-filter-control" title={`${t('workbench.taskFilter')} · ${t(`workbench.filter.${props.filter}`)}`}>
+      <label className="sidebar-filter-control" data-active={props.filter !== 'open' || undefined} title={`${t('workbench.taskFilter')} · ${t(`workbench.filter.${props.filter}`)}`}>
         <ListFilter size={16} aria-hidden="true"/>
         <Select className="task-filter" size="sm" variant="inline" aria-label={t('workbench.taskFilter')} value={props.filter} disabled={props.disabled} onChange={value=>props.setFilter(value as TaskFilter)} options={(['open','unread','archived','all'] as const).map(value=>({value,label:t(`workbench.filter.${value}`)}))}/>
       </label>

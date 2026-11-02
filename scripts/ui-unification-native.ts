@@ -71,7 +71,7 @@ export async function verifyUIUnification(window:BrowserWindow,invoke:<T=unknown
  const project=(await invoke<Array<{id:string}>>(C.projectList))[0];
  if(project){const scoped=await invoke<UsageOverview>(C.usageOverview,{projectId:project.id});const scopedDetails=await invoke<{aggregations:{totalTokens:number}}>(C.chatGetTokenUsageDetails,{projectId:project.id});assert(scoped.totals.totalTokens===scopedDetails.aggregations.totalTokens&&!scoped.models.some(item=>item.model==='ui/model'),'UI: project usage excludes independent task usage');}
  await js(`document.querySelector('[data-settings-section=dashboard]').click()`);assert(await wait(`document.querySelectorAll('[data-usage-day]').length===365`),'UI: annual usage heatmap renders 365 days');
- assert(await js(`document.querySelectorAll('[data-usage-kpis] > div').length===5 && Boolean(document.querySelector('.usage-trend'))`),'UI: usage has five KPIs and a model trend chart');
+ assert(await wait(`document.querySelectorAll('[data-usage-kpis] > div').length===5 && Boolean(document.querySelector('.usage-trend'))`),'UI: usage has five KPIs and a model trend chart');
  await js(`document.querySelectorAll('.usage-segment button')[1].click();document.querySelector('.usage-chart-data').open=true`);
  assert(await wait(`document.querySelectorAll('.usage-chart-data tbody tr').length===30`),'UI: thirty day trend exposes exact daily chart data');
  await js(`document.querySelector('.usage-chart-data').open=false`);await capture('usage-dark');

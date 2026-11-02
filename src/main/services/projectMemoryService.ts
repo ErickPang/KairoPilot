@@ -1,4 +1,5 @@
 import {assertRequestFits} from '../core/context/requestBudget';
+import { isWorkbenchShuttingDown } from './workbenchExecution';
 import {fingerprint} from '../core/security/executionContext';
 import {canKeepMemory,normalizeMemoryText as normalize} from '../core/context/memoryPolicy';
 import {randomUUID} from 'node:crypto';
@@ -49,7 +50,9 @@ export const MEMORY_EXTRACTION_PROMPT='KAIROPILOT_PROJECT_MEMORY_EXTRACTIONï¼šä»
 let active=false;
 const controllers=new Map<string,AbortController>();
 export function stopProjectMemoryJobs(projectId:string) {controllers.get(projectId)?.abort();}
+export function stopAllProjectMemoryJobs() { for (const controller of controllers.values()) controller.abort(); }
 export function scheduleProjectMemory(runId:string) {
+  if (isWorkbenchShuttingDown()) return;
   const run=getRunById(runId);if(!run||run.status!=='completed'||run.executionContext?.phase==='planning')return;
   const task=requireTask(run.sessionId);if(!task.projectId||store.memoryJob(runId))return;
   const settings=store.memorySettings(task.projectId);if(!settings.enabled||!isProjectAuthorized(task.projectId))return;
@@ -75,9 +78,10 @@ export function retryProjectMemory(projectId:string,runId:string,revision:number
  setTimeout(()=>void drainMemoryJobs(),0);return store.memoryState(projectId);
 }
 export async function drainMemoryJobs() {
-  if(active)return;active=true;
+  if(active || isWorkbenchShuttingDown())return;active=true;
   try {
     for(;;){
+      if (isWorkbenchShuttingDown()) break;
       const row=getDb().prepare("SELECT data FROM intelligence_jobs WHERE status='queued' ORDER BY rowid LIMIT 1").get() as {data:string}|undefined;if(!row)break;
       let job:store.MemoryJob=JSON.parse(row.data);const controller=new AbortController();controllers.set(job.projectId,controller);let reserved=false;
       const timer=setTimeout(()=>controller.abort(),45000);

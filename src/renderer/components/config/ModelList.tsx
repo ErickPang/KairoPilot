@@ -15,7 +15,7 @@ export const ModelList = memo(function ModelList({ models, onCreateModel, onEdit
   const sortedModels = [...models].sort((a, b) => a.name.localeCompare(b.name));
 
   return (
-    <div className="config-section config-page-section">
+    <div className="config-section config-page-section model-config-list">
       {sortedModels.map(model => (
         <div key={model.id} className="config-card">
           <div className="card-info">
