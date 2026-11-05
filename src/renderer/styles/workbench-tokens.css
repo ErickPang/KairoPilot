@@ -93,6 +93,12 @@
   --shine-strong: none;
   --workbench-panel-bg: #fafafa;
   --workbench-content-width: 760px;
+  --workbench-body-size: 15px;
+  --workbench-description-size: 13px;
+  --workbench-control-size: 13px;
+  --workbench-caption-size: 12px;
+  --composer-radius: 22px;
+  --skill-option-height: 48px;
   --diff-bg: var(--background);
   --diff-fg: var(--foreground);
   --diff-header-bg: var(--surface-muted);

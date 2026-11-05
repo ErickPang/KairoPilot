@@ -37,12 +37,15 @@ export function TaskResultsPanel({run,sessionId,onOpenFile,onReference,acceptanc
  const renderArtifact=(artifact:TaskArtifact)=><li key={artifact.id} data-delivery-artifact={artifact.id}>
   <strong title={artifact.path}>{artifact.path.split(/[/\\]/).pop()}</strong>
   <span>{t(`workbench.artifact.${artifact.operation}`)} · {t(`workbench.availability.${artifact.availability||'available'}`)}</span>
-  <small>{new Date(artifact.createdAt).toLocaleString()} · Run {artifact.runId.slice(0,8)}</small>
   <div className="delivery-actions">
    <button disabled={artifact.availability==='missing'||artifact.availability==='denied'||artifact.operation==='deleted'} onClick={()=>onOpenFile(artifact.path)}>{t('batch1.preview')}</button>
    <button data-delivery-reference disabled={!onReference||artifact.availability==='missing'||artifact.availability==='denied'||artifact.operation==='deleted'} onClick={()=>onReference?.(artifact.path)}>{t('batch1.continueWithArtifact')}</button>
-   <button disabled={busy||!artifact.diffAvailable||artifact.availability==='denied'} onClick={()=>void loadEvidence(()=>window.kairo.invoke(C.chatGetArtifactDiff,artifact.id),setDiff)}>{t('workbench.savedDiff')}</button>
   </div>
+  <details className="delivery-artifact-details"><summary>{t('workbench.artifactDetails')}</summary>
+   <small>{new Date(artifact.createdAt).toLocaleString()} · Run {artifact.runId.slice(0,8)}</small>
+   <p className="workbench-mono">{artifact.path}</p>
+   <button disabled={busy||!artifact.diffAvailable||artifact.availability==='denied'} onClick={()=>void loadEvidence(()=>window.kairo.invoke(C.chatGetArtifactDiff,artifact.id),setDiff)}>{t('workbench.savedDiff')}</button>
+  </details>
  </li>;
  const renderVerification=(record:VerificationRecord)=><li key={record.id}>
   <strong>{t(`workbench.verification.${record.status}`)}{record.exitCode===undefined?'':` · exit ${record.exitCode}`}</strong>
@@ -51,25 +54,24 @@ export function TaskResultsPanel({run,sessionId,onOpenFile,onReference,acceptanc
  </li>;
  return <section className="workbench-results" data-delivery-run={run?.id||''} data-delivery-ready={!isLoading}>
   <h2>{t('batch1.delivery')}</h2>
-  {run&&<p className="config-subtitle delivery-goal" title={run.goal}>{t('batch1.thisRun')} · {run.id.slice(0,8)} · {run.goal}</p>}
-  <p className="workbench-result-notice">{t('batch1.deliveryHelp')}</p>
+  {run&&<p className="delivery-goal" title={run.goal}>{run.goal}</p>}
   {isLoading&&<p role="status">{t('common.loading')}</p>}{error&&<p className="workbench-error" role="alert">{error}</p>}
   {!isLoading&&<>
-   <div className="delivery-overview"><span>{t('workbench.taskArtifacts')}: {delivery.artifacts.length}</span><span>{t('workbench.changeSummary')}: {delivery.changes.length}</span><span>{t('workbench.verificationEvidence')}: {delivery.verifications.length}</span></div>
-   <p className={delivery.verificationStatus==='failed'?'workbench-error':'workbench-result-notice'} role="status">{t(`workbench.currentVerification.${delivery.verificationStatus}`)}</p>
-   <h3>{t('batch1.needsReview')}</h3>
-   <ul className="delivery-review-list">
-    {!run||run.status!=='completed'?<li>{t('batch1.runNotCompleted')}{run?.error?` · ${run.error}`:''}</li>:<li>{t('batch1.confirmRequirements')}</li>}
-    {!delivery.verifications.length&&<li>{t('workbench.unverified')}</li>}
-    {delivery.unavailableCount>0&&<li>{t('batch1.changedArtifacts',{count:delivery.unavailableCount})}</li>}
-    {delivery.verificationStatus==='failed'&&<li>{t('batch1.failedChecks')}</li>}
-   </ul>
-   {acceptance&&<details><summary>{t('w4.acceptance')}</summary><p>{acceptance}</p></details>}
-   <h3>{t('workbench.taskArtifacts')}</h3>
-   <p className="workbench-result-notice">{t('workbench.artifactSourceNotice')}</p>
+   <p className={`delivery-verification is-${delivery.verificationStatus}`} role="status" data-current-verification={delivery.verificationStatus}>{t(`workbench.currentVerification.${delivery.verificationStatus}`)}</p>
+   {(!run||run.status!=='completed')&&<p className="workbench-result-notice">{t('batch1.runNotCompleted')}{run?.error?` · ${run.error}`:''}</p>}
+   {delivery.unavailableCount>0&&<p className="workbench-error">{t('batch1.changedArtifacts',{count:delivery.unavailableCount})}</p>}
+   <section className="delivery-section">
+   <h3>{t('workbench.taskArtifacts')} <span className="delivery-count">{delivery.artifacts.length}</span></h3>
    {!delivery.artifacts.length&&<p className="workbench-panel-empty">{t('workbench.noArtifacts')}</p>}
    <ul className="workbench-evidence-list" data-current-artifacts>{delivery.artifacts.map(renderArtifact)}</ul>
-   <h3>{t('workbench.changeSummary')}</h3>
+   </section>
+   <details className="delivery-details" data-delivery-verifications open={delivery.verificationStatus==='failed'}>
+   <summary>{t('workbench.verificationEvidence')} <span className="delivery-count">{delivery.verifications.length}</span></summary>
+   <p className="workbench-result-notice">{t('workbench.verificationNotice')}</p>
+   <ul className="workbench-evidence-list" data-current-verifications>{delivery.verifications.map(renderVerification)}</ul>
+   </details>
+   <details className="delivery-details" data-delivery-changes>
+   <summary>{t('workbench.changeSummary')} <span className="delivery-count">{delivery.changes.length}</span></summary>
    <ul className="workbench-evidence-list">{delivery.changes.map(change=><li key={change.path}>
     <strong title={change.path}>{change.path.split(/[/\\]/).pop()}</strong><span>{t(`workbench.change.${change.operation}`)} · {change.artifactIds.length} {t('workbench.recordedOperations')}</span>
     {change.hasDiscontinuity&&<p className="workbench-error">{t('workbench.changeDiscontinuity')}</p>}
@@ -77,8 +79,19 @@ export function TaskResultsPanel({run,sessionId,onOpenFile,onReference,acceptanc
      void loadEvidence(()=>window.kairo.invoke(C.chatGetTaskChangeDiff,{sessionId:sessionId!,path:change.path,runId:run!.id}),setDiff);
     }}>{t('workbench.reviewChangeSummary')}</button>
    </li>)}</ul>
-   <h3>{t('workbench.verificationEvidence')}</h3><p className="workbench-result-notice">{t('workbench.verificationNotice')}</p>
-   <ul className="workbench-evidence-list" data-current-verifications>{delivery.verifications.map(renderVerification)}</ul>
+   </details>
+   <details className="delivery-details">
+   <summary>{t('batch1.needsReview')}</summary>
+   <ul className="delivery-review-list">
+    <li>{t('batch1.confirmRequirements')}</li>
+    {!delivery.verifications.length&&<li>{t('workbench.unverified')}</li>}
+    {delivery.verificationStatus==='failed'&&<li>{t('batch1.failedChecks')}</li>}
+   </ul>
+   {acceptance&&<><h4>{t('w4.acceptance')}</h4><p>{acceptance}</p></>}
+   <p className="workbench-result-notice">{t('batch1.deliveryHelp')}</p>
+   <p className="workbench-result-notice">{t('workbench.artifactSourceNotice')}</p>
+   {run&&<small>{t('batch1.thisRun')} · {run.id.slice(0,8)}</small>}
+   </details>
    {run?.finalResponse&&<details className="workbench-result-response"><summary>{t('workbench.assistantResponse')}</summary><div className="workbench-result-body"><ReactMarkdown remarkPlugins={[remarkGfm]}>{run.finalResponse}</ReactMarkdown></div></details>}
    {(delivery.historyArtifacts.length>0||delivery.historyVerifications.length>0)&&<details className="delivery-history" data-delivery-history><summary>{t('batch1.previousResults')} · {delivery.historyArtifacts.length+delivery.historyVerifications.length}</summary><ul className="workbench-evidence-list">{delivery.historyArtifacts.map(renderArtifact)}{delivery.historyVerifications.map(renderVerification)}</ul></details>}
   </>}

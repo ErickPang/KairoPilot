@@ -14,11 +14,11 @@
 :root[data-theme] .app-container.workbench-app .task-title-popover button { display: flex; justify-content: flex-start; width: 100%; padding: 9px; border: 0; background: transparent; color: var(--foreground); }
 :root[data-theme] .app-container.workbench-app .task-title-popover button:hover { background: var(--surface-muted); }
 :root[data-theme] .app-container.workbench-app .task-title-popover .is-danger { color: var(--danger); }
-:root[data-theme] .app-container.workbench-app .input-actions { display: flex; align-items: center; gap: 6px; }
+:root[data-theme] .app-container.workbench-app .input-actions { display: flex; align-items: center; gap: 8px; }
 .composer-action-spacer { flex: 1; min-width: 8px; }
 :root[data-theme] .app-container.workbench-app .model-switcher { max-width: min(40%,280px); min-width: 90px; flex: 0 1 auto; margin: 0; }
 :root[data-theme] .app-container.workbench-app .workbench-permission { max-width: 190px; min-width: 0; margin: 0; }
-:root[data-theme] .app-container.workbench-app .input-actions .send-btn { margin-left: 2px; flex: 0 0 32px; }
+:root[data-theme] .app-container.workbench-app .input-actions .send-btn { margin-left: 2px; flex: 0 0 36px; }
 :root[data-theme] .app-container.workbench-app .task-filter { max-width: 36px; }
 :root[data-theme] .app-container.workbench-app .task-filter .custom-select-trigger-label { max-width: 0; }
 :root[data-theme] .app-container.workbench-app .settings-sidebar { background: var(--sidebar-bg); }

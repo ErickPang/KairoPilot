@@ -21,7 +21,12 @@ export async function batch1Fixture(input:{messages:Array<{role:string;content:s
  const tool=after.find(item=>item.role==='tool');
  response.writeHead(200,{'Content-Type':'text/event-stream'});response.flushHeaders();
  const send=(delta:unknown,reason:string)=>response.write(`data: ${JSON.stringify({id:'batch1-fixture',object:'chat.completion.chunk',created:1,model:'local-a',choices:[{index:0,delta,finish_reason:reason}]})}\n\n`);
- if(goal.includes('B1_PROGRESS_READ')&&!tool){send({role:'assistant',content:'我先读取测试文件，再整理结果。'},'');send({tool_calls:[{index:0,id:'progress-read',type:'function',function:{name:'read_file',arguments:JSON.stringify({path:goal.split('PATH=')[1]})}}]},'tool_calls');}
+ if(goal.includes('B1_STREAM_MARKDOWN')){
+  send({role:'assistant',content:'## 流式排版\n\n- 标题和列表保持原位\n\n```ts\nconst answer = 42;\nconst longValue = "'+'x'.repeat(220)+'";'},'');
+  await new Promise(resolve=>setTimeout(resolve,1800));
+  send({content:'\n```\n\n'+Array.from({length:20},(_,index)=>`流式验证段落 ${index+1}：保持长回复的阅读和滚动定位。`).join('\n\n')},'stop');
+ }
+ else if(goal.includes('B1_PROGRESS_READ')&&!tool){send({role:'assistant',content:'我先读取测试文件，再整理结果。'},'');send({tool_calls:[{index:0,id:'progress-read',type:'function',function:{name:'read_file',arguments:JSON.stringify({path:goal.split('PATH=')[1]})}}]},'tool_calls');}
  else if(goal.includes('B1_PROGRESS_READ')&&after.filter(item=>item.role==='tool').length<3){const index=after.filter(item=>item.role==='tool').length;await new Promise(resolve=>setTimeout(resolve,index===1?1800:200));const folder=index===1?'agent':'components';send({tool_calls:[{index:0,id:`progress-search-${index}`,type:'function',function:{name:'list_directory',arguments:JSON.stringify({path:path.join(path.dirname(goal.split('PATH=')[1]),folder)})}}]},'tool_calls');}
  else if(goal.includes('B1_PLAN_READ')&&!tool){send({role:'assistant',tool_calls:[{index:0,id:'planning-read',type:'function',function:{name:'read_file',arguments:JSON.stringify({path:goal.split('PATH=')[1]})}}]},'tool_calls');}
  else if(goal.includes('B1_DELIVER')&&!tool){const data=JSON.parse(goal.split('DATA=')[1]);send({role:'assistant',tool_calls:[{index:0,id:'deliver-write',type:'function',function:{name:'write_file',arguments:JSON.stringify(data)}}]},'tool_calls');}
@@ -116,6 +121,24 @@ export async function verifyBatch1(window:BrowserWindow,invokeRaw:(channel:strin
  assert(await until(()=>Boolean(calls.get('B1_UI_QUEUED')))&&await until(()=>getLatestRun(task.id)?.status==='completed'),'real composer follow-up executes after its original request');
  assert(await until(()=>js(`document.querySelector('.chat-interface')?.textContent.includes('B1_COMPLETED B1_UI_QUEUED')`)),'queued user message and assistant result appear in the same task view');
  assert(getTaskDraft(task.id).input===''&&getSessionById(task.id)!.messages.filter(value=>value.role==='user'&&value.content==='B1_UI_QUEUED').length===1,'overlapping composer acceptance does not restore or duplicate the queued draft');
+ const streamingTask=await invoke<SessionSummary>(C.chatCreateSession);await invoke(C.chatSetActiveSession,streamingTask.id);await window.loadFile(path.join(output,'index.html'));
+ assert(await until(()=>js(`Boolean(document.querySelector('.chat-interface[data-session-id="${streamingTask.id}"] .input-textarea:not(:disabled)'))`)),'streaming markdown task mounts');
+ await type('B1_STREAM_MARKDOWN');assert(await until(()=>js(`Boolean(document.querySelector('.send-btn:not(:disabled)'))`)),'streaming markdown can submit');await js(`document.querySelector('.send-btn').click()`);
+ assert(await until(()=>js(`Boolean(document.querySelector('[data-run-summary=running]')) && document.querySelector('.markdown-body h2')?.textContent==='流式排版' && Boolean(document.querySelector('.markdown-body pre code.language-ts'))`)),'streaming renders headings and an unfinished code fence before completion');
+ const initialBlocks=await js(`(()=>{const body=document.querySelector('.markdown-body');return ['h2','ul','pre'].map(tag=>body.querySelector(tag).outerHTML);})()`);
+ assert(await js(`(()=>{const pre=document.querySelector('.markdown-body pre');return pre.scrollWidth>pre.clientWidth && getComputedStyle(pre).overflowX==='auto' && document.documentElement.scrollWidth<=innerWidth+1;})()`),'long streaming code scrolls within its block rather than widening the page');
+ await new Promise(resolve=>setTimeout(resolve,300));
+ fs.writeFileSync(path.join(output,'conversation-streaming-markdown.png'),(await window.webContents.capturePage()).toPNG());
+ assert(await until(()=>getLatestRun(streamingTask.id)?.status==='completed')&&await until(()=>js(`document.querySelector('.conversation-final-answer .markdown-body')?.textContent.includes('流式验证段落 20')`)),'streaming markdown completes with every paragraph');
+ assert(await js(`(()=>{const body=document.querySelector('.conversation-final-answer .markdown-body');return JSON.stringify(['h2','ul','pre'].map(tag=>body.querySelector(tag).outerHTML))===${JSON.stringify(JSON.stringify(initialBlocks))};})()`),'completed headings, lists and code retain their streaming markup');
+ assert(await until(()=>js(`(()=>{const el=document.querySelector('.messages-container');return el.scrollHeight-el.scrollTop-el.clientHeight<4;})()`)),'long markdown completion follows the latest output');
+ for(const theme of ['light','dark'])for(const width of [1440,980]){
+  window.setContentSize(width,900);await js(`document.documentElement.dataset.theme=${JSON.stringify(theme)}`);await new Promise(resolve=>setTimeout(resolve,150));
+  assert(await js(`(()=>{const pre=document.querySelector('.conversation-final-answer pre');return pre.scrollWidth>pre.clientWidth && document.documentElement.scrollWidth<=innerWidth+1 && getComputedStyle(pre).fontSize==='13px';})()`),`markdown code stays readable and inside the viewport in ${theme} ${width}`);
+ }
+ await js(`document.querySelector('.conversation-final-answer h2').scrollIntoView({block:'start'})`);await new Promise(resolve=>setTimeout(resolve,300));
+ fs.writeFileSync(path.join(output,'conversation-markdown-dark-980.png'),(await window.webContents.capturePage()).toPNG());
+ window.setContentSize(1440,900);await js(`document.documentElement.dataset.theme='light'`);
  // Use a clean task to review the conversation progress in the real renderer.
  const progressTask=await invoke<SessionSummary>(C.chatCreateSession);await invoke(C.chatSetActiveSession,progressTask.id);await window.loadFile(path.join(output,'index.html'));
  assert(await until(()=>js(`Boolean(document.querySelector('.chat-interface[data-session-id="${progressTask.id}"][data-save-state="saved"] .input-textarea:not(:disabled)'))`)),'progress task mounts with its own ready composer');
@@ -190,11 +213,21 @@ export async function verifyBatch1(window:BrowserWindow,invokeRaw:(channel:strin
  await js(`document.querySelector('.workbench-panel-buttons button[aria-label="成果"]').click()`);
  assert(await until(()=>js(`document.querySelector('[data-delivery-run]')?.getAttribute('data-delivery-run')===${JSON.stringify(latest.runId)}`)),'results panel selects the latest round');
  assert(await until(()=>js(`document.querySelectorAll('[data-current-artifacts] li').length===1 && document.querySelectorAll('[data-current-verifications] li').length===0 && Boolean(document.querySelector('[data-delivery-history]:not([open])'))`)),'current delivery excludes old checks and folds historical results');
+ assert(await js(`(()=>{const panel=document.querySelector('.workbench-results'),status=panel.querySelector('[data-current-verification]'),files=panel.querySelector('[data-current-artifacts]');return status.dataset.currentVerification==='unverified' && Boolean(status.compareDocumentPosition(files)&Node.DOCUMENT_POSITION_FOLLOWING) && !panel.querySelector('[data-delivery-changes]').open && !panel.querySelector('[data-delivery-verifications]').open && !files.querySelector('.delivery-artifact-details').open;})()`),'delivery prioritizes the verification conclusion and files while technical records start folded');
+ assert(await js(`getComputedStyle(document.querySelector('[data-current-verification]')).fontSize==='13px' && getComputedStyle(document.querySelector('.delivery-artifact-details small')).fontSize==='12px'`),'delivery uses 13px descriptions and 12px operation metadata');
+ await js(`document.querySelector('.delivery-artifact-details > summary').click();document.querySelector('[data-delivery-changes] > summary').click()`);
+ assert(await until(()=>js(`document.querySelector('.delivery-artifact-details').open && Boolean(document.querySelector('.delivery-artifact-details button:not(:disabled)')) && document.querySelector('[data-delivery-changes]').open`)),'file operation details and change summaries expand on actual clicks');
+ await js(`document.querySelector('.delivery-artifact-details > summary').click();document.querySelector('[data-delivery-changes] > summary').click()`);
  await new Promise(resolve=>setTimeout(resolve,350));
  assert(await until(()=>js(`Boolean(document.querySelector('[data-delivery-ready="true"] [data-current-artifacts] li'))`)),'delivery screenshot waits for settled evidence');
  for(const width of [1440,980]){window.setContentSize(width,900);await new Promise(resolve=>setTimeout(resolve,100));assert(await js(`(()=>{const panel=document.querySelector('.workbench-results');return panel.scrollWidth<=panel.clientWidth+1;})()`),`delivery evidence stays within its panel at ${width}px`);}
  window.setContentSize(1440,900);await new Promise(resolve=>setTimeout(resolve,100));
  fs.writeFileSync(path.join(output,'batch1-delivery-review.png'),(await window.webContents.capturePage()).toPNG());
+ insertVerification({runId:latest.runId!,sessionId:deliver.id,toolCallId:'current-fixture-failure',command:'synthetic current check',cwd:deliver.executionRoot!,status:'failed',exitCode:1,stdout:'',stderr:'SYNTHETIC_FAILURE'});
+ await window.reload();
+ assert(await until(()=>js(`document.querySelector('[data-current-verification]')?.dataset.currentVerification==='failed' && document.querySelector('[data-delivery-verifications]')?.open && document.querySelector('[data-current-verifications]')?.textContent.includes('synthetic current check')`)),'failed checks remain visible and automatically expand their evidence');
+ await new Promise(resolve=>setTimeout(resolve,300));
+ fs.writeFileSync(path.join(output,'batch1-delivery-failed.png'),(await window.webContents.capturePage()).toPNG());
  await js(`document.querySelector('[data-current-artifacts] [data-delivery-reference]').click()`);
  assert(await until(()=>getTaskDraft(deliver.id).referenceIds.length===1),'artifact follow-up adds an owned reference without executing a new round');
  assert(getLatestRun(deliver.id)?.id===latest.runId,'referencing a deliverable does not silently start execution');

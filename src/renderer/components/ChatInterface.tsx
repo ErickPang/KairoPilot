@@ -539,12 +539,12 @@ export const ChatInterface = React.memo(function ChatInterface({
           />
           </div>
           <AttachmentList attachments={attachments} onRemove={removeAttachment} disabled={isQuitPending} />
-          <div className="context-reference-list">
+          {references.length > 0 && <div className="context-reference-list">
             {references.map((reference) => <span key={reference.id} className="context-reference-chip">
               <button type="button" disabled={reference.availability !== 'available'} title={reference.path} onClick={() => onViewReference(reference)}>{reference.kind === 'directory' ? '▤' : '▧'} {reference.name}{reference.availability !== 'available' ? ` (${reference.availability})` : ''}</button>
               <button type="button" disabled={sendBlocked} aria-label={t('workbench.removeReference')} onClick={() => setReferences((items) => items.filter((item) => item.id !== reference.id))}><IconX size={12}/></button>
             </span>)}
-          </div>
+          </div>}
           {attachmentError && (
             <div className="attachment-error">
               <span>{attachmentError}</span>

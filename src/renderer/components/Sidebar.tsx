@@ -7,6 +7,7 @@ import { ProjectSessionList } from './ProjectSessionList';
 import type { SessionSummary } from '../types';
 import { IconPlus, IconEdit, IconTrash, IconSearch, IconX } from './Icons';
 import { useTranslation } from '../hooks/useTranslation';
+import { visibleSessionTitle } from './chatMessagePresentation';
 
 export type TaskFilter = 'open' | 'archived' | 'unread' | 'all';
 
@@ -113,7 +114,7 @@ export const Sidebar = React.memo(function Sidebar(props: SidebarProps) {
         if (event.key === 'Enter') { event.preventDefault(); saveTitle(session.id); }
         if (event.key === 'Escape') { event.preventDefault(); editingRef.current = null; setEditingId(null); }
       }}/>
-      : <><div className="session-main"><span className={`session-title ${(session.activityVersion || 0) > (session.readVersion || 0) ? 'is-unread' : ''}`} title={session.title}>{session.title || t('sidebar.newChat')}</span></div>
+      : <><div className="session-main"><span className={`session-title ${(session.activityVersion || 0) > (session.readVersion || 0) ? 'is-unread' : ''}`} title={visibleSessionTitle(session.title, t('sidebar.newChat'))}>{visibleSessionTitle(session.title, t('sidebar.newChat'))}</span></div>
         <div className="session-actions"><button type="button" className="icon-btn" disabled={props.disabled}
           aria-label={t('sidebar.delete')} title={t('sidebar.delete')}
           onClick={(event) => { event.stopPropagation(); props.handleDeleteSession(event, session.id); }}><IconTrash size={14}/></button></div></>}
@@ -136,13 +137,13 @@ export const Sidebar = React.memo(function Sidebar(props: SidebarProps) {
       {props.searchText ? <ProjectSessionList agentId={props.projectNavigation.agentId} filter={props.filter} search={props.searchText} refresh={props.refresh} renderSession={renderSession}/>
         : <ProjectNavigation {...props.projectNavigation} renderSessions={projectId => <ProjectSessionList key={projectId || 'unassigned'} agentId={props.projectNavigation.agentId} projectId={projectId} filter={props.filter} refresh={props.refresh} renderSession={renderSession}/>}/>}
     </div>
-    {menu && menuRoot && createPortal(<div ref={menuRef} className="session-context-menu" role="menu" aria-label={menu.session.title || t('sidebar.newChat')} style={{ left: menu.x, top: menu.y }} onKeyDown={(event) => {
+    {menu && menuRoot && createPortal(<div ref={menuRef} className="session-context-menu" role="menu" aria-label={visibleSessionTitle(menu.session.title, t('sidebar.newChat'))} style={{ left: menu.x, top: menu.y }} onKeyDown={(event) => {
       const items = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('button'));
       const index = items.indexOf(document.activeElement as HTMLButtonElement);
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); items[(index + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length]?.focus(); }
       if (event.key === 'Tab') closeMenu();
     }}>
-      <button type="button" role="menuitem" data-session-action="rename" onClick={() => { editingRef.current = menu.session.id; setEditingId(menu.session.id); setEditTitle(menu.session.title); closeMenu(); }}><IconEdit size={15}/>{t('sidebar.rename')}</button>
+      <button type="button" role="menuitem" data-session-action="rename" onClick={() => { editingRef.current = menu.session.id; setEditingId(menu.session.id); setEditTitle(visibleSessionTitle(menu.session.title, '')); closeMenu(); }}><IconEdit size={15}/>{t('sidebar.rename')}</button>
       <button type="button" role="menuitem" data-session-action="archive" onClick={() => { props.handleArchiveTask(menu.session.id, !menu.session.archivedAt); closeMenu(); }}>{menu.session.archivedAt ? <ArchiveRestore size={15}/> : <Archive size={15}/>} {t(menu.session.archivedAt ? 'workbench.restoreTask' : 'workbench.archiveTask')}</button>
     </div>, menuRoot)}
   </div>;
