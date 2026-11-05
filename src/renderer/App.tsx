@@ -27,6 +27,7 @@ import { useTranslation } from './hooks/useTranslation';
 import { KAIRO_EVENT, KAIRO_INVOKE } from '../shared/ipc';
 import type { AppearanceTheme } from './types';
 import { applyAppearanceTheme, subscribeAppearanceThemeChanged, subscribeSystemThemeChanged } from './theme';
+import { visibleSessionTitle } from './components/chatMessagePresentation';
 
 function App() {
   useTransientScrollbars();
@@ -116,6 +117,7 @@ function App() {
 
   const baseExecutionConfig = agents[0] || null;
   const activeSession = sessions.find((session) => session.id === activeSessionId);
+  const taskTitle = visibleSessionTitle(activeSession?.title, t('workbench.newTask'));
   const activeAgent = baseExecutionConfig && {...baseExecutionConfig,model:activeSession?.executionSettings?.model ?? baseExecutionConfig.model,permissions:activeSession?.executionSettings?.permissions || baseExecutionConfig.permissions};
   const updateTaskConfig=async(value:{model?:string;executionProfile?:import('../shared/contracts').ExecutionProfile;rootPath?:string})=> {
     if(!activeSessionId)return;
@@ -360,7 +362,7 @@ function App() {
         {!isSettingsPage&&<>
           <div className="workbench-sidebar-toolbar"><button type="button" data-toggle-sidebar className="workbench-icon-button" title={t('workbench.toggleSidebar')} aria-label={t('workbench.toggleSidebar')} aria-expanded={!isSidebarCollapsed} onClick={()=>setIsSidebarCollapsed(value=>!value)}><Menu size={18}/></button></div>
           <div className="workbench-main-toolbar">
-          <div className="workbench-task-header"><FolderOpen size={18} aria-hidden="true"/><h1 title={workspacePath?`${activeSession?.title||t('workbench.newTask')} · ${workspacePath}`:activeSession?.title}>{activeSession?.title||t('workbench.newTask')}</h1>
+          <div className="workbench-task-header"><FolderOpen size={18} aria-hidden="true"/><h1 title={workspacePath?`${taskTitle} · ${workspacePath}`:taskTitle}>{taskTitle}</h1>
           {activeSession&&<TaskTitleMenu key={activeSession.id} task={activeSession} disabled={navigationLocked} onRename={async title=>{const result=await window.kairo.invoke(KAIRO_INVOKE.chatUpdateSessionTitle,{sessionId:activeSession.id,title});if(!result.success)throw new Error(result.error);await refreshTasks();}} onArchive={()=>void handleArchiveTaskWithFilter(activeSession.id,!activeSession.archivedAt)} onDelete={event=>void handleDeleteSession(event,activeSession.id)}/>}</div>
           <span className="titlebar-spacer"/>
           <div className="workbench-panel-buttons">{([

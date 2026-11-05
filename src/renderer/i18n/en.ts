@@ -112,6 +112,7 @@ const en = {
   "batch1.queueEditHelp": "Attachments and references are retained. Continue revalidates the current model, permissions, and files.",
   "batch1.addToQueue": "Add to queue",
   "batch1.delivery": "This round: delivery and review",
+  'workbench.artifactDetails': 'Operation details',
   "batch1.thisRun": "This round",
   "batch1.deliveryHelp": "Showing this round; expand previous results below. Successful checks do not establish full requirement coverage.",
   "batch1.preview": "Preview",

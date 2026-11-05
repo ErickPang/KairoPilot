@@ -112,6 +112,7 @@ const zh: Record<TranslationKey, string> = {
   "batch1.queueEditHelp": "保留原有附件和引用。继续操作将按当前任务设置重新检查模型、权限与文件。",
   "batch1.addToQueue": "加入待处理队列",
   "batch1.delivery": "本轮交付与验收",
+  'workbench.artifactDetails': '操作记录',
   "batch1.thisRun": "本轮",
   "batch1.deliveryHelp": "默认仅展示本轮记录，历史结果在下方展开。检查命令成功不代表所有要求均已验收。",
   "batch1.preview": "预览",

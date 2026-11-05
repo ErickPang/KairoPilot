@@ -32,7 +32,6 @@ interface MessageBodyProps {
   onViewReference: (reference: ContextReference) => void;
   markdownComponents: React.ComponentProps<typeof ReactMarkdown>['components'];
   msg: Message;
-  renderPlainAssistant?: boolean;
   t: I18nContextValue['t'];
   toRenderableMarkdown: (content?: string) => string;
 }
@@ -41,10 +40,9 @@ const MessageBody = React.memo(function MessageBody({
   onViewReference,
   markdownComponents,
   msg,
-  renderPlainAssistant = false,
   toRenderableMarkdown
 }: MessageBodyProps) {
-  const shouldRenderPrewrap = msg.role === 'user' || msg.role === 'tool' || renderPlainAssistant;
+  const shouldRenderPrewrap = msg.role === 'user' || msg.role === 'tool';
 
   if (shouldRenderPrewrap) {
     return (
@@ -75,7 +73,6 @@ const MessageRow = React.memo(function MessageRow({
   onViewReference,
   markdownComponents,
   msg,
-  renderPlainAssistant,
   t,
   toRenderableMarkdown
 }: MessageRowProps) {
@@ -86,7 +83,6 @@ const MessageRow = React.memo(function MessageRow({
           onViewReference={onViewReference}
           markdownComponents={markdownComponents}
           msg={msg}
-          renderPlainAssistant={renderPlainAssistant}
           t={t}
           toRenderableMarkdown={toRenderableMarkdown}
         />
@@ -103,7 +99,7 @@ export const ChatMessagesPanel = React.memo(function ChatMessagesPanel(props: Ch
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
   }, [loading, run]);
-  const row = (item: ConversationItem) => <MessageRow key={item.id} msg={{ role: item.kind === 'user' ? 'user' : 'assistant', content: item.content, attachments: item.attachments, references: item.references }} onViewReference={props.onViewReference} markdownComponents={props.markdownComponents} t={t} toRenderableMarkdown={props.toRenderableMarkdown} renderPlainAssistant={item.status === 'running'}/>;
+  const row = (item: ConversationItem) => <MessageRow key={item.id} msg={{ role: item.kind === 'user' ? 'user' : 'assistant', content: item.content, attachments: item.attachments, references: item.references }} onViewReference={props.onViewReference} markdownComponents={props.markdownComponents} t={t} toRenderableMarkdown={props.toRenderableMarkdown}/>;
   const rounds = feed.data?.rounds || [];
   return <div ref={containerRef} className="messages-container">
     {feed.error && <p role="alert" className="workbench-error">{feed.error}</p>}
@@ -111,7 +107,7 @@ export const ChatMessagesPanel = React.memo(function ChatMessagesPanel(props: Ch
       <button disabled={!feed.data?.before} onClick={feed.earlier}>{t('workbench.viewHistory')}</button>
       {feed.before && <button onClick={feed.recent}>{t('workbench.returnRecent')}</button>}
     </div>}
-    {!rounds.length && !loading && <div className="chat-empty-state"><h2>{t('chat.startTaskTitle')}</h2><p>{t('chat.startTaskDescription')}</p></div>}
+    {!rounds.length && !loading && <div className="chat-empty-state"><h2 className="chat-empty-title">{t('chat.startTaskTitle')}</h2><p className="chat-empty-description">{t('chat.startTaskDescription')}</p></div>}
     {rounds.map(round => <React.Fragment key={round.run.id}>
       {round.items.filter(item => item.kind === 'user').map(row)}
       <ConversationProcess run={round.run} now={now} live={isRunUnsettled(round.run) && round.run.status !== 'paused'}>

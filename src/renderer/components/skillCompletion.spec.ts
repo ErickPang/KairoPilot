@@ -1,11 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import type { SkillSummary } from '../../shared/contracts';
-import { completeSkill, filterSkillChoices, invocableSkillChoices, skillInput, slashSkillQuery, splitSkillInput } from './skillCompletion';
+import { completeSkill, filterSkillChoices, invocableSkillChoices, skillDescriptionPreview, skillInput, slashSkillQuery, splitSkillInput } from './skillCompletion';
 import { resolveExplicitSkills } from '../../main/core/skills/resolver';
 
 const skill = (id: string, patch: Partial<SkillSummary> = {}): SkillSummary => ({ id, name: id, description: '整理资料', whenToUse: '', arguments: [], userInvocable: true, modelInvocable: true, allowedTools: [], executionMode: 'inline', content: 'body', source: 'public', skillDir: '/skills', skillFilePath: '/skills/SKILL.md', ...patch });
 
 describe('slash skill completion', () => {
+  it('shows a short original description while matching the full skill metadata', () => {
+    const choice = skill('audit', { description: '检查文档。\n发现问题后给出修复建议。' });
+    expect(skillDescriptionPreview(choice)).toBe('检查文档。');
+    expect(choice.description).toContain('修复建议');
+    expect(filterSkillChoices([choice], '修复建议')).toEqual([choice]);
+    expect(skillDescriptionPreview(skill('fallback', { description: ' ', whenToUse: '  Find documents. Use when searching. ' }))).toBe('Find documents.');
+    expect(skillDescriptionPreview(skill('long', { description: '😀'.repeat(80) }))).toBe('😀'.repeat(72) + '…');
+    expect(skillDescriptionPreview(skill('empty', { description: '' }))).toBe('');
+  });
   it('detects only the current line command, without intercepting URLs, paths or selections', () => {
     expect(slashSkillQuery('/', 1)).toEqual({ start: 0, end: 1, text: '' });
     expect(slashSkillQuery('说明\n  /au 后续要求', 8)).toEqual({ start: 5, end: 8, text: 'au' });

@@ -1,9 +1,11 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { ConversationProcess } from './ConversationProcess';
-import { ToolActivity } from './ChatMessagesPanel';
+import { ChatMessagesPanel, ToolActivity } from './ChatMessagesPanel';
+import { useTranslation } from '../hooks/useTranslation';
 import { I18nProvider } from './layout/I18nProvider';
 import type { RunSummary } from '../../shared/contracts';
+import type { ComponentProps } from 'react';
 const run: RunSummary = { id: 'r', agentId: 'a', sessionId: 's', goal: 'read', userInput: 'read', status: 'completed', createdAt: 1000, updatedAt: 33000, completedAt: 33000 };
 function render(status: RunSummary['status']) {
  return renderToStaticMarkup(<I18nProvider><ConversationProcess run={{ ...run, status }} now={33000} live={status === 'running' || status === 'waiting_approval'}><p>真实中途输出</p></ConversationProcess><p>最终答复</p></I18nProvider>);
@@ -20,5 +22,35 @@ describe('conversation process', () => {
   expect(html).not.toContain('lucide-chevron-right');
   expect(html).not.toContain('运行信息');
   expect(html).not.toContain('上下文');
+ });
+});
+
+function StreamingMessage({ status, content, role = 'draft' }: { status: string; content: string; role?: 'draft' | 'user' }) {
+ const { t } = useTranslation();
+ const feed: ComponentProps<typeof ChatMessagesPanel>['feed'] = { before: undefined, earlier: ()=>{}, recent: ()=>{}, error: '', refresh: ()=>{}, data: { rounds: [{ run: { ...run, status: 'running' }, items: [{ id: 'text', runId: run.id, sequence: 1, kind: role, content, status }] }] } };
+ return <ChatMessagesPanel sessionId="s" run={{ ...run, status: 'running' }} feed={feed} containerRef={{ current: null }} messagesEndRef={{ current: null }} onViewReference={()=>{}} loading t={t} markdownComponents={{}} toRenderableMarkdown={text=>text||''}/>;
+}
+
+describe('streaming message presentation', () => {
+ const renderMessage = (status: string, content: string, role?: 'draft' | 'user') => renderToStaticMarkup(<I18nProvider><StreamingMessage status={status} content={content} role={role}/></I18nProvider>);
+ it('keeps headings, lists and code in the same markup before and after streaming finishes', () => {
+  const markdown = '## 检查结果\n\n- 保留列表\n\n```ts\nconst answer = 42;\n```';
+  const streaming = renderMessage('running', markdown);
+  const completed = renderMessage('completed', markdown);
+  expect(streaming).toContain('<h2>检查结果</h2>');
+  expect(streaming).toContain('<li>保留列表</li>');
+  expect(streaming).toContain('<pre><code class="language-ts">const answer = 42;');
+  expect(streaming.match(/<div class="markdown-body">(.*?)<\/div>/s)?.[0]).toBe(completed.match(/<div class="markdown-body">(.*?)<\/div>/s)?.[0]);
+ });
+ it('renders an unfinished code fence without exposing raw HTML or losing its content', () => {
+  const html = renderMessage('running', '```html\n<script>alert(1)</script>');
+  expect(html).toContain('<pre><code class="language-html">');
+  expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;');
+  expect(html).not.toContain('<script>');
+ });
+ it('continues to show user-authored markdown as literal input', () => {
+  const html = renderMessage('completed', '## 用户原文', 'user');
+  expect(html).toContain('class="message-prewrap">## 用户原文');
+  expect(html).not.toContain('<h2>用户原文');
  });
 });
