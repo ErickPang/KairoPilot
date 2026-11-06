@@ -1,15 +1,13 @@
+
+import { z } from 'zod';
+import { getWorkbenchConfig,saveWorkbenchConfig } from '../../services/workbenchConfigService';
 import { ipcMain } from 'electron';
 import { createLLMProvider, describeProvider } from '../../core/llm/provider';
 import {
-  deleteAgentWithCleanup,
   deleteModelAndRefreshAgents,
-  saveAgentAndRefreshRuntime,
-  saveLegacyAgentConfigAndRefreshRuntime,
   saveModelAndRefreshAgents
 } from '../../services/configService';
 import {
-  createAgentDraft,
-  getAgentConfig,
   getModel,
   readKairoPilotConfig,
   getAppearanceConfig,
@@ -18,18 +16,11 @@ import {
   getRedactedWebSearchConfig,
   redactKairoPilotConfigSecrets,
   saveWebSearchConfig,
-  getAgents,
-  setActiveAgentId,
-  getActiveAgentId
 } from '../../store/config';
 import { KAIRO_INVOKE } from '../../../shared/ipc';
 import {
-  AgentConfigInputSchema,
-  AgentDraftSeedSchema,
+  WorkbenchSettingsInputSchema,
   AppearanceConfigInputSchema,
-  DeleteAgentInputSchema,
-  IdInputSchema,
-  LegacyAgentConfigInputSchema,
   LlmProviderInputSchema,
   ModelConfigInputSchema,
   parseIpcInput,
@@ -44,23 +35,11 @@ function resolveProviderPayloadApiKey(payload: { id?: string; apiKey?: string })
   return payload.id ? getModel(payload.id)?.apiKey || '' : '';
 }
 
-function redactLegacyAgentConfigSecret(config: ReturnType<typeof getAgentConfig>) {
-  return {
-    ...config,
-    apiKey: '',
-    apiKeyStored: Boolean(config.apiKey)
-  };
-}
-
 function registerConfigHandlers() {
-  ipcMain.handle(KAIRO_INVOKE.configGet, async () => {
-    return redactLegacyAgentConfigSecret(getAgentConfig());
-  });
-
-  ipcMain.handle(KAIRO_INVOKE.configSave, async (_, config) => {
-    const payload = parseIpcInput(LegacyAgentConfigInputSchema, config, 'agent config');
-    saveLegacyAgentConfigAndRefreshRuntime(payload);
-    return ipcSuccess();
+  ipcMain.handle(KAIRO_INVOKE.configGetWorkbench, () => getWorkbenchConfig());
+  ipcMain.handle(KAIRO_INVOKE.configSaveWorkbench, (_,input) => {
+    const value=parseIpcInput(WorkbenchSettingsInputSchema,input,'workbench settings');
+    saveWorkbenchConfig(value);return ipcSuccess();
   });
 
   ipcMain.handle(KAIRO_INVOKE.llmListModels, async (_, config) => {
@@ -88,10 +67,7 @@ function registerConfigHandlers() {
     const config = readKairoPilotConfig();
     return redactKairoPilotConfigSecrets({
       ...config,
-      agents: {
-        ...config.agents,
-        list: getAgents()
-      }
+      workbench:getWorkbenchConfig(),
     });
   });
 
@@ -126,44 +102,11 @@ function registerConfigHandlers() {
   });
 
   ipcMain.handle(KAIRO_INVOKE.configDeleteModel, async (_, id) => {
-    const modelId = parseIpcInput(IdInputSchema, id, 'model id');
+    const modelId = parseIpcInput(z.string().min(1).max(160), id, 'model id');
     deleteModelAndRefreshAgents(modelId);
     return ipcSuccess();
   });
 
-  ipcMain.handle(KAIRO_INVOKE.configGetAgents, async () => {
-    return getAgents();
-  });
-
-  ipcMain.handle(KAIRO_INVOKE.configCreateAgentDraft, async (_, seed) => {
-    const payload = typeof seed === 'undefined'
-      ? undefined
-      : parseIpcInput(AgentDraftSeedSchema, seed, 'agent draft seed');
-    return createAgentDraft(payload);
-  });
-
-  ipcMain.handle(KAIRO_INVOKE.configSaveAgent, async (_, agent) => {
-    const payload = parseIpcInput(AgentConfigInputSchema, agent, 'agent config');
-    saveAgentAndRefreshRuntime(payload);
-    return ipcSuccess();
-  });
-
-  ipcMain.handle(KAIRO_INVOKE.configDeleteAgent, async (_, id) => {
-    const payload = parseIpcInput(DeleteAgentInputSchema, id, 'agent delete request');
-    const agentId = payload.id;
-    const cleanup = await deleteAgentWithCleanup(agentId, payload.deleteWorkspace);
-    return ipcSuccess({ cleanup });
-  });
-
-  ipcMain.handle(KAIRO_INVOKE.configSetActiveAgent, async (_, id) => {
-    const agentId = parseIpcInput(IdInputSchema, id, 'agent id');
-    setActiveAgentId(agentId);
-    return ipcSuccess();
-  });
-
-  ipcMain.handle(KAIRO_INVOKE.configGetActiveAgentId, async () => {
-    return getActiveAgentId();
-  });
 }
 
 export { registerConfigHandlers };

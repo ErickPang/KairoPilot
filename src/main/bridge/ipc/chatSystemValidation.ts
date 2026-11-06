@@ -32,19 +32,11 @@ function createPositiveIntegerInputSchema(max: number) {
 
 const PageNumberSchema = createPositiveIntegerInputSchema(100000);
 const RunQueryPageSizeSchema = createPositiveIntegerInputSchema(100);
-const RunTracePageSizeSchema = createPositiveIntegerInputSchema(50);
 const AuditLogPageSizeSchema = createPositiveIntegerInputSchema(1000);
-const LegacyAuditLogPageSizeSchema = z.union([z.number(), z.string()]).transform((value) => {
-  const numberValue = Number(value);
-  if (!Number.isFinite(numberValue) || numberValue < 1) {
-    return undefined;
-  }
-  return Math.min(Math.floor(numberValue), 1000);
-});
-
 export const SessionIdInputSchema = NonEmptyStringSchema.max(200);
 
 export const CreateSessionTitleInputSchema = z.string().trim().max(300).optional();
+export const CreateSessionInputSchema = z.union([CreateSessionTitleInputSchema, z.object({ title: CreateSessionTitleInputSchema, projectId: NonEmptyStringSchema.max(200).optional() }).strict()]);
 
 export const UpdateSessionTitleInputSchema = z.object({
   sessionId: SessionIdInputSchema,
@@ -59,31 +51,8 @@ export const RetryStepInputSchema = RunIdInputSchema.extend({
   stepId: NonEmptyStringSchema.max(200)
 });
 
-export const RunQueryInputSchema = z.object({
-  page: PageNumberSchema,
-  pageSize: RunQueryPageSizeSchema,
-  search: SearchTextSchema,
-  status: z.enum(['all', 'running', 'waiting_approval', 'paused', 'completed', 'failed', 'cancelled']).optional(),
-  sessionId: SessionIdInputSchema.optional(),
-  agentId: NonEmptyStringSchema.max(200).optional()
-}).strict().optional().default({});
-
-const RunTraceObjectInputSchema = z.object({
-  runId: NonEmptyStringSchema.max(200),
-  page: PageNumberSchema,
-  pageSize: RunTracePageSizeSchema,
-  includeToolCalls: z.boolean().optional(),
-  includeApprovalRecords: z.boolean().optional(),
-  includeAuditLogs: z.boolean().optional(),
-  includeContextSummary: z.boolean().optional()
-}).strict();
-
-export const RunTraceInputSchema = z.union([
-  NonEmptyStringSchema.max(200),
-  RunTraceObjectInputSchema
-]).transform((value) => (typeof value === 'string' ? { runId: value } : value));
-
 export const MonitoringTokenQueryInputSchema = z.object({
+  projectId: NonEmptyStringSchema.max(200).optional(),
   agentId: NonEmptyStringSchema.max(200).optional(),
   page: PageNumberSchema,
   pageSize: RunQueryPageSizeSchema,
@@ -95,9 +64,7 @@ export const MonitoringTokenQueryInputSchema = z.object({
   endTime: z.number().finite().nonnegative().optional()
 }).strict().optional().default({});
 
-export const AuditLogQueryInputSchema = z.union([
-  LegacyAuditLogPageSizeSchema.transform((pageSize) => ({ page: 1, pageSize })),
-  z.object({
+export const AuditLogQueryInputSchema = z.object({
     page: PageNumberSchema,
     pageSize: AuditLogPageSizeSchema,
     search: SearchTextSchema,
@@ -109,13 +76,13 @@ export const AuditLogQueryInputSchema = z.union([
     stepId: NonEmptyStringSchema.max(200).optional(),
     startTime: z.number().finite().nonnegative().optional(),
     endTime: z.number().finite().nonnegative().optional()
-  }).strict()
-]).optional().default({});
+  }).strict().optional().default({});
 
 export const ApprovalResponseInputSchema = z.object({
   id: NonEmptyStringSchema.max(200),
-  approved: z.boolean()
-});
+  approved: z.boolean(),
+  scope: z.enum(['once', 'session']).default('once')
+}).strict().refine(value => value.approved || value.scope === 'once', 'Denied operations cannot grant conversation permission');
 
 export const PrepareAttachmentInputSchema = z.object({
   path: NonEmptyStringSchema.max(3000),
@@ -163,3 +130,10 @@ export const OllamaPullInputSchema = z.object({
   baseUrl: LocalOrHttpUrlSchema.optional(),
   modelName: NonEmptyStringSchema.max(200).regex(/^[A-Za-z0-9._:/-]+$/, 'Invalid model name.')
 });
+
+export const OllamaDeleteModelSchema = z.object({
+  baseUrl: LocalOrHttpUrlSchema.optional(),
+  modelName: NonEmptyStringSchema.max(200)
+});
+
+export const OllamaListModelsSchema = LocalOrHttpUrlSchema.optional();

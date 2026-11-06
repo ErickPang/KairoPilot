@@ -1,8 +1,7 @@
-import type { AgentConfig, ModelConfig } from '../../shared/contracts';
-import { getFirstProviderKey, isValidProviderKey, splitAgentModel } from './configModelUtils';
+import type { ModelConfig } from '../../shared/contracts';
+import { isValidProviderKey, splitAgentModel } from './configModelUtils';
 import {
   buildAgentModel,
-  getProviderDefaultModelId,
   modelToProviderConfig,
   providerToModelConfig,
   redactModelConfigSecret
@@ -26,8 +25,8 @@ export function getModel(id: string): ModelConfig | undefined {
   return providerToModelConfig(id, provider);
 }
 
-export function getModelForAgent(agent: AgentConfig): ModelConfig | undefined {
-  const parsedModel = splitAgentModel(agent.model);
+export function getModelForBinding(binding: string): ModelConfig | undefined {
+  const parsedModel = splitAgentModel(binding);
   if (!parsedModel) {
     return undefined;
   }
@@ -35,10 +34,8 @@ export function getModelForAgent(agent: AgentConfig): ModelConfig | undefined {
   if (!provider) {
     return undefined;
   }
-  const modelId = provider.model.some(item => item.id === parsedModel.modelId)
-    ? parsedModel.modelId
-    : getProviderDefaultModelId(provider);
-  return providerToModelConfig(parsedModel.providerKey, provider, modelId);
+  if (!provider.model.some(item=>item.id===parsedModel.modelId)) return undefined;
+  return providerToModelConfig(parsedModel.providerKey,provider,parsedModel.modelId);
 }
 
 export function saveModel(model: ModelConfig) {
@@ -51,31 +48,12 @@ export function saveModel(model: ModelConfig) {
     throw new Error('API Key is required for this provider.');
   }
   config.models.providers[model.id] = modelToProviderConfig(model, existing);
+  if(config.workbench && !config.workbench.defaultModel)config.workbench.defaultModel=buildAgentModel(model.id,model.model || config.models.providers[model.id].model[0]?.id || '');
   saveKairoPilotConfig(config);
 }
 
 export function deleteModel(id: string) {
   const config = readKairoPilotConfig();
   delete config.models.providers[id];
-  const fallbackProviderKey = getFirstProviderKey(config);
-  const fallbackProvider = fallbackProviderKey ? config.models.providers[fallbackProviderKey] : undefined;
-  if (!fallbackProvider || !fallbackProviderKey) {
-    config.agents.list = config.agents.list.map(agent => ({ ...agent, model: '' }));
-  } else {
-    const fallbackModelId = getProviderDefaultModelId(fallbackProvider);
-    config.agents.list = config.agents.list.map(agent => {
-      const parsedModel = splitAgentModel(agent.model);
-      if (!parsedModel) {
-        return { ...agent, model: buildAgentModel(fallbackProviderKey, fallbackModelId) };
-      }
-      if (parsedModel.providerKey !== id) {
-        return agent;
-      }
-      return {
-        ...agent,
-        model: buildAgentModel(fallbackProviderKey, fallbackModelId)
-      };
-    });
-  }
   saveKairoPilotConfig(config);
 }

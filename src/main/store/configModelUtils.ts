@@ -1,5 +1,5 @@
 import type { KairoPilotConfig, ProviderConfig, ProviderType } from '../../shared/contracts';
-import { resolveDefaultBaseUrl } from '../core/llm/provider';
+import { resolveDefaultBaseUrl } from '../core/llm/utils';
 import { resolveConfigSecret } from './configSecrets';
 
 const PROVIDER_TYPES: ProviderType[] = ['openai', 'openrouter', 'ollama', 'anthropic', 'deepseek', 'zhipu', 'kimi', 'qianwen', 'custom'];
@@ -28,10 +28,11 @@ export function normalizeProvider(provider: Partial<ProviderConfig> & { model?: 
     : (Array.isArray(rawModelObject?.list) ? rawModelObject.list : []);
   const modelList = rawModelList
     .filter(item => item && typeof item === 'object' && typeof (item as { id?: unknown }).id === 'string')
-    .map(item => ({
-      id: String((item as { id: string }).id),
-      name: String((item as { name?: string }).name || (item as { id: string }).id)
-    }));
+    .map(item => {
+      const model=item as {id:string;name?:string;contextWindowTokens?:number};
+      const validLimit=typeof model.contextWindowTokens==='number'&&Number.isInteger(model.contextWindowTokens)&&model.contextWindowTokens>=4096&&model.contextWindowTokens<=2000000;
+      return {id:String(model.id),name:String(model.name||model.id),...(validLimit?{contextWindowTokens:model.contextWindowTokens}:{})};
+    });
   const finalModelList = modelList.length > 0 ? modelList : [{ id: 'gpt-4o', name: 'gpt-4o' }];
 
   const resolvedApiKey = resolveConfigSecret(provider.apiKey, provider.apiKeyEncrypted);

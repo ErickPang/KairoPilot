@@ -34,6 +34,10 @@ assert(builderConfig.includes('"dist"') && builderConfig.includes('"dist-electro
 assert(builderConfig.includes('"dmg"'), 'electron-builder mac target must include dmg');
 assert(builderConfig.includes('"nsis"'), 'electron-builder win target must include nsis');
 assert(builderConfig.includes('"AppImage"'), 'electron-builder linux target must include AppImage');
+assert(builderConfig.includes('"publish": null'), 'first release must not automatically publish or configure an update feed');
+assert(!fs.readFileSync(path.join(root, 'src/main/bootstrap/appBootstrap.ts'), 'utf8').includes('setupAutoUpdater'), 'first release uses manual updates');
+assert(fileExists('docs/releases.md'), 'missing GitHub release and installation instructions');
+
 
 assert(windowService.includes('contextIsolation: true'), 'BrowserWindow must enable contextIsolation');
 assert(windowService.includes('nodeIntegration: false'), 'BrowserWindow must disable nodeIntegration');

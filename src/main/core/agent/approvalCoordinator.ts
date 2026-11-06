@@ -9,7 +9,7 @@ import {
   updateRunStep,
   updateToolCallRecord
 } from '../../store/chat';
-import type { RuntimeUpdateEvent } from '../../../shared/contracts';
+import type { RuntimeUpdateEvent, SessionApprovalScope } from '../../../shared/contracts';
 import type { ContextAssemblyMetadata } from '../context/assembler';
 import type { ChatMessage } from '../llm/types';
 import type { LoadedSkillCapability } from './capabilityOrchestrator';
@@ -33,6 +33,7 @@ export interface RuntimeSnapshot {
   contextSummary?: ContextAssemblyMetadata;
   pendingToolCall?: PendingToolCallSnapshot;
   runtimeSupportSnapshot?: RuntimeSupportSnapshot;
+  deferredTools?: import('../plugins/discovery').DeferredToolSelection[];
 }
 
 interface RuntimeSnapshotPatch {
@@ -45,6 +46,7 @@ interface RuntimeSnapshotPatch {
 }
 
 interface CreateApprovalRequestParams {
+  sessionApproval?: SessionApprovalScope;
   runId: string;
   sessionId?: string;
   toolName: string;
@@ -78,6 +80,7 @@ export function createApprovalRequest(params: CreateApprovalRequestParams) {
     approvalMode,
     policyTags,
     redacted,
+    sessionApproval,
     callId,
     toolRecordId,
     toolStepId,
@@ -110,6 +113,7 @@ export function createApprovalRequest(params: CreateApprovalRequestParams) {
       toolRecordId,
       toolStepId,
       redactedArgs: displayArgs,
+      sessionApproval,
       riskLevel,
       approvalMode,
       policyTags,
@@ -129,6 +133,7 @@ export function createApprovalRequest(params: CreateApprovalRequestParams) {
       toolStepId,
       approvalStepId: approvalStep.id,
       redactedArgs: displayArgs,
+      sessionApproval,
       riskLevel,
       approvalMode,
       policyTags,
@@ -158,6 +163,7 @@ export function createApprovalRequest(params: CreateApprovalRequestParams) {
 
   emitUpdate({
     type: 'approval-required',
+    sessionApproval,
     tool: toolName,
     args: displayArgs,
     sessionId,
@@ -201,10 +207,21 @@ export function prepareApprovalResume(approvalId: string, approved: boolean):
   if (!run) {
     throw new Error(`Run not found: ${approval.runId}`);
   }
+  if (run.status !== 'waiting_approval' || run.waitingApprovalId !== approval.id
+    || (approval.sessionId && approval.sessionId !== run.sessionId)) {
+    throw new Error('Approval is stale or does not belong to the waiting run.');
+  }
 
   const snapshot = getLatestContextSnapshot<RuntimeSnapshot>(run.id);
   if (!snapshot) {
     throw new Error(`Context snapshot not found for run ${run.id}`);
+  }
+  const pending = snapshot.pendingToolCall;
+  if (!pending || pending.toolName !== approval.toolName
+    || JSON.stringify(pending.args) !== JSON.stringify(approval.args)
+    || (approval.metadata?.callId && approval.metadata.callId !== pending.callId)
+    || (pending.approvalStepId && pending.approvalStepId !== approval.stepId)) {
+    throw new Error('Approval does not match its pending tool checkpoint.');
   }
 
   resolveApprovalRecord(approvalId, approved);

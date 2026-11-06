@@ -1,0 +1,325 @@
+.form-row,
+.settings-advanced-grid,
+.permission-settings-grid {
+  gap: 10px;
+}
+
+.form-group {
+  margin-bottom: 10px;
+}
+
+.form-group label,
+.form-section-title,
+.settings-summary-label,
+.settings-provider-block-title,
+.settings-toggle-title,
+.settings-advanced-title,
+.settings-save-strip-title,
+.web-search-provider-name,
+.ollama-manager-title {
+  letter-spacing: 0;
+}
+
+.form-section-title {
+  margin: 12px 0 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border-soft);
+  color: var(--foreground);
+  font-size: 14px;
+  font-weight: 650;
+  text-transform: none;
+}
+
+.form-help,
+.settings-provider-block-help,
+.settings-toggle-help,
+.settings-stat-meta,
+.settings-inline-note,
+.settings-advanced-help,
+.settings-save-strip-help {
+  color: var(--muted-fg);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.config-inline-notice,
+.settings-panel,
+.settings-provider-block,
+.settings-toggle-card,
+.settings-stat-card,
+.settings-inline-note,
+.settings-linked-advanced,
+.web-search-provider-row,
+.ollama-manager,
+.ollama-progress {
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  background: var(--background);
+  box-shadow: none;
+}
+
+.settings-panel {
+  overflow: visible;
+}
+
+.settings-panel-body,
+.settings-provider-block,
+.settings-toggle-card,
+.settings-stat-card,
+.settings-inline-note,
+.web-search-provider-row {
+  padding: 10px 12px;
+}
+
+.settings-provider-block-title,
+.settings-toggle-title,
+.settings-advanced-title,
+.settings-save-strip-title,
+.ollama-manager-title {
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.settings-summary-value {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.settings-toggle-card {
+  align-items: center;
+  cursor: default;
+  transition: border-color 0.16s ease, background-color 0.16s ease;
+}
+
+.settings-toggle-card:hover {
+  border-color: var(--border-muted);
+  transform: none;
+  box-shadow: none;
+}
+
+.settings-toggle-card--featured,
+.settings-toggle-card.is-enabled {
+  border-color: rgba(var(--primary-rgb), 0.28);
+  background: var(--primary-muted);
+}
+
+.settings-toggle-card:focus-within {
+  box-shadow: 0 0 0 3px var(--ring);
+}
+
+.settings-toggle-input,
+.form-checkbox input[type="checkbox"] {
+  accent-color: var(--primary);
+}
+
+.settings-linked-advanced {
+  margin-top: 10px;
+  overflow: hidden;
+}
+
+.settings-linked-advanced.is-open {
+  border-color: var(--border-muted);
+  box-shadow: none;
+}
+
+.settings-advanced-bar {
+  padding: 10px 12px;
+  background: var(--surface-muted);
+}
+
+.settings-advanced-content {
+  padding: 0 12px 12px;
+}
+
+.settings-save-strip {
+  margin-top: 10px;
+  padding: 10px 0 0;
+  border-top: 1px solid var(--border-soft);
+  background: var(--background);
+}
+
+.web-search-provider-rank {
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-muted);
+  color: var(--muted-fg);
+  font-size: 12px;
+}
+
+.shell-status-badge,
+.settings-save-state {
+  min-height: 22px;
+  padding: 3px 7px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: var(--surface-muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.shell-status-badge.enabled,
+.settings-save-state.success {
+  border-color: var(--state-success-border);
+  background: var(--state-success-bg);
+  color: var(--success);
+}
+
+.shell-status-badge.disabled {
+  color: var(--muted-fg);
+}
+
+.settings-save-state.error {
+  border-color: var(--state-danger-border);
+  background: var(--card-danger);
+  color: var(--danger);
+}
+
+.ollama-manager {
+  padding: 10px 12px;
+}
+
+.ollama-manager-actions {
+  gap: 8px;
+}
+
+.ollama-progress {
+  padding: 10px;
+}
+
+.ollama-progress-track {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--surface-muted);
+}
+
+.ollama-progress-fill {
+  border-radius: inherit;
+  background: var(--primary);
+}
+
+ .image-preview-overlay { background: rgb(0 0 0 / 40%); }
+.image-preview-dialog { max-height: calc(100vh - 32px); border: 1px solid var(--border); border-radius: 10px; background: var(--background); box-shadow: var(--shadow-dialog); }
+.image-preview-toolbar { margin-bottom: 0; padding: 12px 14px; border-bottom: 1px solid var(--border-soft); background: var(--background); }
+
+.close-btn,
+.image-preview-btn {
+  border-radius: 8px;
+}
+
+.app-notice {
+  top: 12px;
+  right: 12px;
+  width: min(380px, calc(100vw - 24px));
+  padding: 10px 12px;
+  border-radius: 10px;
+  backdrop-filter: none;
+}
+
+.app-notice-icon,
+.app-notice-dismiss {
+  border-radius: 8px;
+}
+
+.image-preview-overlay {
+  padding: 16px;
+}
+
+.image-preview-dialog {
+  width: min(96vw, 1080px);
+  height: min(92vh, 860px);
+}
+
+.image-preview-canvas {
+  background: var(--surface-muted);
+}
+
+@media (max-width: 900px) {
+
+  .sidebar {
+    width: 236px;
+  }
+
+  .config-header {
+    padding: 12px 14px;
+  }
+
+  .config-title {
+    font-size: 16px;
+  }
+
+  .config-page-title-row,
+.settings-save-strip,
+.settings-advanced-bar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .config-page-header-action {
+    width: 100%;
+  }
+
+  .settings-advanced-grid,
+.settings-stat-grid,
+.permission-settings-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .app-container {
+    flex-direction: column;
+  }
+
+  .workspace-area {
+    min-height: 0;
+    overflow-x: auto;
+  }
+
+  .sidebar {
+    width: 210px;
+    padding: 8px;
+  }
+
+  .workspace-panel-main {
+    min-width: 360px;
+  }
+
+  .message,
+  .input-container,
+  .config-content,
+  .config-detail-footer {
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+
+  .modal-overlay,
+  .image-preview-overlay {
+    padding: 10px;
+  }
+
+  .modal-content,
+  .image-preview-dialog {
+    width: 100%;
+    max-height: calc(100vh - 20px);
+  }
+
+  .modal-actions,
+  .form-actions,
+  .settings-save-strip-actions,
+  .web-search-provider-actions,
+  .ollama-manager-actions {
+    flex-direction: column-reverse;
+    align-items: stretch;
+  }
+
+  .modal-actions .btn,
+  .form-actions .btn,
+  .settings-save-strip-actions .btn,
+  .web-search-provider-actions .btn,
+  .ollama-manager-actions .btn {
+    width: 100%;
+    justify-content: center;
+  }
+}

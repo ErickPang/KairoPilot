@@ -190,6 +190,7 @@ export async function handleToolCall(params: HandleToolCallParams): Promise<Runt
   if (permissionDecision.kind === 'approval') {
     const riskLevel = permissionGuard.getToolRiskLevel(toolName, permissionDecision.args);
     const approval = createApprovalRequest({
+      sessionApproval: sessionId ? permissionGuard.getSessionApprovalScope(toolName, permissionDecision.args) : undefined,
       runId,
       sessionId,
       toolName,

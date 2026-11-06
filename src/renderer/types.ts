@@ -1,8 +1,12 @@
+export type { WorkbenchConfig,WorkbenchSettingsInput,TaskExecutionSettings } from '../shared/contracts';
+import type { SessionProjectContext } from '../shared/contracts';
 import type { ChatAttachment } from '../shared/contracts';
 
 export type {
   AgentConfig,
   AgentStats,
+  OllamaModelInfo,
+  OllamaListModelsResult,
   AgentPermissionConfig,
   AppearanceConfig,
   AppearanceTheme,
@@ -12,27 +16,22 @@ export type {
   AuditLogQueryResult,
   ContextAssemblyBudget,
   KairoPilotConfig,
-  LegacyAgentConfig,
   ModelConfig,
   MonitoringTokenQuery,
   MonitoringTokenQueryResult,
   PluginCapabilityDeclaration,
+  PluginInstallReview,
   PluginManifest,
   PluginRegistryEntry,
+  PluginStoreEntry,
   PluginToolManifest,
   ProviderCapabilitySnapshot,
   ProviderConfig,
   ProviderType,
   RunContextSummary,
-  RunQuery,
-  RunQueryResult,
-  RunQueryStatus,
   RiskLevel,
   RuntimeUpdateEvent,
   RunStep,
-  RunTraceAggregations,
-  RunTraceQuery,
-  RunTrace,
   RunSummary,
   SkillSummary,
   ToolCallRecord,
@@ -45,6 +44,8 @@ export interface Message {
   role: 'user' | 'assistant' | 'system' | 'tool' | 'thinking';
   content?: string;
   attachments?: ChatAttachment[];
+  references?: import('../shared/contracts').ContextReference[];
+  skillMentions?: import('../shared/contracts').SkillMention[];
   details?: Record<string, unknown>;
   tool_calls?: Record<string, unknown>[];
   tool_call_id?: string;
@@ -67,7 +68,7 @@ export interface SystemStats {
   uptime: number;
 }
 
-export interface Session {
+export interface Session extends SessionProjectContext {
   id: string;
   title: string;
   agentId?: string;
@@ -76,15 +77,10 @@ export interface Session {
   updatedAt: number;
 }
 
-export interface SessionSummary {
-  id: string;
-  title: string;
-  agentId?: string;
-  createdAt: number;
-  updatedAt: number;
-}
+export type SessionSummary = import('../shared/contracts').SessionSummary;
 
 export interface ConfirmationRequest {
+  sessionApproval?: import('../shared/contracts').SessionApprovalScope;
   id: string;
   tool: string;
   args: Record<string, unknown>;
@@ -115,9 +111,7 @@ export interface SessionContextState {
   activeSessionId: string | null;
   appNotice: AppNotice | null;
   confirmationRequest: ConfirmationRequest | null;
-  latestContextSummary: import('../shared/contracts').RunContextSummary | null;
   latestRun: import('../shared/contracts').RunSummary | null;
-  activeRunSteps: import('../shared/contracts').RunStep[];
 }
 
 export type SessionContextUpdate =

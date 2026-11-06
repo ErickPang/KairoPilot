@@ -1,3 +1,11 @@
+import {createDelegationTool} from '../services/delegationService';
+import {createPlanningTools} from '../core/agent/planningTools';
+import {getRunById} from '../store/chat';
+import {sessionApprovalPolicy} from '../store/approvalGrants';
+import {getTaskPlan,updateTaskPlan} from '../store/taskPlans';
+import {memorySnapshotPrompt} from '../services/projectMemoryService';
+import {requireTask,settingsForTask} from '../services/taskSettingsService';
+import { WORKBENCH_OWNER } from '../store/configWorkbench';
 import path from 'path';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
@@ -10,7 +18,10 @@ import type { SkillCatalogSnapshot } from '../core/agent/runtimeHelpers';
 import { ToolDefinition } from '../core/llm/types';
 import { createLLMProvider } from '../core/llm/provider';
 import { PromptBuilder } from '../core/llm/prompt';
+import {discoverInstructions} from '../core/instructions/agents';
 import { PermissionGuard } from '../core/security/permissions';
+import { guardForExecution } from '../core/security/executionContext';
+import type { RunExecutionContext } from '../../shared/contracts';
 import { SUPPORTED_SKILL_SCRIPT_EXTENSIONS } from '../core/security/policyConstants';
 import { ReadFileTool, WriteFileTool, ListDirectoryTool, DeleteFileTool } from '../core/tools/filesystem';
 import { createReadAttachmentTool } from '../core/tools/attachments';
@@ -18,13 +29,14 @@ import { toolError, toolOk } from '../core/tools/result';
 import { createExecuteCommandTool } from '../core/tools/shell';
 import { SystemInfoTool } from '../core/tools/system';
 import { WebSearchTool, FetchWebpageTool, HttpRequestTool } from '../core/tools/web';
+import { createCodebaseTools } from '../core/tools/codebase';
 import { addAuditLog } from '../store/audit';
-import { AgentConfig, ModelConfig, getAgent, getModelForAgent } from '../store/config';
+import { AgentConfig, ModelConfig } from '../store/config';
 import { pluginManager } from '../core/plugins/manager';
+import {createPluginDiscovery} from '../core/plugins/discovery';
 import { skillsManager } from '../core/skills/manager';
-import { resolveRelevantSkills } from '../core/skills/resolver';
+import { resolveExplicitSkills } from '../core/skills/resolver';
 import {
-  DEFAULT_SHELL_COMMANDS,
   SkillMetadata,
   SkillSummary
 } from '../../shared/contracts';
@@ -64,10 +76,12 @@ function createRuntimeSignature(config: ResolvedAgentConfig) {
 
   return JSON.stringify({
     workspace,
+    executionContext: config.executionContext,
     model: {
       provider: model.provider || 'openai',
       baseUrl: model.baseUrl || '',
-      model: model.model || 'gpt-3.5-turbo',
+      contextWindowTokens:model.contextWindowTokens,
+    model: model.model || 'gpt-3.5-turbo',
       hasApiKey: Boolean(model.apiKey)
     },
     permissions: {
@@ -95,6 +109,7 @@ const SKILL_SCRIPT_MAX_BUFFER_BYTES = 1024 * 1024;
 interface ResolvedAgentConfig {
   agent: AgentConfig;
   model: ModelConfig;
+  executionContext?: RunExecutionContext;
 }
 
 interface SkillArgumentResolution {
@@ -232,6 +247,7 @@ async function resolveSkillLoad(
   agentId: string,
   rawArguments: Record<string, unknown> = {}
 ): Promise<ResolvedSkillLoad | null> {
+  await skillsManager.getSkillCatalogSnapshot(agentId,{force:true});
   const skillRecord = await skillsManager.getSkillRecord(skillName, agentId);
   if (!skillRecord) {
     return null;
@@ -265,8 +281,8 @@ export function createListAvailableSkillsTool(agentId: string): ToolDefinition {
   return {
     name: 'list_available_skills',
     description: 'List currently available skills for this agent, including public skills and agent-specific skills.',
-    parameters: z.object({}),
-    execute: async () => {
+    parameters: z.object({query:z.string().trim().max(200).optional(),offset:z.number().int().min(0).optional(),limit:z.number().int().min(1).max(30).optional()}),
+    execute: async (args) => {
       const [publicSkills, agentSkills, mergedSkills] = await Promise.all([
         skillsManager.listPublicSkills(),
         skillsManager.listAgentSkills(agentId),
@@ -287,59 +303,46 @@ export function createListAvailableSkillsTool(agentId: string): ToolDefinition {
         allowedTools: skill.allowedTools
       });
 
+      const query=String(args.query||'').toLowerCase();const offset=Number(args.offset)||0;const limit=Number(args.limit)||20;
+      const eligible=mergedSkills.filter(skill=>skill.userInvocable!==false||skill.modelInvocable!==false);
+      const matching=eligible.filter(skill=>`${skill.id} ${skill.name} ${skill.description} ${skill.whenToUse}`.toLowerCase().includes(query));
       return toolOk({
+        pagination:{offset,limit,total:matching.length,nextOffset:offset+limit<matching.length?offset+limit:null},
         counts: {
           public: visiblePublicSkills.length,
           agent: visibleAgentSkills.length,
           totalAvailable: visibleMergedSkills.length,
           hidden: hiddenSkills.length
         },
-        publicSkills: visiblePublicSkills.map(toToolPayload),
-        agentSkills: visibleAgentSkills.map(toToolPayload),
-        availableSkills: visibleMergedSkills.map(toToolPayload)
+        publicSkills: visiblePublicSkills.filter(skill=>matching.slice(offset,offset+limit).some(item=>item.id===skill.id)).map(toToolPayload),
+        agentSkills: visibleAgentSkills.filter(skill=>matching.slice(offset,offset+limit).some(item=>item.id===skill.id)).map(toToolPayload),
+        availableSkills: matching.slice(offset,offset+limit).map(toToolPayload)
       });
     }
   };
 }
 
 async function buildBaseSystemPrompt(agent: AgentConfig, workspace: string) {
-  return PromptBuilder.buildSystemPrompt({
-    workspace,
-    kairopilotPrompt: agent.systemPrompt,
-    identityPrompt: agent.identityPrompt,
-    userPrompt: agent.userPrompt,
-    soulPrompt: agent.soulPrompt
-  }, {
-    includeWorkspacePrompts: false,
-    includeMemory: false,
-    includeEnvironment: true
-  });
+  if(agent.instructionSources){const current=discoverInstructions(agent.instructionRoot||agent.workspace,workspace).map(({path,hash,scope})=>({path,hash,scope}));if(JSON.stringify(current)!==JSON.stringify(agent.instructionSources))throw new Error('AGENTS.md changed during this run. Start a new run.');}
+  return PromptBuilder.buildSystemPrompt({workspace,instructions:agent.systemPrompt});
 }
 
 async function resolveInitialSkillsForRun(userInput: string, agentId: string): Promise<LoadedSkillCapability[]> {
   const skills = await skillsManager.listMergedSkills(agentId);
-  const candidates = resolveRelevantSkills(userInput, skills, {
-    maxResults: 2,
-    autoLoadThreshold: 18
-  });
-
-  const selectedCandidates = candidates.filter((candidate, index) => (
-    candidate.explicitMention
-    || candidate.score >= 26
-    || index === 0
-  ));
+  const selectedSkills = resolveExplicitSkills(userInput, skills);
+  addAuditLog({tool:'skill_resolver',args:{agentId},result:{selectedSkillIds:selectedSkills.map(skill=>skill.id),reason:'explicit_user_invocation'},policyTags:['skill:resolver']});
 
   const loadedSkills: LoadedSkillCapability[] = []
-  for (const candidate of selectedCandidates) {
+  for (const selectedSkill of selectedSkills) {
     let resolvedSkill: ResolvedSkillLoad | null = null
     try {
-      resolvedSkill = await resolveSkillLoad(candidate.skill.id, agentId)
+      resolvedSkill = await resolveSkillLoad(selectedSkill.id, agentId)
     } catch (error) {
-      console.warn(`[Skills] Failed to auto-load skill ${candidate.skill.id}:`, error)
-      continue
+      console.warn(`[Skills] Failed to auto-load skill ${selectedSkill.id}:`, error)
+      throw new Error(`Failed to load requested skill "${selectedSkill.id}": ${error instanceof Error ? error.message : String(error)}`)
     }
     if (!resolvedSkill) {
-      continue
+      throw new Error(`Failed to load requested skill "${selectedSkill.id}": skill is no longer available.`)
     }
 
     loadedSkills.push({
@@ -347,7 +350,7 @@ async function resolveInitialSkillsForRun(userInput: string, agentId: string): P
       skillId: resolvedSkill.skillId,
       contentHash: resolvedSkill.contentHash,
       source: resolvedSkill.source,
-      aliases: [candidate.skill.id, candidate.skill.name, resolvedSkill.skillId]
+      aliases: [selectedSkill.id, selectedSkill.name, resolvedSkill.skillId]
         .filter((value, index, values): value is string => Boolean(value) && values.indexOf(value) === index),
       description: resolvedSkill.metadata.description,
       whenToUse: resolvedSkill.metadata.whenToUse,
@@ -356,12 +359,11 @@ async function resolveInitialSkillsForRun(userInput: string, agentId: string): P
       userInvocable: resolvedSkill.metadata.userInvocable,
       modelInvocable: resolvedSkill.metadata.modelInvocable,
       executionMode: resolvedSkill.metadata.executionMode,
-      activationSource: 'automatic',
+      activationSource: 'manual',
       allowedTools: resolvedSkill.metadata.allowedTools,
       resolvedArguments: resolvedSkill.resolvedArguments,
-      resolverScore: candidate.score,
-      resolverReasons: candidate.reasons,
-      explicitMention: candidate.explicitMention,
+      resolverReasons: ['explicit_user_invocation'],
+      explicitMention: true,
       loadedAt: resolvedSkill.loadedAt,
       scopeRevision: resolvedSkill.scopeRevision,
       resourcePaths: resolvedSkill.skillFiles,
@@ -372,56 +374,10 @@ async function resolveInitialSkillsForRun(userInput: string, agentId: string): P
   return loadedSkills
 }
 
-async function reloadRetainedSkillsForSession(
-  skills: LoadedSkillCapability[],
-  agentId: string
-): Promise<LoadedSkillCapability[]> {
-  const currentScopeRevision = skillsManager.getSkillScopeRevision(agentId);
-  if (skills.every((skill) => skill.scopeRevision === currentScopeRevision)) {
-    return skills;
-  }
-
-  const refreshedSkills: LoadedSkillCapability[] = [];
-
-  for (const skill of skills) {
-    const skillReference = skill.skillId || skill.skillName;
-    const resolvedSkill = await resolveSkillLoad(skillReference, agentId, skill.resolvedArguments ?? {});
-    if (!resolvedSkill) {
-      continue;
-    }
-
-    refreshedSkills.push({
-      skillName: resolvedSkill.metadata.name || resolvedSkill.skillId,
-      skillId: resolvedSkill.skillId,
-      contentHash: resolvedSkill.contentHash,
-      source: resolvedSkill.source,
-      aliases: skill.aliases,
-      description: resolvedSkill.metadata.description,
-      whenToUse: resolvedSkill.metadata.whenToUse,
-      instructions: resolvedSkill.renderedContent,
-      arguments: resolvedSkill.metadata.arguments,
-      userInvocable: resolvedSkill.metadata.userInvocable,
-      modelInvocable: resolvedSkill.metadata.modelInvocable,
-      executionMode: resolvedSkill.metadata.executionMode,
-      activationSource: skill.activationSource === 'automatic' ? 'automatic' : 'manual',
-      allowedTools: resolvedSkill.metadata.allowedTools,
-      resolvedArguments: resolvedSkill.resolvedArguments,
-      resolverScore: skill.resolverScore,
-      resolverReasons: skill.resolverReasons ? [...skill.resolverReasons] : undefined,
-      explicitMention: skill.explicitMention,
-      loadedAt: resolvedSkill.loadedAt,
-      scopeRevision: resolvedSkill.scopeRevision,
-      resourcePaths: resolvedSkill.skillFiles,
-      scriptPaths: resolvedSkill.skillFiles.filter((filePath) => isSupportedSkillScriptPath(filePath))
-    });
-  }
-
-  return refreshedSkills;
-}
-
 async function createLoadSkillTool(
   agentId: string,
-  onSkillLoaded?: (payload: LoadedSkillCapability) => void
+  onSkillLoaded?: (payload: LoadedSkillCapability) => void,
+  getUserInput: () => string = () => ''
 ): Promise<ToolDefinition> {
   return {
     name: 'load_skill',
@@ -442,8 +398,9 @@ async function createLoadSkillTool(
         return toolError(`Skill not found: ${name}`);
       }
 
-      if (resolvedSkill.metadata.userInvocable === false) {
-        return toolError(`Skill ${name} is not user-invocable.`);
+      const explicitlyInvoked = resolveExplicitSkills(getUserInput(), [{...resolvedSkill.metadata,id:resolvedSkill.skillId} as SkillSummary]).length > 0;
+      if (resolvedSkill.metadata.modelInvocable === false && !explicitlyInvoked) {
+        return toolError(`Skill ${name} requires an explicit user invocation.`);
       }
 
       const aliases = [name, resolvedSkill.metadata.name, resolvedSkill.skillId]
@@ -461,11 +418,11 @@ async function createLoadSkillTool(
         userInvocable: resolvedSkill.metadata.userInvocable,
         modelInvocable: resolvedSkill.metadata.modelInvocable,
         executionMode: resolvedSkill.metadata.executionMode,
-        activationSource: 'manual',
+        activationSource: explicitlyInvoked ? 'manual' : 'automatic',
         allowedTools: resolvedSkill.metadata.allowedTools,
         resolvedArguments: resolvedSkill.resolvedArguments,
-        resolverReasons: ['manual_load_skill'],
-        explicitMention: true,
+        resolverReasons: [explicitlyInvoked ? 'explicit_user_invocation' : 'model_selected'],
+        explicitMention: explicitlyInvoked,
         loadedAt: resolvedSkill.loadedAt,
         scopeRevision: resolvedSkill.scopeRevision,
         resourcePaths: resolvedSkill.skillFiles,
@@ -492,11 +449,19 @@ async function createLoadSkillTool(
         executionMode: resolvedSkill.metadata.executionMode,
         allowedTools: resolvedSkill.metadata.allowedTools,
         loadedAt: resolvedSkill.loadedAt,
-        content: resolvedSkill.renderedContent,
+        contentHash:resolvedSkill.contentHash,
+        source:resolvedSkill.source,
+        instructionStatus:'Full instructions are loaded into the dedicated skill context on the next inference; resources remain on demand.',
         resources
       });
     }
   };
+}
+
+async function assertLoadedSkillRevision(skill:string,agentId:string,runtime:AgentRuntime){
+ const loaded=runtime.getLoadedSkillCapability(skill);if(!loaded)throw new Error('Load the skill before reading resources.');
+ const current=await resolveSkillLoad(skill,agentId,loaded.resolvedArguments||{});
+ if(!current||current.contentHash!==loaded.contentHash)throw new Error('Skill instructions or invocation policy changed after loading. Load the skill again before using resources.');
 }
 
 function createReadSkillResourceTool(agentId: string, getRuntime: () => AgentRuntime | null): ToolDefinition {
@@ -518,6 +483,7 @@ function createReadSkillResourceTool(agentId: string, getRuntime: () => AgentRun
       if (!runtime?.canAccessLoadedSkillResource(skill, normalizedResourcePath)) {
         return toolError(`Skill resource access requires loading the skill first via load_skill: ${skill}/${normalizedResourcePath}`);
       }
+      await assertLoadedSkillRevision(skill,agentId,runtime);
       const resource = await skillsManager.readSkillResource(skill, normalizedResourcePath, agentId);
       if (!resource) {
         return toolError(`Skill resource not found: ${skill}/${normalizedResourcePath}`);
@@ -543,7 +509,8 @@ function createReadSkillResourceTool(agentId: string, getRuntime: () => AgentRun
 function createRunSkillScriptTool(
   agentId: string,
   getRuntime: () => AgentRuntime | null,
-  permissionGuard: PermissionGuard
+  permissionGuard: PermissionGuard,
+  executionWorkspace: string
 ): ToolDefinition {
   return {
     name: 'run_skill_script',
@@ -571,6 +538,7 @@ function createRunSkillScriptTool(
           return toolError(`Skill script access requires loading the skill first via load_skill: ${skill}/${scriptPath}`);
         }
 
+        await assertLoadedSkillRevision(skill,agentId,runtime);
         const allowed = await skillsManager.canUseAllowedTool(skill, 'run_skill_script', agentId);
         if (!allowed) {
           return toolError(`Skill ${skill} does not allow run_skill_script.`);
@@ -583,12 +551,18 @@ function createRunSkillScriptTool(
 
         const command = resolveSkillScriptCommand(absoluteScriptPath);
         const shellPolicy = permissionGuard.getShellExecutionPolicy();
+        const skillScriptStartedAt = Date.now();
         const { stdout, stderr } = await execFileAsync(command, [absoluteScriptPath, ...scriptArgs], {
-          cwd: path.dirname(absoluteScriptPath),
+          cwd: executionWorkspace,
           maxBuffer: Math.min(shellPolicy.maxBufferBytes, SKILL_SCRIPT_MAX_BUFFER_BYTES),
           windowsHide: true,
           timeout: shellPolicy.timeoutMs
         });
+
+        const elapsedMs = Date.now() - skillScriptStartedAt;
+        if (elapsedMs > 200) {
+          console.warn(`[perf] skill script ${path.basename(absoluteScriptPath)} took ${elapsedMs}ms (threshold: 200ms)`);
+        }
 
         return toolOk({
           skill,
@@ -598,7 +572,8 @@ function createRunSkillScriptTool(
           scriptPath: absoluteScriptPath,
           stdout: stdout.trim(),
           stderr: stderr.trim(),
-          exitCode: 0
+          exitCode: 0,
+          elapsedMs
         });
       } catch (error) {
         const err = error as { stdout?: string | Buffer; stderr?: string | Buffer; code?: number; message?: string };
@@ -628,75 +603,59 @@ async function registerRuntimeTools(params: {
     permissions
   } = params;
 
-  runtime.registerTool(ReadFileTool as unknown as ToolDefinition);
+  runtime.registerTool(ReadFileTool);
   runtime.registerTool(createReadAttachmentTool(() => runtime.getActiveSessionId()));
-  runtime.registerTool(WriteFileTool as unknown as ToolDefinition);
-  runtime.registerTool(ListDirectoryTool as unknown as ToolDefinition);
-  runtime.registerTool(DeleteFileTool as unknown as ToolDefinition);
+  runtime.registerTool(WriteFileTool);
+  runtime.registerTool(ListDirectoryTool);
+  runtime.registerTool(DeleteFileTool);
   runtime.registerTool(createExecuteCommandTool({
     cwd: workspace,
     policy: permissions.getShellExecutionPolicy()
-  }) as unknown as ToolDefinition);
-  runtime.registerTool(SystemInfoTool as unknown as ToolDefinition);
-  runtime.registerTool(WebSearchTool as unknown as ToolDefinition);
-  runtime.registerTool(FetchWebpageTool as unknown as ToolDefinition);
-  runtime.registerTool(HttpRequestTool as unknown as ToolDefinition);
+  }));
+  runtime.registerTool(SystemInfoTool);
+  runtime.registerTool(WebSearchTool);
+  runtime.registerTool(FetchWebpageTool);
+  runtime.registerTool(HttpRequestTool);
+  createCodebaseTools(workspace, permissions).forEach((tool) => runtime.registerTool(tool));
   runtime.registerTool(createListAvailableSkillsTool(agentId));
   runtime.registerTool(await createLoadSkillTool(agentId, (loadedSkill) => {
     runtime.activateLoadedSkill(loadedSkill);
-  }));
+  }, () => {const id=runtime.getActiveRunId();return id?getRunById(id)?.userInput||'':'';}));
   runtime.registerTool(createReadSkillResourceTool(agentId, runtimeRef));
-  runtime.registerTool(createRunSkillScriptTool(agentId, runtimeRef, permissions));
+  runtime.registerTool(createRunSkillScriptTool(agentId, runtimeRef, permissions, workspace));
 
-  const dynamicTools = await pluginManager.loadAllTools(agentId, permissions);
-  for (const tool of dynamicTools) {
-    runtime.registerTool(tool as unknown as ToolDefinition);
-  }
+  const discovery=createPluginDiscovery(agentId,permissions,tool=>runtime.registerTool(tool));
+  runtime.registerTool(discovery.search);
+  runtime.setDeferredToolLoader(discovery.load);
 }
 
 async function initializeAgent(config: ResolvedAgentConfig, sender?: WebContents) {
   void sender;
   const { agent, model } = config;
+  const planning=config.executionContext?.phase==='planning';
   const signature = createRuntimeSignature(config);
-  const workspace = agent.workspace ? path.resolve(agent.workspace) : process.cwd();
-  const userAllowedPaths = Array.isArray(agent.permissions.fileSystem.allowedPaths)
-    ? agent.permissions.fileSystem.allowedPaths.filter((p: string) => p && p.trim().length > 0).map((p: string) => path.resolve(p))
-    : [];
-  const allowedPaths = [...new Set([workspace, ...userAllowedPaths])];
-  const allowedCommands = Array.isArray(agent.permissions.shell.allowedCommands)
-    ? agent.permissions.shell.allowedCommands.filter((c: string) => c && c.trim().length > 0)
-    : [...DEFAULT_SHELL_COMMANDS];
-  const allowedDomains = Array.isArray(agent.permissions.network.allowedDomains)
-    ? agent.permissions.network.allowedDomains.filter((domain: string) => domain && domain.trim().length > 0)
-    : [];
-
-  const permissions = new PermissionGuard({
-    executionProfile: agent.permissions.executionProfile,
-    policy: agent.permissions.policy,
-    fileSystem: {
-      read: agent.permissions.fileSystem.read,
-      write: agent.permissions.fileSystem.write,
-      allowedPaths
-    },
-    network: {
-      enabled: agent.permissions.network.enabled,
-      allowedDomains
-    },
-    shell: {
-      enabled: agent.permissions.shell.enabled,
-      allowedCommands: agent.permissions.shell.enabled ? allowedCommands : []
-    }
-  });
+  const workspace = config.executionContext?.executionRoot || path.resolve(agent.workspace);
+  const permissions = guardForExecution(agent, config.executionContext);
+  if (config.executionContext?.sessionId) permissions.bindSessionApprovals(sessionApprovalPolicy(config.executionContext.sessionId, permissions.getApprovalContextKey()));
 
   const llm = createLLMProvider({
     provider: model.provider || 'openai',
     apiKey: model.apiKey,
     baseUrl: model.baseUrl,
+    contextWindowTokens:model.contextWindowTokens,
     model: model.model || 'gpt-3.5-turbo'
   });
 
-  let availableSkillsCatalog: SkillCatalogSnapshot = await skillsManager.getSkillCatalogSnapshot(agent.id);
-  const baseSystemPrompt = await buildBaseSystemPrompt(agent, workspace);
+  const pluginSummary=async()=>{
+    if(planning||permissions.getExecutionProfile()==='chat_only')return '';
+    const catalog=await pluginManager.listToolCatalog(WORKBENCH_OWNER,permissions);
+    const groups=Array.from(new Map(catalog.map(item=>[`${item.scope}:${item.pluginId}`,`- ${item.pluginId}: ${item.pluginDescription.slice(0,180)}`])).values());
+    return `Plugin capabilities (use search_tools to discover schemas; discovery runs no actions):\n${groups.slice(0,20).join('\n')}\n${groups.length>20?'More plugins are searchable.':''}`;
+  };
+  let availablePluginsSummary=await pluginSummary();
+  let availableSkillsCatalog: SkillCatalogSnapshot = await skillsManager.getSkillCatalogSnapshot(WORKBENCH_OWNER);
+  const snapshotPrompt=memorySnapshotPrompt(config.executionContext?.memorySnapshot);
+  const baseSystemPrompt = await buildBaseSystemPrompt(agent, workspace)+snapshotPrompt;
 
   let runtimeRef: AgentRuntime | null = null;
   const runtime = new AgentRuntime(
@@ -717,26 +676,35 @@ async function initializeAgent(config: ResolvedAgentConfig, sender?: WebContents
       });
     },
     async () => {
-      const [nextPrompt, nextAvailableSkillsCatalog] = await Promise.all([
+      const [nextPrompt, nextAvailableSkillsCatalog,nextPluginsSummary] = await Promise.all([
         buildBaseSystemPrompt(agent, workspace),
-        skillsManager.getSkillCatalogSnapshot(agent.id)
+        skillsManager.getSkillCatalogSnapshot(WORKBENCH_OWNER),pluginSummary()
       ]);
-      availableSkillsCatalog = nextAvailableSkillsCatalog;
-      return nextPrompt;
+      availableSkillsCatalog = nextAvailableSkillsCatalog;availablePluginsSummary=nextPluginsSummary;
+      return nextPrompt+snapshotPrompt;
     },
-    () => ({
-      availableSkillsCatalog
-    }),
-    (userInput, runtimeAgentId) => resolveInitialSkillsForRun(userInput, runtimeAgentId),
-    (skills, runtimeAgentId) => reloadRetainedSkillsForSession(skills, runtimeAgentId)
+    () => planning||permissions.getExecutionProfile()==='chat_only' ? {} : ({availableSkillsCatalog,availablePluginsSummary}),
+    planning||permissions.getExecutionProfile()==='chat_only' ? undefined : (userInput, runtimeAgentId) => resolveInitialSkillsForRun(userInput, runtimeAgentId),
+    agent.workspace
   );
   runtimeRef = runtime;
 
   try {
-    await registerRuntimeTools({
+    if(planning){
+      createPlanningTools(workspace,permissions,entry=>{
+        const runId=runtime.getActiveRunId();const planId=runId?getRunById(runId)?.executionContext?.planId:undefined;
+        const plan=planId?getTaskPlan(planId):null;
+        if(!plan||plan.status!=='planning')throw new Error('Planning evidence is unavailable.');
+        const entries=plan.investigations||[];
+        if(entries.length>=32)throw new Error('Planning investigation limit reached. Summarize existing evidence.');
+        updateTaskPlan(plan.id,plan.revision,{investigations:[...entries,entry]});
+      }).forEach(tool=>runtime.registerTool(tool));
+      runtime.registerTool(createReadAttachmentTool(()=>runtime.getActiveSessionId()));
+    }
+    if(!planning)await registerRuntimeTools({
       runtime,
       runtimeRef: () => runtimeRef,
-      agentId: agent.id,
+      agentId: WORKBENCH_OWNER,
       workspace,
       permissions
     });
@@ -744,6 +712,10 @@ async function initializeAgent(config: ResolvedAgentConfig, sender?: WebContents
     console.error('Failed to register runtime tools:', error);
   }
 
+  const taskId=config.executionContext?.sessionId;
+  if(!planning&&permissions.getExecutionProfile()!=='chat_only'&&taskId&&config.executionContext&&settingsForTask(requireTask(taskId)).delegation!=='off') {
+    runtime.registerTool(createDelegationTool(taskId,()=>runtime.getActiveRunId(),config.executionContext));
+  }
   runtimeRegistry.set(agent.id, {
     runtime,
     signature
@@ -779,25 +751,6 @@ async function ensureAgentRuntime(config: ResolvedAgentConfig, sender?: WebConte
   return initializationPromise;
 }
 
-async function resolveAgentConfig(configOrId: string | AgentConfig | ResolvedAgentConfig): Promise<ResolvedAgentConfig> {
-  if (typeof configOrId === 'string') {
-    const agent = getAgent(configOrId);
-    if (!agent) throw new Error(`Agent not found: ${configOrId}`);
-    const model = getModelForAgent(agent);
-    if (!model) throw new Error(`Model not found for agent model: ${agent.model}`);
-    return { agent, model };
-  }
-
-  if ('agent' in configOrId && 'model' in configOrId) {
-    return configOrId as ResolvedAgentConfig;
-  }
-
-  const agent = configOrId as AgentConfig;
-  const model = getModelForAgent(agent);
-  if (!model) throw new Error(`Model not found for agent model: ${agent.model}`);
-  return { agent, model };
-}
-
 function getAgentRuntime(agentId: string) {
   return runtimeRegistry.get(agentId)?.runtime || null;
 }
@@ -807,10 +760,18 @@ function removeAgentRuntime(agentId: string) {
   runtimeRegistry.delete(agentId);
 }
 
+export function clearAgentRuntimes() { runtimeRegistry.clear(); pendingRuntimeInitializations.clear(); }
+
+export async function cancelActiveAgentRuntimes() {
+  await Promise.all([...runtimeRegistry.values()].map(async ({ runtime }) => {
+    const id = runtime.getActiveRunId();
+    if (id && getRunById(id)?.status === 'running') await runtime.cancelRun(id);
+  }));
+}
+
 export {
   ensureAgentRuntime,
   initializeAgent,
-  resolveAgentConfig,
   getAgentRuntime,
   removeAgentRuntime
 };

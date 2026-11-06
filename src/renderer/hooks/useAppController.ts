@@ -1,4 +1,6 @@
-import { useCallback, useRef, useState } from 'react';
+import { archiveTaskWithFeedback } from './taskActions';
+import { KAIRO_INVOKE } from '../../shared/ipc';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { AppConfirmationOptions, AppNotice } from '../types';
 import { useTranslation } from './useTranslation';
 import { useSessionContextState } from './useSessionContextState';
@@ -6,13 +8,14 @@ import { useChatController } from './useChatController';
 import { useConfigController } from './useConfigController';
 import { useSessionData } from './useSessionData';
 import { createErrorNotice } from './errorUtils';
+import { isRunUnsettled } from './runtimeEventUtils';
 
-export function useAppController() {
-  const [activeTab, setActiveTab] = useState<'chat' | 'plugins' | 'skills' | 'settings' | 'audit' | 'dashboard'>('chat');
+export function useAppController(beforeNavigate?: () => Promise<void>) {
+  const [activeTab, setActiveTab] = useState<'chat' | 'plugins' | 'skills' | 'settings' | 'dashboard'>('chat');
   const [activeConfigSection, setActiveConfigSection] = useState<string>('general');
   const [actionConfirmation, setActionConfirmation] = useState<AppConfirmationOptions | null>(null);
   const { t } = useTranslation();
-  const { sessionContext, updateSessionContext } = useSessionContextState();
+  const { sessionContext, getSessionContext, updateSessionContext } = useSessionContextState();
   const actionConfirmationResolverRef = useRef<((confirmed: boolean) => void) | null>(null);
 
   const reportAppNotice = useCallback((notice: AppNotice) => {
@@ -63,9 +66,10 @@ export function useAppController() {
     resolve?.(confirmed);
   }, []);
 
-  const { loadActiveSession, loadRunState, loadSessions, messages, messagesEndRef, sessions, setMessages, setSessions } = useSessionData(
+  const { loadActiveSession, loadRunState, loadSessions, sessions, setSessions } = useSessionData(
     updateSessionContext,
     {
+      getSessionContext,
       onLoadActiveSessionError: handleLoadActiveSessionError,
       onLoadRunStateError: handleLoadRunStateError,
       onLoadSessionsError: handleLoadSessionsError,
@@ -78,11 +82,12 @@ export function useAppController() {
     availableModels,
     describeProvider,
     fetchModels,
-    handleDeleteAgent,
     handleDeleteModel,
-    handleSaveAgent,
     handleSaveModel,
-    handleSetActiveAgent: handleSetActiveAgentBase,
+    workbench,
+    handleSaveWorkbench,
+    refreshWorkbenchConfig,
+    initializing,
     models
   } = useConfigController({
     sessionContext,
@@ -92,47 +97,63 @@ export function useAppController() {
     loadActiveSession,
     loadSessions
   });
-  const [agentLoading, setAgentLoading] = useState(false);
   const {
     handleCancelRun,
-    handleClear,
     handleConfirm,
     handleCreateSession,
     handleDeleteSession,
-    handleDeleteSessions,
     handleDeny,
-    handlePauseRun,
-    handleResumeRun,
-    handleRetryStep,
     handleSelectSession,
     handleSend,
     handleUpdateSessionTitle,
     input,
     loading: chatLoading,
+    isRequestPending,
     setInput
   } = useChatController({
-    agentCount: agents.length,
+    beforeNavigate,
+    getSessionContext,
     loadActiveSession,
     loadRunState,
     loadSessions,
-    messages,
-    messagesEndRef,
     requestConfirmation,
     sessionContext,
-    setMessages,
     setSessions,
     t,
     updateSessionContext
   });
 
-  const handleSetActiveAgent = async (id: string) => {
-    try {
-      setAgentLoading(true);
-      await handleSetActiveAgentBase(id);
-    } finally {
-      setAgentLoading(false);
-    }
+  const handleArchiveTask = async (sessionId: string, archived: boolean) => {
+    if (isRequestPending || isRunUnsettled(getSessionContext().latestRun)) return false;
+    const success = await archiveTaskWithFeedback({
+      saveDraft: async () => { await beforeNavigate?.(); },
+      archive: async () => { await window.kairo.invoke(KAIRO_INVOKE.chatArchiveTask, { sessionId, archived }); },
+      refresh: () => loadSessions({ throwOnError: true }),
+      reportError: (error) => reportAppError(String(error), 'archive_task')
+    });
+    if (success) updateSessionContext((current) => current.appNotice?.source === 'archive_task' ? { appNotice: null } : {});
+    return success;
   };
+  const activeSummary = sessions.find((session) => session.id === sessionContext.activeSessionId);
+  const activityVersion = activeSummary?.activityVersion || 0;
+  const readVersion = activeSummary?.readVersion || 0;
+  useEffect(() => {
+    const agentId = sessionContext.activeAgentId;
+    const sessionId = sessionContext.activeSessionId;
+    if (!sessionId || activeTab !== 'chat' || activityVersion <= readVersion) return;
+    const markRead = () => {
+      if (document.visibilityState !== 'visible') return;
+      void window.kairo.invoke(KAIRO_INVOKE.chatReadTask, { sessionId, version: activityVersion }).then(() => {
+        if (getSessionContext().activeAgentId !== agentId) return;
+        setSessions((items) => items.map((session) => session.id === sessionId ? { ...session, readVersion: Math.max(session.readVersion || 0, activityVersion) } : session));
+      }).catch((error: unknown) => reportAppError(String(error), 'read_task'));
+    };
+    markRead();
+    document.addEventListener('visibilitychange', markRead);
+    return () => document.removeEventListener('visibilitychange', markRead);
+  }, [sessionContext.activeAgentId, sessionContext.activeSessionId, activeTab, activityVersion, readVersion, getSessionContext, reportAppError, setSessions]);
+
+  const refreshTasks=useCallback(async()=>{await loadSessions();await loadActiveSession();},[loadSessions,loadActiveSession]);
 
   return {
     activeAgentName,
@@ -146,28 +167,25 @@ export function useAppController() {
     reportAppNotice,
     describeProvider,
     fetchModels,
+    handleArchiveTask,
     handleCancelRun,
-    handleClear,
     handleConfirm,
     handleCreateSession,
-    handleDeleteAgent,
     handleDeleteModel,
     handleDeleteSession,
-    handleDeleteSessions,
     handleDeny,
-    handlePauseRun,
-    handleResumeRun,
-    handleRetryStep,
-    handleSaveAgent,
     handleSaveModel,
     handleSelectSession,
     handleSend,
-    handleSetActiveAgent,
+    workbench,
+    handleSaveWorkbench,
+    refreshWorkbenchConfig,
+    refreshTasks,
+    initializing,
     handleUpdateSessionTitle,
     input,
-    loading: chatLoading || agentLoading,
-    messages,
-    messagesEndRef,
+    loading: chatLoading,
+    isRequestPending,
     models,
     clearAppNotice,
     sessionContext,

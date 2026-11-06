@@ -1,0 +1,27 @@
+/* Eager, shared shell: confirmations must work before any settings tab loads. */
+.workbench-app .modal-overlay { position: fixed; inset: 0; z-index: 2000; display: flex; align-items: center; justify-content: center; padding: 24px; background: rgb(0 0 0 / 40%); backdrop-filter: blur(3px); }
+:root[data-theme] .workbench-app .modal-content { width: 560px; max-width: 100%; max-height: calc(100dvh - 48px); overflow: auto; border: 1px solid var(--border); border-radius: var(--radius-xl); background: var(--surface-panel); color: var(--foreground); box-shadow: var(--shadow-dialog); }
+:root[data-theme] .workbench-app .workbench-dialog { display: flex; flex-direction: column; padding: 0; overflow: hidden; }
+.workbench-app .workbench-dialog .modal-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-shrink: 0; margin: 0; padding: 24px 24px 12px; border: 0; background: transparent; }
+.workbench-dialog .modal-header h3 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 18px; font-weight: 600; }
+.workbench-dialog .close-btn { display: grid; place-items: center; width: 30px; height: 30px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--muted-fg); cursor: pointer; }
+.workbench-dialog .close-btn:hover { background: var(--surface-hover); color: var(--foreground); }
+.workbench-app .workbench-dialog .modal-body { min-height: 0; overflow: auto; margin: 0; padding: 16px 24px 24px; }
+.workbench-app .workbench-dialog .modal-actions { display: flex; flex-direction: row; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 10px; flex-shrink: 0; margin: 0; padding: 0 24px 24px; border: 0; background: transparent; }
+.workbench-dialog .modal-actions .btn { width: auto; min-height: 36px; padding: 7px 16px; border-radius: var(--control-radius); }
+:root[data-theme] .workbench-app .action-confirmation-modal { width: 460px; }
+.action-confirmation-message { margin: 0; color: var(--muted-fg); line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
+.workbench-dialog .workbench-project-form { display: flex; flex-direction: column; gap: 22px; padding: 0; }
+.workbench-project-form label { display: flex; flex-direction: column; gap: 10px; font-size: 13px; font-weight: 600; }
+.workbench-project-form input { width: 100%; min-width: 0; height: 40px; padding: 8px 12px; font: inherit; color: var(--foreground); background: var(--surface-panel); border: 1px solid var(--border); border-radius: var(--control-radius); }
+.workbench-project-form p { margin: 0; color: var(--muted-fg); font-size: 12px; line-height: 1.6; }
+.workbench-project-form .project-directory-select { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; min-height: 136px; padding: 20px; font: inherit; font-weight: 500; color: var(--foreground); background: var(--surface-muted); border: 1px dashed var(--border); border-radius: var(--radius-lg); cursor: pointer; }
+.project-directory-select span { max-width: 100%; overflow-wrap: anywhere; }
+.project-directory-select small { color: var(--muted-fg); font-weight: 400; }
+.project-form-error { color: var(--danger); font-size: 12px; overflow-wrap: anywhere; margin: 16px 0 0; }
+@media (max-width: 600px) { .workbench-app .modal-overlay { padding: 12px; } :root[data-theme] .workbench-app .modal-content { max-height: calc(100dvh - 24px); } .workbench-app .workbench-dialog .modal-header { padding: 18px 18px 8px; } .workbench-app .workbench-dialog .modal-body { padding: 12px 18px 18px; } .workbench-app .workbench-dialog .modal-actions { padding: 0 18px 18px; } }
+:root[data-theme] .workbench-app .workbench-dialog:is(.skill-install-modal, .diff-modal) { width: 780px; }
+.workbench-dialog .plugin-install-review { margin-bottom: 20px; }
+.workbench-dialog .config-subtitle { margin: 0 0 20px; }
+.workbench-dialog .skill-install-form-card + .skill-install-form-card { margin-top: 12px; }
+.workbench-dialog .skill-install-review-hero { margin-bottom: 14px; }

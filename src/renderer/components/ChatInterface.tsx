@@ -1,338 +1,152 @@
+import { useConversationFeed } from '../hooks/useConversationFeed';
+import { useSkillCompletion } from '../hooks/useSkillCompletion';
+import { SkillCompletionMenu } from './SkillCompletionMenu';
+import {ApprovalCard} from './ApprovalCard';
+import type {ConfirmationRequest} from '../types';
+import {Select} from './Select';
+import {Hand,Shield} from 'lucide-react';
+import {DelegationPanel} from './DelegationPanel';
+import {TaskWorkflowControls} from './TaskWorkflowControls';
+import {TaskPlanPanel} from './TaskPlanPanel';
+import {TaskQueuePanel} from './TaskQueuePanel';
+import {useAdaptiveResource} from '../hooks/useAdaptiveResource';
+import { InputRecoveryNotice } from './InputRecoveryNotice';
+import { AttachmentList } from './AttachmentList';
+import { ChatMessagesPanel } from './ChatMessagesPanel';
+import { useTaskDraft, type ComposerHandle } from '../hooks/useTaskDraft';
+import type { ExecutionProfile,ContextReference,TaskExecutionSettings,QueuedTaskMessage,RunSummary } from '../../shared/contracts';
 import React, { useEffect, useState } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import { AgentConfig, ChatAttachment, Message, ModelConfig } from '../types';
-import { IconUser, IconBot, IconTool, IconSend, IconCpu, IconChevronDown, IconCheck, IconPlus, IconX } from './Icons';
+import { AgentConfig, ChatAttachment, ModelConfig } from '../types';
+import { IconSkill, IconX } from './Icons';
+import { ArrowUp, Square } from 'lucide-react';
 import { useTranslation } from '../hooks/useTranslation';
-import type { I18nContextValue } from './layout/I18nContext';
+import type { TaskViewState } from './taskViewState';
+import { isRunUnsettled } from '../hooks/runtimeEventUtils';
 import { KAIRO_INVOKE } from '../../shared/ipc';
 
 interface ChatInterfaceProps {
-  messages: Message[];
+  run: RunSummary | null;
+  onCancelRun: () => Promise<boolean | void>;
+  approvalRequest?:ConfirmationRequest|null;
+  onApprove:(scope?:import('../../shared/contracts').ApprovalDecisionScope)=>void;
+  onDeny:()=>void;
+  approvalBusy:boolean;
   input: string;
   setInput: (input: string | ((prev: string) => string)) => void;
   loading: boolean;
-  handleSend: (attachments?: ChatAttachment[]) => void;
-  handleClear: () => void;
-  messagesEndRef: React.RefObject<HTMLDivElement>;
+  handleSend: (attachments?: ChatAttachment[], references?: ContextReference[], draftRevision?: number) => Promise<boolean | void>;
+  composerRef: React.MutableRefObject<ComposerHandle | null>;
+  isQuitPending: boolean;
+  onViewReference: (reference: ContextReference) => void;
   models: ModelConfig[];
   activeAgent: AgentConfig | null;
   activeModelId: string | null;
-  activeAgentName: string;
   focusInputToken: number;
   onModelChange: (modelId: string) => void;
-}
-
-type MessageGroup = {
-  type: 'user' | 'final_answer' | 'process';
-  messages: Message[];
-};
-
-interface ChatMessagesPanelProps {
-  activeAgentName: string;
-  containerRef: React.RefObject<HTMLDivElement>;
-  groupedMessages: MessageGroup[];
-  loading: boolean;
-  markdownComponents: React.ComponentProps<typeof ReactMarkdown>['components'];
-  messages: Message[];
-  messagesEndRef: React.RefObject<HTMLDivElement>;
-  setupSteps: SetupStep[];
-  t: I18nContextValue['t'];
-  toRenderableMarkdown: (content?: string) => string;
-}
-
-type SetupStep = {
-  key: string;
-  label: string;
-  state: 'done' | 'pending';
-};
-
-function formatBytes(value: number) {
-  if (value < 1024) return `${value} B`;
-  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
-  return `${(value / 1024 / 1024).toFixed(1)} MB`;
-}
-
-function AttachmentList({ attachments, onRemove, compact = false }: { attachments?: ChatAttachment[]; onRemove?: (id: string) => void; compact?: boolean }) {
-  if (!attachments || attachments.length === 0) {
-    return null;
-  }
-
-  return (
-    <div className={`attachment-list ${compact ? 'is-compact' : ''}`}>
-      {attachments.map((attachment) => (
-        <div key={attachment.id} className="attachment-chip" title={attachment.name}>
-          {attachment.kind === 'image' && attachment.previewUri ? (
-            <img className="attachment-thumb" src={attachment.previewUri} alt={attachment.name} />
-          ) : (
-            <span className="attachment-file-icon">{attachment.kind === 'text' ? 'TXT' : 'FILE'}</span>
-          )}
-          <span className="attachment-meta">
-            <span className="attachment-name" title={attachment.name}>{attachment.name}</span>
-            <span className="attachment-size">{formatBytes(attachment.size)}</span>
-          </span>
-          {onRemove && (
-            <button type="button" className="attachment-remove" onClick={() => onRemove(attachment.id)} aria-label="Remove attachment">
-              <IconX size={12} />
-            </button>
-          )}
-        </div>
-      ))}
-    </div>
-  );
+  onOpenModelSettings?: () => void;
+  onProfileChange?:(profile:ExecutionProfile)=>void;
+  taskSettings?:TaskExecutionSettings;
+  onTaskChanged:()=>Promise<void>;
+  sessionId: string | null;
+  isRunBlocked: boolean;
+  canQueue?:boolean;
+  viewKey: string;
+  viewCache: Map<string, TaskViewState>;
 }
 
 type PendingAttachmentFile = { path: string; name?: string; mimeType?: string };
 
-const MARKDOWN_REMARK_PLUGINS = [remarkGfm];
-
-interface MessageBodyProps {
-  markdownComponents: React.ComponentProps<typeof ReactMarkdown>['components'];
-  msg: Message;
-  renderPlainAssistant?: boolean;
-  t: I18nContextValue['t'];
-  toRenderableMarkdown: (content?: string) => string;
-}
-
-const MessageBody = React.memo(function MessageBody({
-  markdownComponents,
-  msg,
-  renderPlainAssistant = false,
-  t,
-  toRenderableMarkdown
-}: MessageBodyProps) {
-  const shouldRenderPrewrap = msg.role === 'user' || msg.role === 'tool' || renderPlainAssistant;
-
-  if (shouldRenderPrewrap) {
-    return (
-      <div className="message-prewrap">
-        {msg.content}
-        <AttachmentList attachments={msg.attachments} compact />
-        {msg.details && (
-          <details className="message-details">
-            <summary className="message-summary">{t('chat.details')}</summary>
-            <pre className="message-pre">{JSON.stringify(msg.details, null, 2)}</pre>
-          </details>
-        )}
-      </div>
-    );
-  }
-
-  return (
-    <div className="markdown-body">
-      <ReactMarkdown remarkPlugins={MARKDOWN_REMARK_PLUGINS} components={markdownComponents}>
-        {toRenderableMarkdown(msg.content)}
-      </ReactMarkdown>
-    </div>
-  );
-});
-
-interface MessageRowProps extends MessageBodyProps {
-  className?: string;
-  showAvatar?: boolean;
-}
-
-const MessageRow = React.memo(function MessageRow({
-  className = '',
-  markdownComponents,
-  msg,
-  renderPlainAssistant,
-  showAvatar = true,
-  t,
-  toRenderableMarkdown
-}: MessageRowProps) {
-  return (
-    <div className={`message ${msg.role} ${className}`}>
-      {showAvatar && (
-        <div className="avatar">
-          {msg.role === 'user' ? <IconUser size={18} /> : msg.role === 'tool' ? <IconTool size={18} /> : <IconBot size={18} />}
-        </div>
-      )}
-      <div className={`message-content ${showAvatar ? '' : 'process-message-content'}`}>
-        <MessageBody
-          markdownComponents={markdownComponents}
-          msg={msg}
-          renderPlainAssistant={renderPlainAssistant}
-          t={t}
-          toRenderableMarkdown={toRenderableMarkdown}
-        />
-      </div>
-    </div>
-  );
-});
-
-const ChatMessagesPanel = React.memo(function ChatMessagesPanel({
-  activeAgentName,
-  containerRef,
-  groupedMessages,
-  loading,
-  markdownComponents,
-  messages,
-  messagesEndRef,
-  setupSteps,
-  t,
-  toRenderableMarkdown
-}: ChatMessagesPanelProps) {
-  return (
-    <div ref={containerRef} className="messages-container">
-      {messages.length === 0 && (
-        <div className="chat-empty-state">
-          <span className="chat-empty-kicker">{t('chat.welcome')}</span>
-          <h2 className="chat-empty-title">{activeAgentName}</h2>
-          <p className="chat-empty-description">{t('chat.welcomeDesc')}</p>
-          <div className="chat-setup-checklist" aria-label={t('chat.setupTitle')}>
-            <div className="chat-setup-title">{t('chat.setupTitle')}</div>
-            {setupSteps.map((step) => (
-              <div key={step.key} className={`chat-setup-step ${step.state === 'done' ? 'is-done' : 'is-pending'}`}>
-                <span className="chat-setup-step-dot">
-                  {step.state === 'done' ? <IconCheck size={12} /> : null}
-                </span>
-                <span>{step.label}</span>
-              </div>
-            ))}
-          </div>
-          <div className="chat-empty-notes">
-            <div className="chat-empty-note">
-              <span className="chat-empty-note-label">{t('chat.currentTask')}</span>
-              <strong>{t('chat.placeholder')}</strong>
-            </div>
-            <div className="chat-empty-note">
-              <span className="chat-empty-note-label">{t('chat.availableTools')}</span>
-              <strong>{t('chat.dropFiles')}</strong>
-            </div>
-          </div>
-        </div>
-      )}
-      {groupedMessages.map((group, groupIdx) => {
-        if (group.type === 'process') {
-          return (
-            <div key={`group-${groupIdx}`} className="message process-group">
-              <div className="avatar">
-                <IconBot size={18} />
-              </div>
-              <div className="message-content">
-                <details className="process-steps-details">
-                  <summary className="process-steps-summary">{t('chat.viewProcess', { count: group.messages.length })}</summary>
-                  <div className="process-steps-list">
-                    {group.messages.map((msg, i) => (
-                      <MessageRow
-                        key={`process-${groupIdx}-${i}`}
-                        className={i > 0 ? 'process-message-offset' : ''}
-                        markdownComponents={markdownComponents}
-                        msg={msg}
-                        renderPlainAssistant={msg.role === 'thinking' || msg.role === 'tool'}
-                        showAvatar={false}
-                        t={t}
-                        toRenderableMarkdown={toRenderableMarkdown}
-                      />
-                    ))}
-                  </div>
-                </details>
-              </div>
-            </div>
-          );
-        }
-
-        return group.messages.map((msg, i) => {
-          const isLatestGroup = groupIdx === groupedMessages.length - 1;
-          const isLatestMessage = i === group.messages.length - 1;
-          const renderStreamingText = loading && isLatestGroup && isLatestMessage && msg.role === 'assistant';
-
-          return (
-            <MessageRow
-              key={`msg-${groupIdx}-${i}`}
-              markdownComponents={markdownComponents}
-              msg={msg}
-              renderPlainAssistant={renderStreamingText}
-              t={t}
-              toRenderableMarkdown={toRenderableMarkdown}
-            />
-          );
-        });
-      })}
-      {loading && messages.length > 0 && <div className="messages-loading-spacer" />}
-      <div ref={messagesEndRef} />
-    </div>
-  );
-});
-
 export const ChatInterface = React.memo(function ChatInterface({
-  messages,
+  run,onCancelRun,
+  approvalRequest,onApprove,onDeny,approvalBusy,
   input,
   setInput,
   loading,
   handleSend,
-  messagesEndRef,
   models,
   activeAgent,
   activeModelId,
-  activeAgentName,
   focusInputToken,
-  onModelChange
+  onModelChange,
+  onOpenModelSettings,
+  onProfileChange,
+  taskSettings,
+  onTaskChanged,
+  sessionId,
+  isRunBlocked,
+  canQueue=false,
+  viewKey,
+  viewCache,
+  composerRef,
+  isQuitPending,
+  onViewReference
 }: ChatInterfaceProps) {
   const { t } = useTranslation();
+  const messagesEndRef = React.useRef<HTMLDivElement>(null);
+  const conversation = useConversationFeed(sessionId, run, loading);
+  const hasMessages = Boolean(conversation.data?.rounds.length);
+  const currentRun = run?.sessionId === sessionId ? run : null;
+  const isExecuting = loading || isRunUnsettled(currentRun);
+  const [isStopping, setIsStopping] = useState(false);
+  const stopPending = React.useRef(false);
+  useEffect(() => { stopPending.current = false; setIsStopping(false); }, [currentRun?.id, isExecuting]);
+  const stopRun = async () => {
+    if (stopPending.current || !currentRun || !isRunUnsettled(currentRun)) return;
+    stopPending.current = true;
+    setIsStopping(true);
+    try {
+      if (await onCancelRun() !== true) { stopPending.current = false; setIsStopping(false); }
+    } catch { stopPending.current = false; setIsStopping(false); }
+  };
+  const stopButton = <button type="button" className="send-btn is-stop" data-composer-stop disabled={isStopping || !isRunUnsettled(currentRun)} onClick={() => void stopRun()} title={t(isStopping ? 'progress.stopping' : 'workbench.cancel')} aria-label={t(isStopping ? 'progress.stopping' : 'workbench.cancel')}><Square size={13} fill="currentColor"/></button>;
+  const approvalCard=approvalRequest?<ApprovalCard request={approvalRequest} busy={approvalBusy} onConfirm={onApprove} onDeny={onDeny} stopAction={isExecuting?stopButton:undefined}/>:null;
+  const queued=useAdaptiveResource<QueuedTaskMessage[]>(sessionId||'',()=>sessionId?window.kairo.invoke(KAIRO_INVOKE.taskQueueList,sessionId):Promise.resolve([]),value=>loading||value.some(item=>item.status==='queued'||item.status==='dispatching'));
+  const queueItems=queued.data||[];
+  const shouldQueue=Boolean(sessionId&&canQueue&&(isRunBlocked||queueItems.length));
+  const sendBlocked=isRunBlocked&&!shouldQueue;
+  const refreshQueue=queued.refresh;
+  useEffect(()=>refreshQueue(),[loading,refreshQueue]);
   const [isDragging, setIsDragging] = useState(false);
   const [previewImageSrc, setPreviewImageSrc] = useState<string | null>(null);
   const [previewZoom, setPreviewZoom] = useState(1);
-  const [isModelDropdownOpen, setIsModelDropdownOpen] = useState(false);
-  const [activeModelIndex, setActiveModelIndex] = useState(-1);
-  const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
+  const draft = useTaskDraft(sessionId, input, setInput);
+  const { attachments, setAttachments, references, setReferences, flush: flushDraft, flushForQuit, addReference } = draft;
+  const hasRestoredScroll = React.useRef(false);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [failedAttachmentFiles, setFailedAttachmentFiles] = useState<PendingAttachmentFile[]>([]);
   const [isPreparingAttachments, setIsPreparingAttachments] = useState(false);
-  const [modelDropdownPlacement, setModelDropdownPlacement] = useState<'top' | 'bottom'>('top');
+  const preparingAttachments = React.useRef(0);
+  React.useEffect(() => {
+    composerRef.current = {
+      flush: flushDraft,
+      flushForQuit: async () => {
+        if (preparingAttachments.current > 0) throw new Error('Attachment preparation is still in progress.');
+        await flushForQuit();
+      },
+      addReference
+    };
+    return () => { composerRef.current = null; };
+  }, [composerRef, flushDraft, flushForQuit, addReference]);
   const dragCounter = React.useRef(0);
   const messagesContainerRef = React.useRef<HTMLDivElement>(null);
-  const modelDropdownRef = React.useRef<HTMLDivElement>(null);
-  const modelTriggerRef = React.useRef<HTMLButtonElement>(null);
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
+  const skillCompletion = useSkillCompletion(input, setInput, textareaRef, !draft.ready || draft.isRecovering || isQuitPending || Boolean(approvalRequest));
   const shouldAutoScrollRef = React.useRef(true);
   const autoScrollFrameRef = React.useRef<number | null>(null);
   const autoScrollTimeoutRef = React.useRef<number | null>(null);
   const lastAutoScrollAtRef = React.useRef(0);
   const activeProfile = activeAgent?.permissions.executionProfile;
-  const setupSteps = React.useMemo<SetupStep[]>(() => {
-    const hasModel = models.length > 0 && Boolean(activeModelId);
-    const hasAgent = Boolean(activeAgent);
-    const profileLabel = activeProfile
-      ? t(`config.executionProfile.${activeProfile}` as Parameters<typeof t>[0])
-      : t('chat.setupPermissionPending');
-
-    return [
-      {
-        key: 'model',
-        state: hasModel ? 'done' : 'pending',
-        label: hasModel ? t('chat.setupModelReady') : t('chat.setupModelPending')
-      },
-      {
-        key: 'agent',
-        state: hasAgent ? 'done' : 'pending',
-        label: hasAgent ? t('chat.setupAgentReady', { name: activeAgentName || t('chat.agentName') }) : t('chat.setupAgentPending')
-      },
-      {
-        key: 'permission',
-        state: hasAgent ? 'done' : 'pending',
-        label: hasAgent ? t('chat.setupPermissionReady', { profile: profileLabel }) : t('chat.setupPermissionPending')
-      },
-      {
-        key: 'start',
-        state: hasModel && hasAgent ? 'done' : 'pending',
-        label: t('chat.setupStart')
-      }
-    ];
-  }, [activeAgent, activeAgentName, activeModelId, activeProfile, models.length, t]);
-
   const addAttachmentsFromPaths = React.useCallback(async (files: PendingAttachmentFile[]) => {
     const filteredFiles = files.filter((file) => file.path);
     if (filteredFiles.length === 0) {
       return;
     }
 
+    preparingAttachments.current += 1;
     setIsPreparingAttachments(true);
     setAttachmentError(null);
     try {
-      const activeSession = await window.kairo.invoke(KAIRO_INVOKE.chatGetActiveSession) as { id?: string } | null;
-      const sessionId = activeSession?.id || ((await window.kairo.invoke(KAIRO_INVOKE.chatCreateSession, 'New Chat')) as { id?: string } | null)?.id;
+
       if (!sessionId) {
         throw new Error('Create or select a chat session before attaching files.');
       }
@@ -349,9 +163,10 @@ export const ChatInterface = React.memo(function ChatInterface({
       setFailedAttachmentFiles(filteredFiles);
       setAttachmentError(error instanceof Error ? error.message : 'Failed to prepare attachments.');
     } finally {
-      setIsPreparingAttachments(false);
+      preparingAttachments.current -= 1;
+      setIsPreparingAttachments(preparingAttachments.current > 0);
     }
-  }, []);
+  }, [sessionId, setAttachments]);
 
   const retryFailedAttachments = React.useCallback(async () => {
     await addAttachmentsFromPaths(failedAttachmentFiles);
@@ -368,28 +183,22 @@ export const ChatInterface = React.memo(function ChatInterface({
     }
   }, [addAttachmentsFromPaths]);
 
-  const submitMessage = React.useCallback(() => {
-    const nextAttachments = attachments;
-    if (!input.trim() && nextAttachments.length === 0) {
-      return;
-    }
-    handleSend(nextAttachments);
-    setAttachments([]);
-    setAttachmentError(null);
-  }, [attachments, handleSend, input]);
+  const submitMessage = React.useCallback(async () => {
+    if (sendBlocked || isPreparingAttachments || !draft.ready || draft.isRecovering || Boolean(draft.errorKind)) return;
+    if (!input.trim() && attachments.length === 0 && references.length === 0) return;
+    shouldAutoScrollRef.current = true;
+    await draft.send(async(revision) => {
+      if(shouldQueue&&sessionId&&revision!==undefined){
+        await window.kairo.invoke(KAIRO_INVOKE.taskQueueAdd,{sessionId,draftRevision:revision,data:{input,referenceIds:references.map(item=>item.id),attachmentIds:attachments.map(item=>item.id)}});
+        setInput(value=>value===input?'':value);queued.refresh();return true;
+      }
+      return handleSend(attachments,references,revision);
+    });
+  }, [attachments, references, draft, handleSend, input, sendBlocked, shouldQueue,sessionId,setInput,queued,isPreparingAttachments]);
 
   const removeAttachment = React.useCallback((id: string) => {
-    setAttachments((prev) => {
-      const removed = prev.find((attachment) => attachment.id === id);
-      if (removed) {
-        void window.kairo.invoke(KAIRO_INVOKE.chatDeleteAttachment, {
-          sessionId: removed.sessionId,
-          attachment: removed
-        });
-      }
-      return prev.filter((attachment) => attachment.id !== id);
-    });
-  }, []);
+    setAttachments((prev) => prev.filter((attachment) => attachment.id !== id));
+  }, [setAttachments]);
 
   const modelGroups = React.useMemo(
     () =>
@@ -407,31 +216,9 @@ export const ChatInterface = React.memo(function ChatInterface({
     [models]
   );
 
-  const activeProviderId = activeModelId?.split('/')[0] || '';
-  const activeModelName = activeModelId?.split('/')[1] || '';
-  const activeProvider = React.useMemo(
-    () => modelGroups.find((group) => group.providerId === activeProviderId),
-    [activeProviderId, modelGroups]
-  );
-  const activeModelDisplay = React.useMemo(
-    () => (activeProvider ? `${activeProvider.providerName} (${activeModelName})` : activeModelId || t('chat.selectModel')),
-    [activeModelId, activeModelName, activeProvider, t]
-  );
-  const flatModelOptions = React.useMemo(
-    () =>
-      modelGroups.flatMap((group) =>
-        group.models.map((model) => ({
-          value: `${group.providerId}/${model.id}`,
-          modelId: model.id
-        }))
-      ),
-    [modelGroups]
-  );
-  const modelIndexMap = React.useMemo(
-    () => new Map(flatModelOptions.map((item, index) => [item.value, index])),
-    [flatModelOptions]
-  );
-
+  const modelOptions=React.useMemo(()=>modelGroups.flatMap(group=>group.models.map(model=>({value:`${group.providerId}/${model.id}`,label:model.id,group:group.providerName}))),[modelGroups]);
+  const activeModelName=activeModelId?.slice((activeModelId.indexOf('/')+1))||t('chat.selectModel');
+  const profileLabels:Record<ExecutionProfile,string>={chat_only:t('ui.profile.chat'),read_only_workspace:t('ui.profile.read'),approved_execution:t('ui.profile.confirm'),trusted_automation:t('ui.profile.auto')};
   const isImageResource = React.useCallback((value: string) => {
     const normalized = value.trim().split('?')[0].split('#')[0];
     return /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(normalized);
@@ -509,109 +296,6 @@ export const ChatInterface = React.memo(function ChatInterface({
     [t, toRenderableUri]
   );
 
-  const groupedMessages = React.useMemo(() => {
-    const groups: MessageGroup[] = [];
-    let currentProcess: Message[] = [];
-
-    for (let i = 0; i < messages.length; i++) {
-      const msg = messages[i];
-
-      if (msg.role === 'user') {
-        if (currentProcess.length > 0) {
-          groups.push({ type: 'process', messages: currentProcess });
-          currentProcess = [];
-        }
-        groups.push({ type: 'user', messages: [msg] });
-        continue;
-      }
-
-      let isFinalInTurn = false;
-      if (msg.role === 'assistant') {
-        let hasMoreAfter = false;
-        for (let j = i + 1; j < messages.length; j++) {
-          if (messages[j].role === 'user') {
-            break;
-          }
-          if (messages[j].role === 'assistant' || messages[j].role === 'tool' || messages[j].role === 'thinking') {
-            hasMoreAfter = true;
-            break;
-          }
-        }
-        if (!hasMoreAfter) {
-          isFinalInTurn = true;
-        }
-      }
-
-      if (isFinalInTurn) {
-        if (currentProcess.length > 0) {
-          groups.push({ type: 'process', messages: currentProcess });
-          currentProcess = [];
-        }
-        groups.push({ type: 'final_answer', messages: [msg] });
-      } else {
-        currentProcess.push(msg);
-      }
-    }
-
-    if (currentProcess.length > 0) {
-      groups.push({ type: 'process', messages: currentProcess });
-    }
-
-    return groups;
-  }, [messages]);
-
-  useEffect(() => {
-    if (!isModelDropdownOpen) {
-      return;
-    }
-    const handleClickOutside = (event: MouseEvent) => {
-      if (modelDropdownRef.current && !modelDropdownRef.current.contains(event.target as Node)) {
-        setIsModelDropdownOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-    };
-  }, [isModelDropdownOpen]);
-
-  useEffect(() => {
-    if (!isModelDropdownOpen) {
-      return;
-    }
-    const updatePlacement = () => {
-      const trigger = modelTriggerRef.current;
-      if (!trigger) {
-        return;
-      }
-      const rect = trigger.getBoundingClientRect();
-      const spaceAbove = rect.top;
-      const spaceBelow = window.innerHeight - rect.bottom;
-      const requiredSpace = 320;
-      if (spaceBelow >= requiredSpace || spaceBelow > spaceAbove) {
-        setModelDropdownPlacement('bottom');
-        return;
-      }
-      setModelDropdownPlacement('top');
-    };
-    updatePlacement();
-    window.addEventListener('resize', updatePlacement);
-    window.addEventListener('scroll', updatePlacement, true);
-    return () => {
-      window.removeEventListener('resize', updatePlacement);
-      window.removeEventListener('scroll', updatePlacement, true);
-    };
-  }, [isModelDropdownOpen]);
-
-  useEffect(() => {
-    if (!isModelDropdownOpen) {
-      setActiveModelIndex(-1);
-      return;
-    }
-    const selectedIndex = activeModelId ? flatModelOptions.findIndex((item) => item.value === activeModelId) : -1;
-    setActiveModelIndex(selectedIndex >= 0 ? selectedIndex : flatModelOptions.length > 0 ? 0 : -1);
-  }, [activeModelId, flatModelOptions, isModelDropdownOpen]);
-
   const updateAutoScrollState = React.useCallback(() => {
     const container = messagesContainerRef.current;
     if (!container) {
@@ -631,6 +315,7 @@ export const ChatInterface = React.memo(function ChatInterface({
 
     updateAutoScrollState();
     const handleScroll = () => {
+      viewCache.set(viewKey, { ...viewCache.get(viewKey), scrollTop: container.scrollTop });
       updateAutoScrollState();
     };
 
@@ -638,10 +323,20 @@ export const ChatInterface = React.memo(function ChatInterface({
     return () => {
       container.removeEventListener('scroll', handleScroll);
     };
-  }, [updateAutoScrollState]);
+  }, [updateAutoScrollState, viewCache, viewKey]);
 
   useEffect(() => {
-    if (messages.length > 0 && !shouldAutoScrollRef.current) {
+    if (!hasMessages) return;
+    if (!hasRestoredScroll.current && hasMessages) {
+      hasRestoredScroll.current = true;
+      const savedScroll = viewCache.get(viewKey)?.scrollTop;
+      if (savedScroll !== undefined && messagesContainerRef.current) {
+        messagesContainerRef.current.scrollTop = savedScroll;
+        shouldAutoScrollRef.current = false;
+        return;
+      }
+    }
+    if (hasMessages && !shouldAutoScrollRef.current) {
       return;
     }
 
@@ -668,7 +363,7 @@ export const ChatInterface = React.memo(function ChatInterface({
         autoScrollFrameRef.current = null;
       });
     }, waitMs);
-  }, [loading, messages, messagesEndRef]);
+  }, [loading, conversation.data, hasMessages, viewCache, viewKey]);
 
   useEffect(() => {
     return () => {
@@ -754,185 +449,122 @@ export const ChatInterface = React.memo(function ChatInterface({
   };
 
   const handleDrop = (e: React.DragEvent) => {
+    if (isQuitPending) { e.preventDefault(); return; }
     e.preventDefault();
     dragCounter.current = 0;
     setIsDragging(false);
 
+    // Handle file drops
     const files = Array.from(e.dataTransfer.files);
-    if (files.length === 0) {
+    if (files.length > 0) {
+      void addAttachmentsFromPaths(files
+        .map((file) => ({
+          path: (file as File & { path?: string }).path || '',
+          name: file.name,
+          mimeType: file.type
+        }))
+        .filter((file) => file.path));
       return;
     }
 
-    void addAttachmentsFromPaths(files
-      .map((file) => ({
-        path: (file as File & { path?: string }).path || '',
-        name: file.name,
-        mimeType: file.type
-      }))
-      .filter((file) => file.path));
+    // Handle text drops (e.g., from browser/editor text selection)
+    const text = e.dataTransfer.getData('text/plain');
+    if (text) {
+      setInput((prev) => {
+        const separator = prev ? '\n' : '';
+        return prev + separator + text;
+      });
+      textareaRef.current?.focus();
+    }
   };
 
   return (
-    <div className="chat-interface" onDragEnter={handleDragEnter} onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop}>
+    <div
+      className={`chat-interface ${!hasMessages ? 'is-empty-session' : ''}`}
+      data-session-id={sessionId || ''} data-save-state={draft.status}
+      onDragEnter={handleDragEnter}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
+      <InputRecoveryNotice draft={draft} disabled={isQuitPending}/>
       {isDragging && <div className="drag-overlay">{t('chat.dropFiles')}</div>}
 
-      <div className="chat-header">
-        <div className="chat-header-copy">
-          <span className="chat-header-kicker">{t('chat.currentAgentLabel')}</span>
-          <div className="chat-header-main">
-            <div className="header-title">{activeAgentName}</div>
-            <span className={`chat-header-status ${loading ? 'is-busy' : ''}`}>
-              {loading ? t('chat.thinking') : t('chat.currentRun')}
-            </span>
-          </div>
-        </div>
-      </div>
 
       <ChatMessagesPanel
-        activeAgentName={activeAgentName}
+        skills={skillCompletion.skills}
+        onViewReference={onViewReference}
         containerRef={messagesContainerRef}
-        groupedMessages={groupedMessages}
+        sessionId={sessionId} run={currentRun} feed={conversation}
         loading={loading}
         markdownComponents={markdownComponents}
-        messages={messages}
         messagesEndRef={messagesEndRef}
-        setupSteps={setupSteps}
         t={t}
         toRenderableMarkdown={toRenderableMarkdown}
       />
 
+      {sessionId&&<DelegationPanel sessionId={sessionId} loading={loading}/>}
+      {sessionId&&<TaskPlanPanel sessionId={sessionId} onChanged={onTaskChanged}/>}
+      {sessionId&&<TaskQueuePanel sessionId={sessionId} items={queueItems} contextLabel={`${activeModelId||''} · ${activeProfile?t(`config.executionProfile.${activeProfile}`):''}`} onChanged={queued.refresh}/>}
+      {queued.error&&<p role="alert" className="workbench-error">{queued.error}</p>}
       <div className="input-container">
-        <div className="input-box">
+        {approvalCard}
+        <div className="input-box" style={{display:approvalRequest?'none':undefined}} aria-hidden={Boolean(approvalRequest)}>
+          <SkillCompletionMenu completion={skillCompletion}/>
+          <div className="composer-text-row">
+          {skillCompletion.selected.map((skill, index) => <span className="composer-skill-token" data-selected-skill={skill.id} key={`${skill.id}-${index}`} title={`/${skill.id}`}>
+            <IconSkill size={18}/><span>{skill.name}</span>
+            <button type="button" disabled={!draft.ready || draft.isRecovering || isQuitPending} aria-label={`${t('chat.removeSkill')} ${skill.name}`} onClick={() => skillCompletion.remove(index)}><IconX size={12}/></button>
+          </span>)}
           <textarea
             ref={textareaRef}
+            {...skillCompletion.inputProps}
             className="input-textarea"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
+            value={skillCompletion.text}
+            disabled={!draft.ready || draft.isRecovering || isQuitPending}
+            onChange={(e) => { skillCompletion.setText(e.target.value); skillCompletion.syncCaret(); }}
             onKeyDown={(e) => {
+              if (e.nativeEvent.isComposing || e.keyCode === 229 || skillCompletion.keyDown(e)) return;
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
                 submitMessage();
               }
             }}
             placeholder={t('chat.placeholder')}
-            disabled={loading}
             rows={1}
             onInput={(e) => {
               const target = e.target as HTMLTextAreaElement;
               target.style.height = 'auto';
-              target.style.height = `${Math.min(target.scrollHeight, 200)}px`;
+              target.style.height = `${Math.min(target.scrollHeight, 160)}px`;
             }}
           />
-          <AttachmentList attachments={attachments} onRemove={removeAttachment} />
+          </div>
+          <AttachmentList attachments={attachments} onRemove={removeAttachment} disabled={isQuitPending} />
+          {references.length > 0 && <div className="context-reference-list">
+            {references.map((reference) => <span key={reference.id} className="context-reference-chip">
+              <button type="button" disabled={reference.availability !== 'available'} title={reference.path} onClick={() => onViewReference(reference)}>{reference.kind === 'directory' ? '▤' : '▧'} {reference.name}{reference.availability !== 'available' ? ` (${reference.availability})` : ''}</button>
+              <button type="button" disabled={sendBlocked} aria-label={t('workbench.removeReference')} onClick={() => setReferences((items) => items.filter((item) => item.id !== reference.id))}><IconX size={12}/></button>
+            </span>)}
+          </div>}
           {attachmentError && (
             <div className="attachment-error">
               <span>{attachmentError}</span>
               {failedAttachmentFiles.length > 0 && (
-                <button type="button" className="attachment-retry" onClick={retryFailedAttachments} disabled={isPreparingAttachments}>
+                <button type="button" className="attachment-retry" onClick={retryFailedAttachments} disabled={isPreparingAttachments || isQuitPending}>
                   {t('chat.retryAttachment')}
                 </button>
               )}
             </div>
           )}
           <div className="input-actions">
-            <button
-              type="button"
-              className="attach-btn"
-              onClick={handleAttachClick}
-              disabled={loading || isPreparingAttachments}
-              title={t('chat.attachFiles')}
-              aria-label={t('chat.attachFiles')}
-            >
-              <IconPlus size={16} />
-            </button>
-            <div ref={modelDropdownRef} className="model-switcher">
-              <button
-                ref={modelTriggerRef}
-                type="button"
-                disabled={loading}
-                onClick={() => setIsModelDropdownOpen((prev) => !prev)}
-                onKeyDown={(e) => {
-                  if (e.key === 'ArrowDown') {
-                    e.preventDefault();
-                    if (!isModelDropdownOpen) {
-                      setIsModelDropdownOpen(true);
-                      return;
-                    }
-                    if (flatModelOptions.length > 0) {
-                      setActiveModelIndex((prev) => (prev + 1 + flatModelOptions.length) % flatModelOptions.length);
-                    }
-                    return;
-                  }
-                  if (e.key === 'ArrowUp') {
-                    e.preventDefault();
-                    if (!isModelDropdownOpen) {
-                      setIsModelDropdownOpen(true);
-                      return;
-                    }
-                    if (flatModelOptions.length > 0) {
-                      setActiveModelIndex((prev) => (prev - 1 + flatModelOptions.length) % flatModelOptions.length);
-                    }
-                    return;
-                  }
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    if (!isModelDropdownOpen) {
-                      setIsModelDropdownOpen(true);
-                      return;
-                    }
-                    if (activeModelIndex >= 0 && flatModelOptions[activeModelIndex]) {
-                      onModelChange(flatModelOptions[activeModelIndex].value);
-                      setIsModelDropdownOpen(false);
-                    }
-                    return;
-                  }
-                  if (e.key === 'Escape' && isModelDropdownOpen) {
-                    e.preventDefault();
-                    setIsModelDropdownOpen(false);
-                  }
-                }}
-                className={`model-switcher-trigger ${isModelDropdownOpen ? 'is-open' : ''}`}
-                title={t('chat.selectModelTitle')}
-              >
-                <IconCpu size={14} />
-                <span className="model-switcher-trigger-label">{activeModelDisplay}</span>
-                <IconChevronDown size={14} />
-              </button>
-              {isModelDropdownOpen && (
-                <div className={`model-switcher-menu ${modelDropdownPlacement === 'top' ? 'is-top' : 'is-bottom'}`}>
-                  {modelGroups.map((group) => (
-                    <div key={group.providerId} className="model-switcher-group">
-                      <div className="model-switcher-group-label">{group.providerName}</div>
-                      {group.models.map((model) => {
-                        const value = `${group.providerId}/${model.id}`;
-                        const selected = value === activeModelId;
-                        const itemIndex = modelIndexMap.get(value) ?? -1;
-                        const highlighted = itemIndex === activeModelIndex;
-                        return (
-                          <div
-                            key={value}
-                            onMouseEnter={() => setActiveModelIndex(itemIndex)}
-                            onClick={() => {
-                              onModelChange(value);
-                              setIsModelDropdownOpen(false);
-                            }}
-                            className={`model-switcher-item ${selected ? 'is-selected' : ''} ${highlighted ? 'is-highlighted' : ''}`}
-                          >
-                            <div className="model-switcher-item-check">
-                              {selected && <IconCheck size={14} />}
-                            </div>
-                            <span className="model-switcher-item-label">{model.id}</span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-            <button type="button" className="send-btn" onClick={submitMessage} disabled={loading || (!input.trim() && attachments.length === 0)} title={`${t('chat.send')} · Enter`}>
-              <IconSend size={16} />
-            </button>
+            <TaskWorkflowControls canAttach={Boolean(sessionId&&canQueue&&!isPreparingAttachments&&!isQuitPending)} sessionId={sessionId} settings={taskSettings} disabled={isRunBlocked || isPreparingAttachments || !sessionId} onAttach={()=>void handleAttachClick()} onChanged={onTaskChanged}/>
+            <Select className="workbench-permission" variant="inline" placement="top" aria-label={t('workbench.taskProfile')} icon={activeProfile==='trusted_automation'?<Shield size={15}/>:<Hand size={15}/>} value={activeProfile||'chat_only'} disabled={isRunBlocked} onChange={value=>onProfileChange?.(value as ExecutionProfile)} options={(['chat_only','read_only_workspace','approved_execution','trusted_automation'] as const).map(profile=>({value:profile,label:profileLabels[profile],description:t(`config.executionProfile.${profile}`)}))}/>
+            <span className="composer-action-spacer"/>
+            <Select className="model-switcher" variant="inline" align="end" placement="top" searchable aria-label={t('chat.selectModelTitle')} title={activeModelId||t('chat.selectModel')} displayValue={activeModelName} value={activeModelId||''} disabled={isRunBlocked} onChange={onModelChange} options={modelOptions} footer={onOpenModelSettings&&<button type="button" onClick={onOpenModelSettings}>{t('workbench.manageModels')}</button>}/>
+            {isExecuting && !approvalRequest && shouldQueue && (input.trim() || attachments.length > 0 || references.length > 0) && <button type="button" className="composer-queue-btn" data-queue-send disabled={sendBlocked || isPreparingAttachments || !draft.ready || draft.isRecovering || Boolean(draft.errorKind)} onClick={() => void submitMessage()} title={`${t('batch1.addToQueue')} · Enter`}>{t('batch1.addToQueue')}</button>}
+            {isExecuting && !approvalRequest ? stopButton : <button type="button" className="send-btn" onClick={submitMessage} disabled={sendBlocked || isPreparingAttachments || !draft.ready || draft.isRecovering || Boolean(draft.errorKind) || (!input.trim() && attachments.length === 0 && references.length === 0)} data-queue-send={shouldQueue||undefined} title={`${t(shouldQueue?'batch1.addToQueue':'chat.send')} · Enter`} aria-label={t(shouldQueue?'batch1.addToQueue':'chat.send')}>
+              <ArrowUp size={18} />
+            </button>}
           </div>
         </div>
       </div>

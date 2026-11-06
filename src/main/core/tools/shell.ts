@@ -1,11 +1,8 @@
-import { execFile } from 'child_process';
-import { promisify } from 'util';
+import { spawn } from 'child_process';
 import { z } from 'zod';
 import { ToolDefinition } from '../llm/types';
 import { ShellExecutionPolicy } from '../security/permissions';
 import { toolError, toolOk } from './result';
-
-const execFileAsync = promisify(execFile);
 const EXECUTION_MAX_BUFFER_BYTES = 1024 * 1024;
 const SHELL_CONTROL_PATTERN = /[|&;<>()$`\n\r]/;
 const INTERACTIVE_COMMANDS = new Set(['vim', 'vi', 'nano', 'top', 'less', 'more', 'man']);
@@ -147,12 +144,14 @@ function getShellPolicy(options: ExecuteCommandToolOptions) {
 
 export const createExecuteCommandTool = (options: string | ExecuteCommandToolOptions): ToolDefinition => ({
   name: 'execute_command',
+  metadata: { source: 'builtin' },
   description: `Execute a non-interactive command in the current workspace (${typeof options === 'string' ? options : options.cwd}). Provide the binary in command and each argument separately in args. Do not use shell operators like &&, |, >, <, ; or command substitution.`,
   parameters: z.object({
     command: z.string().describe('The executable or binary name only, for example "npm", "git", "node", or "python3".'),
-    args: z.array(z.string()).default([]).describe('Arguments passed to the executable as a string array, for example ["run", "build"].')
+    args: z.array(z.string()).default([]).describe('Arguments passed to the executable as a string array, for example ["run", "build"].'),
+    verification: z.boolean().optional().describe('Set true only when this command intentionally verifies a task requirement. Records the actual exit status as separate verification evidence.')
   }),
-  execute: async (args: Record<string, unknown>) => {
+  execute: async (args: Record<string, unknown>, signal?: AbortSignal) => {
     try {
       const resolvedOptions = typeof options === 'string' ? { cwd: options } : options;
       const shellPolicy = getShellPolicy(resolvedOptions);
@@ -163,27 +162,109 @@ export const createExecuteCommandTool = (options: string | ExecuteCommandToolOpt
       if (!shellPolicy.allowInteractive && isInteractiveShellCommand(normalized.command, normalized.args)) {
         throw new Error('Interactive shell commands are not allowed.');
       }
-      const { stdout, stderr } = await execFileAsync(normalized.command, normalized.args, {
+
+      let stdout = '';
+      let stderr = '';
+      let totalBuffer = 0;
+
+      const child = spawn(normalized.command, normalized.args, {
         cwd: resolvedOptions.cwd,
-        maxBuffer: shellPolicy.maxBufferBytes,
         windowsHide: true,
-        timeout: shellPolicy.timeoutMs
+        stdio: ['ignore', 'pipe', 'pipe'],
       });
+
+      const output = await new Promise<{ stdout: string; stderr: string; exitCode: number }>((resolve, reject) => {
+        const onAbort = () => {
+          child.kill('SIGTERM');
+          // Force kill after 3s if still alive
+          setTimeout(() => {
+            if (child.exitCode === null) {
+              child.kill('SIGKILL');
+            }
+          }, 3000);
+        };
+
+        if (signal) {
+          if (signal.aborted) {
+            onAbort();
+            return;
+          }
+          signal.addEventListener('abort', onAbort, { once: true });
+        }
+
+        // Timeout
+        const timeoutId = setTimeout(() => {
+          child.kill('SIGTERM');
+        }, shellPolicy.timeoutMs);
+
+        child.stdout?.on('data', (chunk: Buffer) => {
+          totalBuffer += chunk.length;
+          if (totalBuffer > shellPolicy.maxBufferBytes) {
+            child.kill('SIGTERM');
+            reject(new Error(`Command output exceeded max buffer size of ${shellPolicy.maxBufferBytes} bytes.`));
+            return;
+          }
+          stdout += chunk.toString();
+        });
+
+        child.stderr?.on('data', (chunk: Buffer) => {
+          totalBuffer += chunk.length;
+          if (totalBuffer > shellPolicy.maxBufferBytes) {
+            child.kill('SIGTERM');
+            reject(new Error(`Command output exceeded max buffer size of ${shellPolicy.maxBufferBytes} bytes.`));
+            return;
+          }
+          stderr += chunk.toString();
+        });
+
+        child.on('error', (err) => {
+          clearTimeout(timeoutId);
+          if (signal) signal.removeEventListener('abort', onAbort);
+          reject(err);
+        });
+
+        child.on('close', (exitCode) => {
+          clearTimeout(timeoutId);
+          if (signal) signal.removeEventListener('abort', onAbort);
+          resolve({
+            stdout: stdout.trim(),
+            stderr: stderr.trim(),
+            exitCode: exitCode ?? 1,
+          });
+        });
+      });
+
+      if (signal?.aborted) {
+        return toolError('Command cancelled by user.', {
+          stdout: output.stdout,
+          stderr: output.stderr,
+          exitCode: output.exitCode,
+        });
+      }
+
+      if (output.exitCode !== 0) {
+        return toolError(`Command exited with code ${output.exitCode}`, {
+          stdout: output.stdout,
+          stderr: output.stderr || `Exit code: ${output.exitCode}`,
+          exitCode: output.exitCode,
+        });
+      }
+
       return toolOk({
-        stdout: stdout.trim(),
-        stderr: stderr.trim(),
-        exitCode: 0
+        stdout: output.stdout,
+        stderr: output.stderr,
+        exitCode: 0,
       });
     } catch (error) {
-      const err = error as { stdout?: string | Buffer; stderr?: string | Buffer; code?: number; message: string };
-      return toolError(err.message, {
-        stdout: String(err.stdout || '').trim(),
-        stderr: String(err.stderr || '').trim() || err.message,
-        exitCode: err.code || 1
+      const err = error as { message: string };
+      if (signal?.aborted) {
+        return toolError('Command cancelled by user.');
+      }
+      return toolError(err.message || 'Unknown shell error', {
+        stdout: '',
+        stderr: err.message,
+        exitCode: 1,
       });
     }
   },
 });
-
-// Deprecated: Kept for backward compatibility if needed, but defaults to process.cwd()
-export const ExecuteCommandTool = createExecuteCommandTool(process.cwd());

@@ -1,0 +1,15 @@
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import {spawn} from 'node:child_process';
+import {createRequire} from 'node:module';
+import {build} from 'esbuild';
+const require=createRequire(import.meta.url),output=await fs.mkdtemp(path.join(os.tmpdir(),'kairo-ui-polish-'));
+await build({entryPoints:['scripts/ui-polish-native.ts'],outfile:path.join(output,'entry.cjs'),bundle:true,platform:'node',format:'cjs',external:['electron']});
+await build({entryPoints:['scripts/ui-polish-renderer-fixture.tsx'],outfile:path.join(output,'renderer.js'),bundle:true,platform:'browser',format:'iife',define:{'import.meta.env.DEV':'false','process.env.NODE_ENV':'"development"'},loader:{'.png':'dataurl','.svg':'dataurl'}});
+await fs.writeFile(path.join(output,'index.html'),'<!doctype html><html><head><meta charset="UTF-8"><link rel="stylesheet" href="renderer.css"></head><body><div id="root"></div><script src="renderer.js"></script></body></html>');
+console.log(`UI polish evidence: ${output}`);
+const child=spawn(require('electron'),[path.join(output,'entry.cjs')],{env:{...process.env,KAIROPILOT_UI_POLISH_OUTPUT:output},stdio:['ignore','pipe','pipe']});child.stdout.resume();child.stderr.resume();
+const timeout=setTimeout(()=>child.kill('SIGKILL'),60000),code=await new Promise(resolve=>child.on('exit',resolve));clearTimeout(timeout);
+const report=JSON.parse(await fs.readFile(path.join(output,'report.json'),'utf8').catch(()=>'{"success":false,"error":"Electron exited without report"}'));
+console.log(JSON.stringify({code,...report}));if(code!==0||!report.success)process.exitCode=1;

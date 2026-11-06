@@ -27,6 +27,7 @@ export function saveAppearanceConfig(appearance: AppearanceConfig) {
   const config = readKairoPilotConfig();
   const nextTheme = appearance?.theme;
   config.appearance = {
+    ...(appearance?.clipboardSuggestions === true ? {clipboardSuggestions: true} : {}),
     theme: nextTheme === 'system' || nextTheme === 'light' || nextTheme === 'dark' || nextTheme === 'slate' || nextTheme === 'warm'
       ? nextTheme
       : DEFAULT_CONFIG.appearance.theme

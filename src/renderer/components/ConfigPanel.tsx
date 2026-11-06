@@ -1,26 +1,21 @@
 import { memo, useState, useEffect, useCallback } from 'react';
-import { ModelConfig, AgentConfig, FetchModelsResult, ProviderCapabilitySnapshot, AppNotice } from '../types';
+import { ModelConfig, WorkbenchConfig,WorkbenchSettingsInput, FetchModelsResult, ProviderCapabilitySnapshot, AppNotice } from '../types';
 import { useTranslation } from '../hooks/useTranslation';
 import { ModelList } from './config/ModelList';
-import { AgentList } from './config/AgentList';
+import { WorkbenchSettings } from './config/WorkbenchSettings';
 import { ModelEditor } from './config/ModelEditor';
-import { AgentEditor } from './config/AgentEditor';
 import { GeneralSettings } from './config/GeneralSettings';
-import { IconBot, IconCpu, IconPlus, IconSettings } from './Icons';
-import { KAIRO_INVOKE } from '../../shared/ipc';
+import { IconCpu, IconPlus, IconSettings } from './Icons';
 import { createErrorNotice } from '../hooks/errorUtils';
 
 interface ConfigPanelProps {
   models: ModelConfig[];
-  agents: AgentConfig[];
-  activeAgentId: string | null;
+  workbench?: WorkbenchConfig;
+  onSaveWorkbench:(value:WorkbenchSettingsInput)=>Promise<void>;
   onClearNotice: () => void;
   onReportNotice: (notice: AppNotice) => void;
   onSaveModel: (model: ModelConfig) => void;
   onDeleteModel: (id: string) => void;
-  onSaveAgent: (agent: AgentConfig) => void;
-  onDeleteAgent: (id: string) => void;
-  onSetActiveAgent: (id: string) => void;
   onDescribeProvider: (config: ModelConfig) => Promise<ProviderCapabilitySnapshot | null>;
   onFetchModels: (config: ModelConfig) => Promise<FetchModelsResult>;
   availableModels: string[];
@@ -38,15 +33,13 @@ const EmptyModelConfig: ModelConfig = {
 };
 
 export const ConfigPanel = memo(function ConfigPanel({ 
-  models, agents, activeAgentId, 
+  models, workbench,onSaveWorkbench,
   onClearNotice, onReportNotice,
   onSaveModel, onDeleteModel, 
-  onSaveAgent, onDeleteAgent, onSetActiveAgent,
   onDescribeProvider, onFetchModels, availableModels, activeSection 
 }: ConfigPanelProps) {
-  const [view, setView] = useState<'list' | 'edit-model' | 'edit-agent'>('list');
+  const [view, setView] = useState<'list' | 'edit-model'>('list');
   const [editingModel, setEditingModel] = useState<ModelConfig | null>(null);
-  const [editingAgent, setEditingAgent] = useState<AgentConfig | null>(null);
   const [isEditingExistingModel, setIsEditingExistingModel] = useState(false);
 
   const { t } = useTranslation();
@@ -55,7 +48,6 @@ export const ConfigPanel = memo(function ConfigPanel({
   useEffect(() => {
     setView('list');
     setEditingModel(null);
-    setEditingAgent(null);
   }, [activeSection]);
 
   const handleEditModel = useCallback((model: ModelConfig) => {
@@ -103,45 +95,12 @@ export const ConfigPanel = memo(function ConfigPanel({
     }
   }, [editingModel, isEditingExistingModel, onClearNotice, onReportNotice, onSaveModel, t]);
 
-  const handleEditAgent = useCallback((agent: AgentConfig) => {
-    setEditingAgent({ ...agent });
-    setView('edit-agent');
-  }, []);
-
-  const handleCreateAgent = useCallback(async () => {
-    const nextModel = models.length > 0
-      ? `${models[0].id}/${models[0].availableModels?.[0]?.id || models[0].model}`
-      : '';
-    const draft = await window.kairo.invoke(KAIRO_INVOKE.configCreateAgentDraft, {
-      model: nextModel,
-      name: 'New Agent'
-    });
-    setEditingAgent(draft);
-    setView('edit-agent');
-  }, [models]);
-
-  const handleSaveAgent = useCallback(() => {
-    if (editingAgent) {
-      onSaveAgent(editingAgent);
-      setView('list');
-      setEditingAgent(null);
-    }
-  }, [editingAgent, onSaveAgent]);
-
   const headerMeta = (() => {
     if (view === 'edit-model') {
       return {
         Icon: IconCpu,
         title: editingModel?.id ? t('config.editModel') : t('config.newModel'),
         description: t('settings.modelEditorDescription')
-      };
-    }
-
-    if (view === 'edit-agent') {
-      return {
-        Icon: IconBot,
-        title: editingAgent?.id ? t('config.editAgent') : t('config.newAgent'),
-        description: t('settings.agentEditorDescription')
       };
     }
 
@@ -153,13 +112,7 @@ export const ConfigPanel = memo(function ConfigPanel({
       };
     }
 
-    if (activeSection === 'agent') {
-      return {
-        Icon: IconBot,
-        title: t('config.agents'),
-        description: t('settings.agentOverviewDescription')
-      };
-    }
+    if(activeSection==='execution' || activeSection==='rules')return {Icon:IconSettings,title:t(activeSection==='execution'?'workbench.executionSettings':'workbench.rulesSettings'),description:t('workbench.settingsDescription')};
 
     return {
       Icon: IconSettings,
@@ -167,19 +120,13 @@ export const ConfigPanel = memo(function ConfigPanel({
       description: t('settings.generalOverviewDescription')
     };
   })();
-  const HeaderIcon = headerMeta.Icon;
   const headerAction = view === 'list'
     ? activeSection === 'model'
       ? {
           label: t('config.addModel'),
           onClick: handleCreateModel
         }
-      : activeSection === 'agent'
-        ? {
-            label: t('config.addAgent'),
-            onClick: () => { void handleCreateAgent(); }
-          }
-        : null
+      : null
     : null;
 
   return (
@@ -190,9 +137,6 @@ export const ConfigPanel = memo(function ConfigPanel({
             <div className="config-page-title-block">
               <div className="config-page-title-row">
                 <div className="config-page-title-main">
-                  <div className="config-page-icon">
-                    <HeaderIcon size={20} />
-                  </div>
                   <div>
                     <div className="config-title">{headerMeta.title}</div>
                   </div>
@@ -215,17 +159,7 @@ export const ConfigPanel = memo(function ConfigPanel({
                 onDeleteModel={onDeleteModel}
               />
             )}
-            {(activeSection === 'agent' || !activeSection) && (
-              <AgentList 
-                agents={agents}
-                models={models}
-                activeAgentId={activeAgentId}
-                onCreateAgent={handleCreateAgent}
-                onEditAgent={handleEditAgent}
-                onDeleteAgent={onDeleteAgent}
-                onSetActiveAgent={onSetActiveAgent}
-              />
-            )}
+            {workbench && (activeSection==='execution' || activeSection==='rules') && <WorkbenchSettings config={workbench} models={models} section={activeSection} onSave={onSaveWorkbench}/>}
             {activeSection === 'general' && <GeneralSettings />}
           </div>
         </>
@@ -249,19 +183,7 @@ export const ConfigPanel = memo(function ConfigPanel({
         />
       )}
       
-      {view === 'edit-agent' && editingAgent && (
-        <AgentEditor 
-          editingAgent={editingAgent}
-          setEditingAgent={setEditingAgent}
-          models={models}
-          agents={agents}
-          onSave={handleSaveAgent}
-          onCancel={() => {
-            setView('list');
-            setEditingAgent(null);
-          }}
-        />
-      )}
+
     </div>
   );
 });

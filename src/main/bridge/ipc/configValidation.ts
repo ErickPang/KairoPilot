@@ -15,9 +15,12 @@ const ProviderTypeSchema = z.enum([
 const NonEmptyStringSchema = z.string().trim().min(1);
 const StringListSchema = z.array(z.string().trim().min(1)).max(200).default([]);
 
+const ContextWindowSchema=z.number().int().min(4096).max(2000000).optional();
+
 const ModelOptionSchema = z.object({
   id: NonEmptyStringSchema,
-  name: NonEmptyStringSchema
+  name: NonEmptyStringSchema,
+  contextWindowTokens:ContextWindowSchema
 });
 
 export const ModelConfigInputSchema = z.object({
@@ -28,7 +31,8 @@ export const ModelConfigInputSchema = z.object({
   apiKey: z.string(),
   apiKeyStored: z.boolean().optional(),
   model: NonEmptyStringSchema,
-  availableModels: z.array(ModelOptionSchema).max(500).optional()
+  availableModels: z.array(ModelOptionSchema).max(500).optional(),
+  contextWindowTokens:ContextWindowSchema
 });
 
 export const LlmProviderInputSchema = ModelConfigInputSchema.pick({
@@ -59,7 +63,7 @@ const PolicySchema = z.object({
   redactSensitiveOutput: z.boolean()
 });
 
-const AgentPermissionSchema = z.object({
+export const AgentPermissionInputSchema = z.object({
   executionProfile: z.enum(['chat_only', 'read_only_workspace', 'approved_execution', 'trusted_automation']),
   policy: PolicySchema,
   fileSystem: z.object({
@@ -77,63 +81,15 @@ const AgentPermissionSchema = z.object({
   })
 });
 
-export const AgentConfigInputSchema = z.object({
-  id: NonEmptyStringSchema.max(120),
-  name: NonEmptyStringSchema.max(120),
-  workspace: z.string().trim(),
-  workspaceName: z.string().trim().max(120).optional(),
-  systemPrompt: z.string().max(100_000),
-  identityPrompt: z.string().max(100_000),
-  userPrompt: z.string().max(100_000),
-  soulPrompt: z.string().max(100_000),
-  model: z.string().trim(),
-  permissions: AgentPermissionSchema
-});
-
-export const IdInputSchema = NonEmptyStringSchema.max(160);
-
-export const DeleteAgentInputSchema = z.object({
-  id: IdInputSchema,
-  deleteWorkspace: z.boolean(),
-  confirmation: z.string().trim().max(260).optional()
-}).strict().refine((value) => (
-  !value.deleteWorkspace || value.confirmation === `delete-agent:${value.id}:workspace`
-), {
-  message: 'Workspace deletion requires explicit confirmation.',
-  path: ['confirmation']
-});
-
-export const AgentDraftSeedSchema = AgentConfigInputSchema.partial();
-
-export const AgentInitInputSchema = z.union([
-  IdInputSchema,
-  AgentConfigInputSchema,
-  z.object({
-    agent: AgentConfigInputSchema,
-    model: ModelConfigInputSchema
-  }).strict()
-]);
-
-export const LegacyAgentConfigInputSchema = z.object({
-  provider: ProviderTypeSchema.default('openai'),
-  apiKey: z.string().default(''),
-  apiKeyStored: z.boolean().optional(),
-  baseUrl: z.string().trim().default(''),
-  model: z.string().trim().default(''),
-  workspace: z.string().trim().default(''),
-  systemPrompt: z.string().default(''),
-  enableShell: z.boolean().default(false),
-  enableNetwork: z.boolean().default(false),
-  enableFileSystemRead: z.boolean().default(false),
-  enableFileSystemWrite: z.boolean().default(false),
-  allowedPaths: StringListSchema,
-  allowedDomains: StringListSchema,
-  allowedCommands: StringListSchema,
-  permissions: AgentPermissionSchema.optional()
-});
+export const WorkbenchSettingsInputSchema = z.object({
+  defaultModel:z.string().max(500),
+  permissions:AgentPermissionInputSchema,
+  instructions:z.string().max(32768)
+}).strict();
 
 export const AppearanceConfigInputSchema = z.object({
-  theme: z.enum(['system', 'light', 'dark', 'slate', 'warm'])
+  theme: z.enum(['system', 'light', 'dark', 'slate', 'warm']),
+  clipboardSuggestions: z.boolean().optional()
 });
 
 const WebSearchToggleSchema = z.object({

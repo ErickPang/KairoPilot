@@ -2,6 +2,8 @@ import { z } from 'zod';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
+import { approvalFingerprint, sessionApprovalOperation } from './sessionApproval';
+import type { SessionApprovalPolicy } from './sessionApproval';
 import {
   ApprovalMode,
   createDefaultPolicyConfig,
@@ -82,6 +84,39 @@ export type PermissionConfig = z.infer<typeof PermissionSchema>;
 
 export class PermissionGuard {
   private config: PermissionConfig;
+  private sessionApprovalPolicy?: SessionApprovalPolicy;
+
+  bindSessionApprovals(policy: SessionApprovalPolicy) { this.sessionApprovalPolicy = policy; }
+
+  getApprovalContextKey() { return approvalFingerprint(this.config); }
+
+  private getSessionApprovalOperation(tool: string, args: Record<string, unknown>) {
+    if (!this.sessionApprovalPolicy || this.getToolRiskLevel(tool, args) === 'critical') return undefined;
+    return sessionApprovalOperation(tool, args, {
+      workspaceRoot: this.getDefaultWorkspacePath(),
+      directoryForPath: (target, mode) => {
+        if (!path.isAbsolute(target) || !this.checkFileSystem(target, mode)) return undefined;
+        if (mode === 'write' && !this.checkFileSystem(target, 'read')) return undefined;
+        const root = [...this.config.fileSystem.allowedPaths]
+          .sort((a, b) => b.length - a.length).find(base => this.isPathSafe(base, target));
+        return root && this.resolvePathForContainment(root);
+      }
+    });
+  }
+
+  getSessionApprovalScope(tool: string, args: Record<string, unknown>) {
+    return this.getSessionApprovalOperation(tool, args)?.scope;
+  }
+
+  rememberSessionApproval(tool: string, args: Record<string, unknown>, approvalId: string) {
+    const operation = this.getSessionApprovalOperation(tool, args);
+    if (!operation || !this.sessionApprovalPolicy) throw new Error('This operation does not support conversation permission.');
+    this.sessionApprovalPolicy.remember(operation.key, approvalId);
+  }
+
+  getDefaultWorkspacePath(): string | undefined {
+    return this.config.fileSystem.allowedPaths[0];
+  }
 
   constructor(config: PermissionConfigInput | PermissionConfig) {
     this.config = PermissionSchema.parse({
@@ -194,7 +229,7 @@ export class PermissionGuard {
       return 'high';
     }
 
-    if (toolName === 'write_file') {
+    if (toolName === 'write_file' || toolName === 'edit_file') {
       const targetPath = String(args.path || args.file_path || '').toLowerCase();
       if (targetPath.includes('.env') || targetPath.includes('/.ssh/') || targetPath.endsWith('/.ssh')) {
         return 'critical';
@@ -219,11 +254,14 @@ export class PermissionGuard {
       return false;
     }
 
+    const operation = this.getSessionApprovalOperation(toolName, args);
+    if (operation && this.sessionApprovalPolicy?.allows(operation.key)) return false;
+
     if (approvalMode === 'always') {
       return true;
     }
 
-    const isWriteTool = toolName === 'write_file' || toolName === 'delete_file';
+    const isWriteTool = toolName === 'write_file' || toolName === 'edit_file' || toolName === 'delete_file';
     const isExternalTool = toolName === 'web_search'
       || toolName === 'fetch_webpage'
       || toolName === 'http_request'

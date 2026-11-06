@@ -2,7 +2,6 @@ import path from 'path';
 
 export interface PromptWorkspaceLayout {
   workspaceRoot: string;
-  promptsDir: string;
   memoryDir: string;
   skillsDir: string;
   tasksDir: string;
@@ -15,7 +14,6 @@ export interface PromptWorkspaceLayout {
 export function getPromptWorkspaceLayout(workspace: string): PromptWorkspaceLayout {
   return {
     workspaceRoot: workspace,
-    promptsDir: path.join(workspace, 'prompts'),
     memoryDir: path.join(workspace, 'memory'),
     skillsDir: path.join(workspace, 'skills'),
     tasksDir: path.join(workspace, 'tasks'),

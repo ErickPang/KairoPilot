@@ -2,7 +2,8 @@
 {
   "$schema": "https://raw.githubusercontent.com/electron-userland/electron-builder/master/packages/app-builder-lib/scheme.json",
   "appId": "com.kairopilot.app",
-  "buildDependenciesFromSource": true,
+  "publish": null,
+  "npmRebuild": false,
   "asar": true,
   "productName": "KairoPilot",
   "icon": "public/icon.png",
@@ -11,7 +12,9 @@
   },
   "files": [
     "dist",
-    "dist-electron"
+    "dist-electron",
+    "LICENSE",
+    "docs/releases.md"
   ],
   "extraResources": [
     {
@@ -24,7 +27,7 @@
     "target": [
       "dmg"
     ],
-    "artifactName": "${productName}-${version}.${ext}"
+    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}"
   },
   "win": {
     "icon": "public/icon.png",
@@ -36,7 +39,7 @@
         ]
       }
     ],
-    "artifactName": "${productName}-${version}.${ext}"
+    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}"
   },
   "nsis": {
     "oneClick": false,
@@ -49,6 +52,6 @@
     "target": [
       "AppImage"
     ],
-    "artifactName": "${productName}-${version}.${ext}"
+    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}"
   }
 }

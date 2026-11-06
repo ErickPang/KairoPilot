@@ -2,17 +2,21 @@ import { describe, expect, it } from 'vitest';
 import { parseIpcInput } from './configValidation';
 import {
   AuditLogQueryInputSchema,
+  ApprovalResponseInputSchema,
   MonitoringTokenQueryInputSchema,
   OllamaPullInputSchema,
   PrepareAttachmentsInputSchema,
   RetryStepInputSchema,
   RunIdInputSchema,
-  RunQueryInputSchema,
-  RunTraceInputSchema,
   SelectFileInputSchema
 } from './chatSystemValidation';
 
 describe('chatSystemValidation', () => {
+  it('accepts only explicit session approval and rejects forged scope or denied grants', () => {
+    expect(ApprovalResponseInputSchema.parse({id:'a',approved:true})).toEqual({id:'a',approved:true,scope:'once'});
+    expect(ApprovalResponseInputSchema.parse({id:'a',approved:true,scope:'session'}).scope).toBe('session');
+    for (const value of [{id:'a',approved:false,scope:'session'},{id:'a',approved:true,scope:'global'},{id:'a',approved:true,sessionId:'other'}]) expect(()=>ApprovalResponseInputSchema.parse(value)).toThrow();
+  });
   it('rejects empty run control ids', () => {
     expect(() => parseIpcInput(RunIdInputSchema, { runId: '' }, 'run pause request')).toThrow('Invalid run pause request');
     expect(() => parseIpcInput(RetryStepInputSchema, { runId: 'run-1', stepId: '' }, 'run retry request')).toThrow('Invalid run retry request');
@@ -25,47 +29,6 @@ describe('chatSystemValidation', () => {
     }, 'attachment prepare request')).toThrow('Invalid attachment prepare request');
   });
 
-  it('rejects invalid run query filters', () => {
-    expect(() => parseIpcInput(RunQueryInputSchema, {
-      status: 'done'
-    }, 'run query')).toThrow('Invalid run query');
-  });
-
-  it('normalizes run query pagination without failing the whole request', () => {
-    expect(parseIpcInput(RunQueryInputSchema, {
-      page: '2',
-      pageSize: 500
-    }, 'run query')).toEqual({
-      page: 2,
-      pageSize: 100
-    });
-
-    expect(parseIpcInput(RunQueryInputSchema, {
-      page: 0,
-      pageSize: Number.NaN
-    }, 'run query')).toEqual({});
-  });
-
-  it('normalizes legacy run trace string input', () => {
-    expect(parseIpcInput(RunTraceInputSchema, 'run-1', 'run trace query')).toEqual({
-      runId: 'run-1'
-    });
-  });
-
-  it('normalizes run trace pagination to the backend trace limits', () => {
-    expect(parseIpcInput(RunTraceInputSchema, {
-      runId: 'run-1',
-      page: '3',
-      pageSize: 100,
-      includeToolCalls: true
-    }, 'run trace query')).toEqual({
-      runId: 'run-1',
-      page: 3,
-      pageSize: 50,
-      includeToolCalls: true
-    });
-  });
-
   it('rejects token detail queries with unknown fields', () => {
     expect(() => parseIpcInput(MonitoringTokenQueryInputSchema, {
       role: 'assistant',
@@ -73,11 +36,8 @@ describe('chatSystemValidation', () => {
     }, 'token usage query')).toThrow('Invalid token usage query');
   });
 
-  it('normalizes legacy audit query limits and rejects unsafe filters', () => {
-    expect(parseIpcInput(AuditLogQueryInputSchema, 50, 'audit log query')).toEqual({
-      page: 1,
-      pageSize: 50
-    });
+  it('normalizes structured audit query limits and rejects unsafe filters', () => {
+    expect(()=>parseIpcInput(AuditLogQueryInputSchema,50,'audit log query')).toThrow('Invalid audit log query');
 
     expect(parseIpcInput(AuditLogQueryInputSchema, {
       page: '2',

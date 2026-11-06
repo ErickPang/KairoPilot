@@ -1,3 +1,6 @@
+import {getUsageOverview} from '../../services/usageOverviewService';
+import {z} from 'zod';
+import { registerTaskOrganizationHandlers } from './taskOrganizationHandlers';
 import { ipcMain } from 'electron';
 import {
   clearActiveAgentSessions,
@@ -9,16 +12,12 @@ import {
   updateActiveAgentSessionTitle
 } from '../../services/chatService';
 import {
-  getLatestContextSummaryForActiveAgentSession,
   getLatestRunForActiveAgentSession,
-  getPendingApprovalForActiveAgentSession,
-  getRunStepsForActiveAgentSession,
-  getRunTraceForActiveAgent,
-  queryRunsForActiveAgent
+  getPendingApprovalForActiveAgentSession
 } from '../../services/chatRunService';
 import {
   deleteAttachmentForActiveSession,
-  getSessionWithLegacyAttachmentMigration,
+  getTaskSession,
   prepareAttachmentsForActiveAgent,
   recordPrepareAttachmentsFailure
 } from '../../services/chatAttachmentService';
@@ -29,25 +28,27 @@ import {
 import { KAIRO_INVOKE } from '../../../shared/ipc';
 import { parseIpcInput } from './configValidation';
 import {
-  CreateSessionTitleInputSchema,
+  CreateSessionInputSchema,
   DeleteAttachmentInputSchema,
   MonitoringTokenQueryInputSchema,
   PrepareAttachmentsInputSchema,
-  RunQueryInputSchema,
-  RunTraceInputSchema,
   SessionIdInputSchema,
   UpdateSessionTitleInputSchema
 } from './chatSystemValidation';
 import { ipcFailure, ipcSuccess } from './ipcResult';
 
 function registerChatHandlers() {
+  registerTaskOrganizationHandlers();
+  ipcMain.handle(KAIRO_INVOKE.usageOverview,(_,value)=>{const input=z.object({projectId:z.string().trim().min(1).max(200).optional()}).strict().parse(value||{});return getUsageOverview(input.projectId);});
   ipcMain.handle(KAIRO_INVOKE.chatListSessions, async () => {
     return listActiveAgentSessions();
   });
 
   ipcMain.handle(KAIRO_INVOKE.chatCreateSession, async (_, title) => {
-    const sessionTitle = parseIpcInput(CreateSessionTitleInputSchema, title, 'session title') || 'New Chat';
-    return createActiveAgentSession(sessionTitle);
+    const payload = parseIpcInput(CreateSessionInputSchema, title, 'session creation');
+    return typeof payload === 'object'
+      ? createActiveAgentSession(payload.title || 'New Chat', payload.projectId)
+      : createActiveAgentSession(payload || 'New Chat');
   });
 
   ipcMain.handle(KAIRO_INVOKE.chatGetActiveSession, async () => {
@@ -59,7 +60,7 @@ function registerChatHandlers() {
     if (!payload.success) {
       return null;
     }
-    return getSessionWithLegacyAttachmentMigration(payload.data);
+    return getTaskSession(payload.data);
   });
 
   ipcMain.handle(KAIRO_INVOKE.chatGetLatestRun, async (_, sessionId) => {
@@ -70,38 +71,12 @@ function registerChatHandlers() {
     return getLatestRunForActiveAgentSession(payload.data);
   });
 
-  ipcMain.handle(KAIRO_INVOKE.chatGetLatestContextSummary, async (_, sessionId) => {
-    const payload = SessionIdInputSchema.safeParse(sessionId);
-    if (!payload.success) {
-      return null;
-    }
-    return getLatestContextSummaryForActiveAgentSession(payload.data);
-  });
-
-  ipcMain.handle(KAIRO_INVOKE.chatGetSessionRuns, async (_, sessionId) => {
-    const payload = SessionIdInputSchema.safeParse(sessionId);
-    if (!payload.success) {
-      return [];
-    }
-    return getRunStepsForActiveAgentSession(payload.data);
-  });
-
   ipcMain.handle(KAIRO_INVOKE.chatGetPendingApproval, async (_, sessionId) => {
     const payload = SessionIdInputSchema.safeParse(sessionId);
     if (payload.success) {
       return getPendingApprovalForActiveAgentSession(payload.data);
     }
     return getPendingApprovalForActiveAgentSession();
-  });
-
-  ipcMain.handle(KAIRO_INVOKE.chatQueryRuns, async (_, input) => {
-    const query = parseIpcInput(RunQueryInputSchema, input, 'run query');
-    return queryRunsForActiveAgent(query);
-  });
-
-  ipcMain.handle(KAIRO_INVOKE.chatGetRunTrace, async (_, input) => {
-    const query = parseIpcInput(RunTraceInputSchema, input, 'run trace query');
-    return getRunTraceForActiveAgent(query);
   });
 
   ipcMain.handle(KAIRO_INVOKE.chatSetActiveSession, async (_, sessionId) => {

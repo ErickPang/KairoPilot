@@ -1,10 +1,11 @@
 import { app } from 'electron'
-import { realpathSync, watch, type FSWatcher } from 'fs'
+import { getKairoPilotDataRoot } from '../../services/dataRoot'
+import { existsSync, readFileSync, realpathSync, watch, type FSWatcher } from 'fs'
 import fs from 'fs/promises'
 import path from 'path'
-import { randomUUID } from 'crypto'
+import { createHash, randomUUID } from 'crypto'
 import { createLLMProvider } from '../llm/provider'
-import { getAgent, getAgents, getModelForAgent, readKairoPilotConfig, saveKairoPilotConfig } from '../../store/config'
+import { getModelForBinding, readKairoPilotConfig, saveKairoPilotConfig } from '../../store/config'
 import {
   DEFAULT_SKILL_MARKETPLACE_PRESETS,
   SKILL_IMPORT_ERROR,
@@ -15,6 +16,7 @@ import {
   SkillInstallReviewArgs,
   SkillMarketplaceQuery,
   SkillUninstallArgs,
+  SkillRollbackArgs,
   SkillSummary,
   SkillRecord,
   SkillReviewFinding,
@@ -63,7 +65,17 @@ interface PreparedSkillInstall {
   tempSkillDir: string
   targetSkillDir: string
   review: SkillInstallReview
+  existingSkill?: SkillRecord
 }
+
+interface SkillRollbackMetadata {
+  version?: string
+  contentHash?: string
+  backupDir: string
+  backedUpAt: number
+}
+
+const SKILL_ROLLBACK_FILE = '_kairopilot_rollback.json'
 
 export interface SkillCatalogEntrySnapshot {
   id: string
@@ -221,7 +233,7 @@ export class SkillsManager {
   private directoryWatchers = new Map<string, FSWatcher>()
 
   constructor() {
-    this.publicSkillsDir = path.join(app.getPath('home'), '.kairopilot', 'skills')
+    this.publicSkillsDir = path.join(getKairoPilotDataRoot(app.getPath('home')), 'skills')
     this.pendingInstallsDir = path.join(app.getPath('userData'), 'pending-skill-installs')
   }
 
@@ -400,6 +412,12 @@ export class SkillsManager {
       ? this.publicSkillsDir
       : this.getAgentSkillsDirectoryPath(target.agentId)
     const targetSkillDir = path.join(targetBaseDir, skillId)
+    const existingSkill = await readSkillRecord(
+      targetSkillDir,
+      target.type === 'agent' ? 'agent' : 'public',
+      skillId,
+      target.type === 'agent' ? target.agentId : undefined
+    )
     const requestId = randomUUID()
     const tempSkillDir = path.join(this.pendingInstallsDir, requestId, skillId)
 
@@ -410,7 +428,8 @@ export class SkillsManager {
       requestId,
       skill: storeSkill,
       scope,
-      materializedSkill
+      materializedSkill,
+      existingSkill
     })
 
     const previousPreparedInstall = this.pendingInstalls.get(requestId)
@@ -424,7 +443,8 @@ export class SkillsManager {
       scope,
       tempSkillDir,
       targetSkillDir,
-      review
+      review,
+      existingSkill: existingSkill ?? undefined
     })
 
     return review
@@ -442,8 +462,23 @@ export class SkillsManager {
     }
 
     await fs.mkdir(path.dirname(preparedInstall.targetSkillDir), { recursive: true })
+    let rollbackMetadata: SkillRollbackMetadata | null = null
+    if (preparedInstall.existingSkill) {
+      const backupDir = path.join(this.pendingInstallsDir, 'skill-backups', `${preparedInstall.skillId}-${Date.now()}`)
+      await fs.mkdir(path.dirname(backupDir), { recursive: true })
+      await fs.cp(preparedInstall.existingSkill.skillDir, backupDir, { recursive: true })
+      rollbackMetadata = {
+        version: preparedInstall.existingSkill.metadata.version,
+        contentHash: preparedInstall.existingSkill.contentHash,
+        backupDir,
+        backedUpAt: Date.now()
+      }
+    }
     await fs.rm(preparedInstall.targetSkillDir, { recursive: true, force: true })
     await fs.rename(preparedInstall.tempSkillDir, preparedInstall.targetSkillDir)
+    if (rollbackMetadata) {
+      await fs.writeFile(path.join(preparedInstall.targetSkillDir, SKILL_ROLLBACK_FILE), JSON.stringify(rollbackMetadata, null, 2), 'utf-8')
+    }
     await fs.rm(path.dirname(preparedInstall.tempSkillDir), { recursive: true, force: true })
     this.pendingInstalls.delete(requestId)
 
@@ -453,8 +488,8 @@ export class SkillsManager {
       return
     }
 
-    if (preparedInstall.scope.startsWith('agent:')) {
-      const agentId = preparedInstall.scope.slice('agent:'.length)
+    if (preparedInstall.scope === 'agent:workbench') {
+      const agentId = 'workbench'
       this.invalidateAgentSkills(agentId)
       await this.loadAgentSkills(agentId, { force: true })
     }
@@ -554,11 +589,8 @@ export class SkillsManager {
       return
     }
 
-    if (scope.startsWith('agent:')) {
-      const agentId = scope.slice('agent:'.length).trim()
-      if (!agentId) {
-        throw new Error(`Unsupported uninstall scope: ${scope}`)
-      }
+    if (scope === 'agent:workbench') {
+      const agentId = 'workbench'
       await this.loadAgentSkills(agentId)
       const skill = this.getAgentIndex(agentId).get(skillId)
       if (!skill) {
@@ -574,6 +606,33 @@ export class SkillsManager {
     }
 
     throw new Error(`Unsupported uninstall scope: ${scope}`)
+  }
+
+  async rollbackSkill(args: SkillRollbackArgs) {
+    const skillId = normalizeSkillFolderId(args.id)
+    if (!skillId) {
+      throw new Error('Invalid skill id.')
+    }
+    const scope = typeof args.scope === 'string' && args.scope.trim() ? args.scope.trim() : 'public'
+    const target = this.resolveInstallScope(scope)
+    const targetBaseDir = target.type === 'public'
+      ? this.publicSkillsDir
+      : this.getAgentSkillsDirectoryPath(target.agentId)
+    const targetSkillDir = path.join(targetBaseDir, skillId)
+    const rollbackMetadata = this.readSkillRollbackMetadata(targetSkillDir)
+    if (!rollbackMetadata) {
+      throw new Error(`Skill ${skillId} has no rollback snapshot.`)
+    }
+    await fs.rm(targetSkillDir, { recursive: true, force: true })
+    await fs.cp(rollbackMetadata.backupDir, targetSkillDir, { recursive: true })
+    await fs.rm(path.join(targetSkillDir, SKILL_ROLLBACK_FILE), { force: true })
+    if (target.type === 'public') {
+      this.invalidatePublicSkills()
+      await this.loadAllSkills({ force: true })
+      return
+    }
+    this.invalidateAgentSkills(target.agentId)
+    await this.loadAgentSkills(target.agentId, { force: true })
   }
 
   async getSkillRecord(skillName: string, agentId?: string) {
@@ -665,13 +724,8 @@ export class SkillsManager {
   }
 
   getAgentSkillsDirectoryPath(agentId: string) {
-    const agent = getAgent(agentId)
-    if (agent?.workspace) {
-      return path.join(agent.workspace, 'skills')
-    }
-
-    const fallbackName = agentId === 'mainAgent' ? 'workspace' : `workspace-${agentId}`
-    return path.join(app.getPath('userData'), fallbackName, 'skills')
+    if (agentId !== 'workbench') throw new Error('Historical Agent skill scopes are read-only. Import the skill into the workbench first.')
+    return path.join(readKairoPilotConfig().workbench!.managementRoot, 'skills')
   }
 
   private async ensureSkillsDirectories() {
@@ -740,10 +794,34 @@ export class SkillsManager {
   }
 
   private toManagedSkillSummary(skill: SkillRecord): SkillSummary {
+    const rollbackMetadata = this.readSkillRollbackMetadata(skill.skillDir)
     return {
       ...toSkillSummary(skill),
-      removable: this.isSkillRecordRemovable(skill)
+      removable: this.isSkillRecordRemovable(skill),
+      rollbackAvailable: Boolean(rollbackMetadata),
+      previousVersion: rollbackMetadata?.version
     }
+  }
+
+  private readSkillRollbackMetadata(skillDir: string): SkillRollbackMetadata | null {
+    const metadataPath = path.join(skillDir, SKILL_ROLLBACK_FILE)
+    if (!existsSync(metadataPath)) {
+      return null
+    }
+    try {
+      const payload = JSON.parse(readFileSync(metadataPath, 'utf-8')) as Partial<SkillRollbackMetadata>
+      if (typeof payload.backupDir === 'string' && payload.backupDir.trim()) {
+        return {
+          backupDir: payload.backupDir,
+          version: typeof payload.version === 'string' ? payload.version : undefined,
+          contentHash: typeof payload.contentHash === 'string' ? payload.contentHash : undefined,
+          backedUpAt: typeof payload.backedUpAt === 'number' ? payload.backedUpAt : 0
+        }
+      }
+    } catch {
+      return null
+    }
+    return null
   }
 
   private isSkillRecordRemovable(skill: SkillRecord) {
@@ -792,9 +870,21 @@ export class SkillsManager {
       return
     }
 
+    // 防抖：避免 watcher 高频触发导致技能缓存反复清空
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null
+    const debouncedInvalidate = () => {
+      if (debounceTimer) {
+        clearTimeout(debounceTimer)
+      }
+      debounceTimer = setTimeout(() => {
+        onInvalidate()
+        debounceTimer = null
+      }, 500)
+    }
+
     try {
       const watcher = watch(targetPath, { recursive: true }, () => {
-        onInvalidate()
+        debouncedInvalidate()
       })
       watcher.on('error', () => {
         watcher.close()
@@ -806,7 +896,7 @@ export class SkillsManager {
       if (code === 'ERR_FEATURE_UNAVAILABLE_ON_PLATFORM' || code === 'ERR_INVALID_ARG_VALUE') {
         try {
           const watcher = watch(targetPath, () => {
-            onInvalidate()
+            debouncedInvalidate()
           })
           watcher.on('error', () => {
             watcher.close()
@@ -928,16 +1018,28 @@ export class SkillsManager {
     skill: SkillStoreEntry
     scope: string
     materializedSkill: MaterializedSkill
+    existingSkill?: SkillRecord | null
   }): Promise<SkillInstallReview> {
     const staticFindings = buildStaticReviewFindings(params.skill, params.materializedSkill)
     const skillVetterReport = await this.runSkillVetterAudit(params.skill, params.scope, params.materializedSkill, staticFindings)
-    return buildSkillInstallReview({
+    const review = buildSkillInstallReview({
       requestId: params.requestId,
       skill: params.skill,
       scope: params.scope,
       materializedSkill: params.materializedSkill,
       skillVetterReport
     })
+    if (params.existingSkill) {
+      review.versionDiff = {
+        fromVersion: params.existingSkill.metadata.version,
+        toVersion: review.version,
+        fromHash: params.existingSkill.contentHash,
+        toHash: params.materializedSkill.skillContent
+          ? createHash('sha256').update(params.materializedSkill.skillContent).digest('hex')
+          : undefined
+      }
+    }
+    return review
   }
 
   private resolveInstallScope(scope: string) {
@@ -945,12 +1047,8 @@ export class SkillsManager {
       return { type: 'public' } as const
     }
 
-    if (scope.startsWith('agent:')) {
-      const agentId = scope.slice('agent:'.length).trim()
-      if (!agentId || !getAgent(agentId)) {
-        throw new Error(`Agent scope ${scope} does not exist.`)
-      }
-      return { type: 'agent', agentId } as const
+    if (scope === 'agent:workbench') {
+      return { type: 'agent', agentId: 'workbench' } as const
     }
 
     throw new Error(`Unsupported install scope: ${scope}`)
@@ -964,13 +1062,11 @@ export class SkillsManager {
       scopeMap.set(skill.id, ['public'])
     }
 
-    for (const agent of getAgents()) {
-      await this.loadAgentSkills(agent.id)
-      for (const skill of this.getAgentIndex(agent.id).values()) {
-        const currentScopes = scopeMap.get(skill.id) ?? []
-        currentScopes.push(`agent:${agent.id}`)
-        scopeMap.set(skill.id, currentScopes)
-      }
+    await this.loadAgentSkills('workbench')
+    for (const skill of this.getAgentIndex('workbench').values()) {
+      const currentScopes = scopeMap.get(skill.id) ?? []
+      currentScopes.push('agent:workbench')
+      scopeMap.set(skill.id, currentScopes)
     }
 
     return scopeMap
@@ -1138,36 +1234,8 @@ export class SkillsManager {
     }
   }
 
-  private resolveSkillReviewModel(scope: string): ModelConfig | undefined {
-    const candidateAgents = new Map<string, ReturnType<typeof getAgent>>()
-    const registerCandidate = (agentId: string | undefined) => {
-      if (!agentId || candidateAgents.has(agentId)) {
-        return
-      }
-      candidateAgents.set(agentId, getAgent(agentId))
-    }
-
-    if (scope.startsWith('agent:')) {
-      registerCandidate(scope.slice('agent:'.length).trim())
-    }
-
-    registerCandidate('mainAgent')
-
-    for (const agent of getAgents()) {
-      registerCandidate(agent.id)
-    }
-
-    for (const agent of candidateAgents.values()) {
-      if (!agent) {
-        continue
-      }
-      const model = getModelForAgent(agent)
-      if (model?.model) {
-        return model
-      }
-    }
-
-    return undefined
+  private resolveSkillReviewModel(_scope: string): ModelConfig | undefined {
+    return getModelForBinding(readKairoPilotConfig().workbench!.defaultModel)
   }
 
   private getAgentIndex(agentId: string) {

@@ -1,26 +1,23 @@
 import { ipcMain } from 'electron';
 import { queryAuditLogs } from '../../store/audit';
-import { getAgents, setActiveAgentId } from '../../store/config';
-import { ensureActiveSession } from '../../store/chat';
+import { createActiveAgentSession,getActiveAgentSession } from '../../services/chatService';
 import { skillsManager } from '../../core/skills/manager';
-import { ensureAgentRuntime, resolveAgentConfig } from '../../assistant/agentRuntime';
 import { KAIRO_INVOKE } from '../../../shared/ipc';
-import { SkillSummary } from '../../../shared/contracts';
 import {
   createRuntimeUpdateForwarder,
-  mapRuntimeExecutionResult,
   mapRuntimeHandlerFailure,
-  persistAgentSessionHistory,
-  resolveRuntimeForApproval,
-  resolveRuntimeForRun,
+  runStoredAgentAction,
+  runApprovalResponse,
+  controlStoredRun,
   runActiveAgentChat
 } from './agentHandlerService';
-import { AgentInitInputSchema, parseIpcInput } from './configValidation';
+import { parseIpcInput } from './configValidation';
 import {
   SkillImportInputSchema,
   SkillMarketplaceQueryInputSchema,
   SkillPrepareInstallInputSchema,
   SkillRequestInputSchema,
+  SkillRollbackInputSchema,
   SkillsRegistryInputSchema,
   SkillUninstallInputSchema
 } from './skillPluginValidation';
@@ -33,135 +30,46 @@ import {
 import { ipcFailure, ipcSuccess } from './ipcResult';
 
 function registerAgentHandlers() {
-  ipcMain.handle(KAIRO_INVOKE.agentInit, async (event, configOrId) => {
-    try {
-      const payload = parseIpcInput(AgentInitInputSchema, configOrId, 'agent init request');
-      const config = await resolveAgentConfig(payload);
-
-      if (typeof payload === 'string') {
-        setActiveAgentId(payload);
-        ensureActiveSession(payload);
-      }
-
-      await ensureAgentRuntime(config, event.sender);
-      return ipcSuccess();
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      if (!message.startsWith('Model not found for agent model:')) {
-        console.error('Failed to init agent:', error);
-      }
-      return ipcFailure(message);
-    }
+  ipcMain.handle(KAIRO_INVOKE.workbenchInit, async () => {
+    if (!getActiveAgentSession()) createActiveAgentSession('New Chat');
+    return ipcSuccess();
   });
 
   ipcMain.handle(KAIRO_INVOKE.agentConfirmResponse, async (event, input) => {
-    let agent:
-      | {
-          getSessionHistory: () => import('../../core/llm/types').ChatMessage[];
-          resumeRun: (approvalId: string, approved: boolean, onUpdate?: (update: import('../../core/agent/runEngine').RuntimeUpdate) => void) => Promise<import('../../core/agent/runEngine').RuntimeExecutionResult>;
-        }
-      | undefined;
-    let sessionId: string | undefined;
     try {
       const payload = parseIpcInput(ApprovalResponseInputSchema, input, 'approval response');
-      const resolved = await resolveRuntimeForApproval(payload.id, event.sender);
-      agent = resolved.agent;
-      sessionId = resolved.approval?.sessionId;
-      const result = await agent.resumeRun(payload.id, payload.approved, createRuntimeUpdateForwarder(event.sender, sessionId));
-      return mapRuntimeExecutionResult(result);
-    } catch (error) {
-      return mapRuntimeHandlerFailure(error);
-    } finally {
-      if (agent && sessionId) {
-        persistAgentSessionHistory(agent, sessionId);
-      }
-    }
+      return await runApprovalResponse(payload.id, payload.approved, event.sender, payload.scope);
+    } catch (error) { return mapRuntimeHandlerFailure(error); }
   });
 
-  ipcMain.handle(KAIRO_INVOKE.agentPauseRun, async (event, args) => {
+  ipcMain.handle(KAIRO_INVOKE.agentPauseRun, async (event, input) => {
     try {
-      const payload = parseIpcInput(RunIdInputSchema, args, 'run pause request');
-      const { agent } = await resolveRuntimeForRun(payload.runId, event.sender);
-      await agent.pauseRun(payload.runId);
+      const { runId } = parseIpcInput(RunIdInputSchema, input, 'run pause request');
+      await controlStoredRun(runId, 'pause', event.sender);
       return ipcSuccess();
-    } catch (error) {
-      return mapRuntimeHandlerFailure(error);
-    }
+    } catch (error) { return mapRuntimeHandlerFailure(error); }
   });
 
-  ipcMain.handle(KAIRO_INVOKE.agentCancelRun, async (event, args) => {
-    let agent:
-      | {
-          getSessionHistory: () => import('../../core/llm/types').ChatMessage[];
-          cancelRun: (runId: string) => Promise<void>;
-        }
-      | undefined;
-    let sessionId: string | undefined;
+  ipcMain.handle(KAIRO_INVOKE.agentCancelRun, async (event, input) => {
     try {
-      const payload = parseIpcInput(RunIdInputSchema, args, 'run cancel request');
-      const runId = payload.runId;
-      const resolved = await resolveRuntimeForRun(runId, event.sender);
-      agent = resolved.agent;
-      sessionId = resolved.run.sessionId;
-      await agent.cancelRun(runId);
+      const { runId } = parseIpcInput(RunIdInputSchema, input, 'run cancel request');
+      await controlStoredRun(runId, 'cancel', event.sender);
       return ipcSuccess();
-    } catch (error) {
-      return mapRuntimeHandlerFailure(error);
-    } finally {
-      if (agent && sessionId) {
-        persistAgentSessionHistory(agent, sessionId);
-      }
-    }
+    } catch (error) { return mapRuntimeHandlerFailure(error); }
   });
 
-  ipcMain.handle(KAIRO_INVOKE.agentResumeRun, async (event, args) => {
-    let agent:
-      | {
-          getSessionHistory: () => import('../../core/llm/types').ChatMessage[];
-          resumeInterruptedRun: (runId: string, onUpdate?: (update: import('../../core/agent/runEngine').RuntimeUpdate) => void) => Promise<import('../../core/agent/runEngine').RuntimeExecutionResult>;
-        }
-      | undefined;
-    let sessionId: string | undefined;
+  ipcMain.handle(KAIRO_INVOKE.agentResumeRun, async (event, input) => {
     try {
-      const payload = parseIpcInput(RunIdInputSchema, args, 'run resume request');
-      const runId = payload.runId;
-      const resolved = await resolveRuntimeForRun(runId, event.sender);
-      agent = resolved.agent;
-      sessionId = resolved.run.sessionId;
-      const result = await agent.resumeInterruptedRun(runId, createRuntimeUpdateForwarder(event.sender, sessionId));
-      return mapRuntimeExecutionResult(result);
-    } catch (error) {
-      return mapRuntimeHandlerFailure(error);
-    } finally {
-      if (agent && sessionId) {
-        persistAgentSessionHistory(agent, sessionId);
-      }
-    }
+      const { runId } = parseIpcInput(RunIdInputSchema, input, 'run resume request');
+      return await runStoredAgentAction(runId, event.sender, (agent) => agent.resumeInterruptedRun(runId, createRuntimeUpdateForwarder(event.sender)));
+    } catch (error) { return mapRuntimeHandlerFailure(error); }
   });
 
-  ipcMain.handle(KAIRO_INVOKE.agentRetryStep, async (event, args) => {
-    let agent:
-      | {
-          getSessionHistory: () => import('../../core/llm/types').ChatMessage[];
-          retryStep: (runId: string, stepId: string, onUpdate?: (update: import('../../core/agent/runEngine').RuntimeUpdate) => void) => Promise<import('../../core/agent/runEngine').RuntimeExecutionResult>;
-        }
-      | undefined;
-    let sessionId: string | undefined;
+  ipcMain.handle(KAIRO_INVOKE.agentRetryStep, async (event, input) => {
     try {
-      const payload = parseIpcInput(RetryStepInputSchema, args, 'run retry request');
-      const { runId, stepId } = payload;
-      const resolved = await resolveRuntimeForRun(runId, event.sender);
-      agent = resolved.agent;
-      sessionId = resolved.run.sessionId;
-      const result = await agent.retryStep(runId, stepId, createRuntimeUpdateForwarder(event.sender, sessionId));
-      return mapRuntimeExecutionResult(result);
-    } catch (error) {
-      return mapRuntimeHandlerFailure(error);
-    } finally {
-      if (agent && sessionId) {
-        persistAgentSessionHistory(agent, sessionId);
-      }
-    }
+      const { runId, stepId } = parseIpcInput(RetryStepInputSchema, input, 'run retry request');
+      return await runStoredAgentAction(runId, event.sender, (agent) => agent.retryStep(runId, stepId, createRuntimeUpdateForwarder(event.sender)));
+    } catch (error) { return mapRuntimeHandlerFailure(error); }
   });
 
   ipcMain.handle(KAIRO_INVOKE.auditGet, async (_, query) => {
@@ -170,17 +78,7 @@ function registerAgentHandlers() {
   });
 
   ipcMain.handle(KAIRO_INVOKE.skillsGetAll, async () => {
-    const agents = getAgents();
-    const result: Record<string, SkillSummary[]> = {};
-    result.public = await skillsManager.listPublicSkills();
-    const agentSkillEntries = await Promise.all(agents.map(async (agent) => ([
-      agent.id,
-      await skillsManager.listAgentSkills(agent.id)
-    ] as const)));
-    for (const [agentId, agentSkills] of agentSkillEntries) {
-      result[agentId] = agentSkills;
-    }
-    return result;
+    return { public: await skillsManager.listPublicSkills(), workbench: await skillsManager.listAgentSkills('workbench') };
   });
 
   ipcMain.handle(KAIRO_INVOKE.skillsGetStore, async () => {
@@ -266,6 +164,19 @@ function registerAgentHandlers() {
     try {
       const payload = parseIpcInput(SkillUninstallInputSchema, args, 'skill uninstall request');
       await skillsManager.uninstallSkill({
+        id: payload.id,
+        scope: payload.scope
+      });
+      return ipcSuccess();
+    } catch (error) {
+      return ipcFailure(error);
+    }
+  });
+
+  ipcMain.handle(KAIRO_INVOKE.skillsRollback, async (_, args) => {
+    try {
+      const payload = parseIpcInput(SkillRollbackInputSchema, args, 'skill rollback request');
+      await skillsManager.rollbackSkill({
         id: payload.id,
         scope: payload.scope
       });

@@ -1,19 +1,18 @@
+import { cancelSuspendedRun } from './cancelSuspendedRun';
+import { withReferenceContext } from '../context/references';
 import {
   createRun,
   createRunStep,
-  getApprovalRecord,
   getLatestContextSnapshot,
   getLatestContextSnapshotByStep,
   getRecentSessionContextSummaries,
   getPendingApproval,
+  getApprovalRecord,
   getRunById,
   getRunSteps,
-  resolveApprovalRecord,
   saveContextSnapshot,
   saveRunContextSummary,
-  updateRun,
-  updateRunStep,
-  updateToolCallRecord
+  updateRun
 } from '../../store/chat';
 import {
   prepareApprovalResume,
@@ -30,15 +29,12 @@ import {
   RuntimeSnapshotPatch,
   RuntimeUpdate
 } from './runEngine';
-import { createPermissionGuardedTool } from './toolPipeline';
+import { checkPermission, createPermissionGuardedTool } from './toolPipeline';
+import type { ApprovalDecisionScope } from '../../../shared/contracts';
 import {
   SkillCatalogSnapshot,
   shouldBlockSensitiveDisclosure
 } from './runtimeHelpers';
-import {
-  buildSkillInventoryResponse,
-  isSkillInventoryQuery
-} from './runtimeSkillInventory';
 import {
   handleToolCall,
   resumePendingToolCall
@@ -48,11 +44,13 @@ import { RuntimeRunControl } from './runtimeRunControl';
 import { RuntimeSupportState } from './runtimeSupportState';
 import { formatAttachmentContext } from '../../store/attachments';
 
+import type {DeferredToolSelection} from '../plugins/discovery';
+
 interface RuntimeSupportContext {
   availableSkillsCatalog?: SkillCatalogSnapshot;
+  availablePluginsSummary?: string;
 }
 
-export { buildSkillInventoryResponse, isSkillInventoryQuery };
 
 function isVisibleSessionMessage(message: ChatMessage) {
   const content = message.content.trim();
@@ -96,7 +94,12 @@ export class AgentRuntime {
   private refreshSystemPrompt?: () => string | Promise<string>;
   private getRuntimeSupportContext?: () => RuntimeSupportContext;
   private resolveInitialSkills?: (userInput: string, agentId: string) => Promise<LoadedSkillCapability[]>;
-  private reloadRetainedSkills?: (skills: LoadedSkillCapability[], agentId: string) => Promise<LoadedSkillCapability[]>;
+  private deferredToolLoader?: (selection:DeferredToolSelection)=>Promise<unknown>;
+  setDeferredToolLoader(loader:(selection:DeferredToolSelection)=>Promise<unknown>){this.deferredToolLoader=loader;}
+  private clearDeferredTools(){for(const [name,tool] of this.tools)if(tool.metadata?.source==='plugin'){this.tools.delete(name);this.capabilityOrchestrator.unregisterTool(name);}}
+  private async restoreDeferredTools(snapshot:RuntimeSnapshot){this.clearDeferredTools();for(const item of snapshot.deferredTools||[])await this.deferredToolLoader?.(item);}
+  private cachedSystemPrompt: string | null = null;
+  private lastPromptFingerprint: string | null = null;
 
   private restoreSnapshotState(snapshot: RuntimeSnapshot) {
     this.systemPrompt = snapshot.systemPrompt || this.systemPrompt;
@@ -133,7 +136,7 @@ export class AgentRuntime {
     refreshSystemPrompt?: () => string | Promise<string>,
     getRuntimeSupportContext?: () => RuntimeSupportContext,
     resolveInitialSkills?: (userInput: string, agentId: string) => Promise<LoadedSkillCapability[]>,
-    reloadRetainedSkills?: (skills: LoadedSkillCapability[], agentId: string) => Promise<LoadedSkillCapability[]>
+    private agentMemoryWorkspace: string = workspace
   ) {
     this.llm = llm;
     this.systemPrompt = systemPrompt;
@@ -143,7 +146,6 @@ export class AgentRuntime {
     this.refreshSystemPrompt = refreshSystemPrompt;
     this.getRuntimeSupportContext = getRuntimeSupportContext;
     this.resolveInitialSkills = resolveInitialSkills;
-    this.reloadRetainedSkills = reloadRetainedSkills;
     this.tools = new Map();
     this.capabilityOrchestrator = new CapabilityOrchestrator(permissionGuard);
   }
@@ -199,6 +201,10 @@ export class AgentRuntime {
     return this.capabilityOrchestrator.getLoadedSkillCapability(skillReference);
   }
 
+  getActiveRunId() {
+    return this.activeRunId;
+  }
+
   async chat(
     userInput: string,
     onUpdate?: (update: RuntimeUpdate) => void,
@@ -209,18 +215,9 @@ export class AgentRuntime {
     }
     this.activeSessionId = options.sessionId;
 
+    this.clearDeferredTools();
     await this.refreshPromptIfNeeded();
-    if (this.reloadRetainedSkills) {
-      const retainedSkills = this.capabilityOrchestrator.getLoadedSkills()
-        .filter((skill) => skill.activationSource !== 'automatic');
-      if (retainedSkills.length > 0) {
-        const refreshedSkills = await this.reloadRetainedSkills(retainedSkills, options.agentId || 'mainAgent');
-        this.capabilityOrchestrator.clearLoadedSkills({ activationSource: 'manual' });
-        for (const skill of refreshedSkills) {
-          this.capabilityOrchestrator.activateSkill(skill);
-        }
-      }
-    }
+    this.capabilityOrchestrator.clearLoadedSkills();
     const attachments = Array.isArray(options.attachments) ? options.attachments : [];
     const attachmentContext = formatAttachmentContext(attachments);
     const modelUserInput = attachmentContext ? `${attachmentContext}\n\n${userInput}` : userInput;
@@ -228,13 +225,18 @@ export class AgentRuntime {
       role: 'user',
       content: modelUserInput,
       attachments,
+      references: options.references,
       timestamp: Date.now()
     };
     this.history.push(userMessage);
 
-    const run = createRun(options.sessionId, options.agentId || 'mainAgent', userInput, userInput);
+    const run = createRun(options.sessionId, options.agentId || 'mainAgent', userInput, userInput, options.executionContext || {
+      agentId: options.agentId || 'mainAgent', agentWorkspace: this.agentMemoryWorkspace,
+      executionRoot: this.workspace, model: this.llm.config?.model || '', provider: this.llm.config?.provider || 'custom', permissionsHash: ''
+    });
     this.activeRunId = run.id;
     this.runControl.start(run.id);
+    try {
     const planStep = createRunStep(run.id, 'plan', '接收用户输入', {
       status: 'completed',
       input: {
@@ -253,54 +255,8 @@ export class AgentRuntime {
       stepId: planStep.id
     });
 
-    if (isSkillInventoryQuery(userInput)) {
-      const content = await buildSkillInventoryResponse(options.agentId || 'mainAgent');
-      const assistantMessage: ChatMessage = {
-        role: 'assistant',
-        content,
-        timestamp: Date.now()
-      };
-      this.history.push(assistantMessage);
+    options.onAccepted?.();
 
-      const completeStep = createRunStep(run.id, 'complete', '直接返回技能清单', {
-        status: 'completed',
-        output: {
-          content
-        }
-      });
-
-      updateRun(run.id, {
-        status: 'completed',
-        finalResponse: content,
-        error: null,
-        waitingApprovalId: null,
-        completedAt: Date.now()
-      });
-
-      this.persistSnapshot(run.id, {
-        iterations: 0,
-        lastUserInput: userInput,
-        contextSummary: this.buildModelContext(run.id, options.sessionId, {
-          consumeRuntimeSupportSummary: false
-        }).metadata,
-        stepId: completeStep.id
-      });
-
-      this.emitUpdate(onUpdate, {
-        type: 'assistant-response',
-        content,
-        runId: run.id,
-        status: 'completed'
-      });
-
-      return {
-        status: 'completed',
-        runId: run.id,
-        content
-      };
-    }
-
-    this.capabilityOrchestrator.clearLoadedSkills({ activationSource: 'automatic' });
     let initialSkillsLoaded = false;
     if (this.resolveInitialSkills) {
       const initialSkills = await this.resolveInitialSkills(userInput, options.agentId || 'mainAgent');
@@ -319,7 +275,6 @@ export class AgentRuntime {
       });
     }
 
-    try {
       return await this.executeRun({
         runId: run.id,
         userInput: modelUserInput,
@@ -337,6 +292,8 @@ export class AgentRuntime {
         waitingApprovalId: null,
         completedAt: Date.now()
       });
+      this.runControl.reconcile(run.id, 'failed');
+      this.emitUpdate(onUpdate, { type: 'run-failed', runId: run.id, status: 'failed', error: message });
       return {
         status: 'failed',
         runId: run.id,
@@ -348,8 +305,13 @@ export class AgentRuntime {
   async resumeRun(
     approvalId: string,
     approved: boolean,
-    onUpdate?: (update: RuntimeUpdate) => void
+    onUpdate?: (update: RuntimeUpdate) => void,
+    scope: ApprovalDecisionScope = 'once'
   ): Promise<RuntimeExecutionResult> {
+    if (scope === 'session') {
+      const approval = getApprovalRecord(approvalId);
+      if (!approved || !approval || !this.permissionGuard.getSessionApprovalScope(approval.toolName, approval.args)) throw new Error('This approval does not support conversation permission.');
+    }
     const resumeState = prepareApprovalResume(approvalId, approved);
     if (resumeState.status === 'failed') {
       return resumeState;
@@ -357,9 +319,15 @@ export class AgentRuntime {
     const { approval, run, snapshot, pendingToolCall } = resumeState;
 
     this.restoreSnapshotState(snapshot);
+    await this.restoreDeferredTools(snapshot);
     this.activeRunId = run.id;
     this.activeSessionId = run.sessionId || this.activeSessionId;
     this.runControl.start(run.id);
+
+    if (scope === 'session' && this.tools.has(pendingToolCall.toolName) && checkPermission(this.permissionGuard, pendingToolCall.toolName, approval.args).kind !== 'deny') {
+      this.permissionGuard.rememberSessionApproval(pendingToolCall.toolName, approval.args, approval.id);
+      this.auditLog?.({ tool: pendingToolCall.toolName, args: approval.args, sessionId: run.sessionId, runId: run.id, policyTags: ['approval:session_granted'], result: { approvalId: approval.id } });
+    }
 
     await resumePendingToolCall({
       tools: this.tools,
@@ -423,71 +391,7 @@ export class AgentRuntime {
       throw new Error(`Run not found: ${runId}`);
     }
 
-    if (run.status === 'waiting_approval' && run.waitingApprovalId) {
-      const approval = getApprovalRecord(run.waitingApprovalId);
-      resolveApprovalRecord(run.waitingApprovalId, false);
-      if (approval?.stepId) {
-        updateRunStep(approval.stepId, {
-          status: 'cancelled',
-          output: {
-            approved: false,
-            cancelled: true
-          },
-          metadata: {
-            ...(approval.metadata || {}),
-            approvalId: approval.id
-          }
-        });
-      }
-      const toolStepId = typeof approval?.metadata?.toolStepId === 'string' ? approval.metadata.toolStepId : null;
-      const toolRecordId = typeof approval?.metadata?.toolRecordId === 'string' ? approval.metadata.toolRecordId : null;
-      if (toolStepId) {
-        updateRunStep(toolStepId, {
-          status: 'cancelled',
-          error: 'Run cancelled by user.'
-        });
-      }
-      if (toolRecordId) {
-        updateToolCallRecord(toolRecordId, {
-          status: 'cancelled'
-        });
-      }
-      createRunStep(run.id, 'summary', '运行已取消', {
-        status: 'cancelled',
-        output: {
-          reason: 'cancel_requested'
-        }
-      });
-      updateRun(run.id, {
-        status: 'cancelled',
-        error: 'Run cancelled by user.',
-        waitingApprovalId: null,
-        completedAt: Date.now()
-      });
-      this.runControl.clear(runId);
-      return;
-    }
-
-    if (run.status === 'paused') {
-      createRunStep(run.id, 'summary', '运行已取消', {
-        status: 'cancelled',
-        output: {
-          reason: 'cancel_requested'
-        }
-      });
-      updateRun(run.id, {
-        status: 'cancelled',
-        error: 'Run cancelled by user.',
-        waitingApprovalId: null,
-        completedAt: Date.now()
-      });
-      this.runControl.clear(runId);
-      return;
-    }
-
-    if (run.status !== 'running') {
-      throw new Error(`Run ${runId} cannot be cancelled from status ${run.status}.`);
-    }
+    if (run.status !== 'running') { cancelSuspendedRun(runId); this.runControl.clear(runId); return; }
 
     this.runControl.requestCancel(runId);
   }
@@ -510,6 +414,7 @@ export class AgentRuntime {
     }
 
     this.restoreSnapshotState(snapshot);
+    await this.restoreDeferredTools(snapshot);
     this.activeRunId = run.id;
     this.activeSessionId = run.sessionId || this.activeSessionId;
     this.runControl.start(run.id);
@@ -538,12 +443,17 @@ export class AgentRuntime {
       throw new Error(`Run not found: ${runId}`);
     }
 
+    if (run.status !== 'failed' || run.error?.startsWith('RUN_INTERRUPTED_BY_RESTART:')) {
+      throw new Error('Only failed, non-interrupted runs can retry a checkpoint.');
+    }
+
     const snapshot = getLatestContextSnapshotByStep<RuntimeSnapshot>(runId, stepId);
     if (!snapshot) {
       throw new Error(`Context snapshot not found for step ${stepId}.`);
     }
 
     this.restoreSnapshotState(snapshot);
+    await this.restoreDeferredTools(snapshot);
     this.activeRunId = run.id;
     this.activeSessionId = run.sessionId || this.activeSessionId;
     this.runControl.start(run.id);
@@ -578,6 +488,7 @@ export class AgentRuntime {
     const result = await executeRunEngine({
       llm: this.llm,
       tools: this.capabilityOrchestrator.getExposedTools(),
+      getTools: () => this.capabilityOrchestrator.getExposedTools(),
       runId,
       userInput,
       onUpdate,
@@ -602,7 +513,7 @@ export class AgentRuntime {
       persistSnapshot: (currentRunId, patch) => this.persistSnapshot(currentRunId, patch),
       emitUpdate: (listener, update) => this.emitUpdate(listener, update),
       pushHistory: (message) => {
-        this.history.push(message);
+        this.history.push({...message,timestamp:message.timestamp || Date.now()});
       },
       shouldBlockSensitiveDisclosure: (input, output) => shouldBlockSensitiveDisclosure(this.systemPrompt, input, output),
       shouldInterrupt: () => this.runControl.consume(runId)
@@ -633,7 +544,8 @@ export class AgentRuntime {
       loadedSkills: patch.loadedSkills ?? this.capabilityOrchestrator.getLoadedSkills(),
       contextSummary: patch.contextSummary,
       pendingToolCall: patch.pendingToolCall,
-      runtimeSupportSnapshot: this.runtimeSupportState.snapshot()
+      runtimeSupportSnapshot: this.runtimeSupportState.snapshot(),
+      deferredTools: Array.from(this.tools.values()).filter(tool=>tool.metadata?.source==='plugin').map(tool=>({pluginId:tool.metadata!.pluginId!,scope:tool.metadata!.pluginScope!,names:[tool.metadata!.originalToolName||tool.name]}))
     } satisfies RuntimeSnapshot, patch.stepId);
 
     if (patch.contextSummary) {
@@ -702,23 +614,17 @@ export class AgentRuntime {
       return;
     }
     const latestSystemPrompt = await this.refreshSystemPrompt();
-    if (typeof latestSystemPrompt === 'string' && latestSystemPrompt.trim().length > 0) {
-      this.systemPrompt = latestSystemPrompt;
+    if (typeof latestSystemPrompt !== 'string' || latestSystemPrompt.trim().length === 0) {
+      return;
     }
-  }
-
-  private resolveAvailableSkillsSummary(
-    runId: string,
-    sessionId: string | undefined,
-    availableSkillsCatalog: SkillCatalogSnapshot | undefined,
-    consumeRuntimeSupportSummary: boolean
-  ) {
-    return this.runtimeSupportState.resolveAvailableSkillsSummary(
-      runId,
-      sessionId,
-      availableSkillsCatalog,
-      consumeRuntimeSupportSummary
-    );
+    // 基于内容指纹缓存：相同内容跳过 systemPrompt 更新与 orchestra 重建
+    const fingerprint = latestSystemPrompt.trim();
+    if (this.cachedSystemPrompt === fingerprint && this.lastPromptFingerprint !== null) {
+      return;
+    }
+    this.cachedSystemPrompt = fingerprint;
+    this.lastPromptFingerprint = fingerprint;
+    this.systemPrompt = fingerprint;
   }
 
   private resolveActiveSkillsSummary(
@@ -769,31 +675,37 @@ export class AgentRuntime {
       loadedSkills,
       options?.consumeRuntimeSupportSummary === true
     );
-    const availableSkillsSummary = this.resolveAvailableSkillsSummary(
-      runId,
-      sessionId,
-      runtimeSupportContext.availableSkillsCatalog,
-      options?.consumeRuntimeSupportSummary === true
-    );
-    const availableToolsSummary = this.resolveAvailableToolsSummary(
+    // 可用技能列表必须始终可见，不使用 delta 追踪避免后续迭代丢失
+    const availableSkillsSummary = runtimeSupportContext.availableSkillsCatalog?.fullSummary||'';
+    const availableToolsSummary = [this.resolveAvailableToolsSummary(
       runId,
       sessionId,
       availableToolNames,
       options?.consumeRuntimeSupportSummary === true
-    );
+    ),runtimeSupportContext.availablePluginsSummary].filter(Boolean).join('\n');
+
+    const capabilities = this.llm.getCapabilities();
+    const modelContextWindowTokens = typeof capabilities.contextWindowTokens === 'number' && capabilities.contextWindowTokens > 0
+      ? capabilities.contextWindowTokens
+      : undefined;
 
     return assembleRuntimeContext({
       systemPrompt: this.systemPrompt,
       workspace: this.workspace,
-      history: this.history,
+      memoryWorkspace: this.agentMemoryWorkspace,
+      canReadWorkspacePath: (target) => run?.executionContext?.phase!=='planning' && this.permissionGuard.checkFileSystem(target, 'read'),
+      history: this.history.map((message) => withReferenceContext(message, (target) => this.permissionGuard.checkFileSystem(target, 'read'))),
       activeSkillsSummary,
       loadedSkills,
       availableSkillsSummary,
       availableToolsSummary,
+      availableToolNames,
       run,
       runSteps,
       pendingApproval,
-      episodicSummaries
+      episodicSummaries,
+      modelContextWindowTokens,
+      tools: this.capabilityOrchestrator.getExposedTools()
     });
   }
 }

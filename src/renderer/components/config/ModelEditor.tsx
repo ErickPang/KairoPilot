@@ -191,7 +191,7 @@ export const ModelEditor = memo(function ModelEditor({
       : [...selectedModelIds, id];
     setEditingModel({
       ...editingModel,
-      availableModels: nextSelected.map(item => ({ id: item, name: item })),
+      availableModels: nextSelected.map(item => editingModel.availableModels?.find(model=>model.id===item)||({id:item,name:item})),
       model: nextSelected.includes(editingModel.model) ? editingModel.model : (nextSelected[0] || '')
     });
   };
@@ -206,7 +206,7 @@ export const ModelEditor = memo(function ModelEditor({
       : [...selectedModelIds, trimmed];
     setEditingModel({
       ...editingModel,
-      availableModels: nextSelected.map(item => ({ id: item, name: item })),
+      availableModels: nextSelected.map(item => editingModel.availableModels?.find(model=>model.id===item)||({id:item,name:item})),
       model: editingModel.model || trimmed
     });
     setManualModelId('');
@@ -440,6 +440,11 @@ export const ModelEditor = memo(function ModelEditor({
           )}
           <div className="form-help">{t('config.modelIdHelp')}</div>
           {showManualInput && <div className="form-help">{t('config.manualModelIdHelp')}</div>}
+          <details className="form-group" data-model-context-limits>
+            <summary>{t('config.contextLimits')}</summary>
+            <p className="form-help">{t('config.contextLimitsHelp')}</p>
+            {selectedModelIds.map(id=><label key={id}>{id}<input className="form-control" type="number" min={4096} max={2000000} step={1} placeholder="65536" value={editingModel.availableModels?.find(item=>item.id===id)?.contextWindowTokens??''} onChange={event=>setEditingModel({...editingModel,availableModels:selectedModelIds.map(modelId=>({...editingModel.availableModels?.find(item=>item.id===modelId),id:modelId,name:modelId,...(modelId===id?{contextWindowTokens:event.target.value?Number(event.target.value):undefined}:{})}))})}/></label>)}
+          </details>
           </div>
 
           {editingModel.provider === 'ollama' && (

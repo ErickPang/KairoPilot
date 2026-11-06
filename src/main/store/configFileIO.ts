@@ -4,8 +4,8 @@ import { redactPlainConfigSecrets } from './configSecrets';
 import {
   normalizeConfig,
   sanitizeConfigForStorage
-} from './configMigration';
-import { stripAgentPromptFields } from './configWorkspace';
+} from './configNormalization';
+import { stripRuntimeInstructions } from './configWorkspace';
 
 const MAX_CONFIG_BACKUPS = 5;
 
@@ -20,20 +20,20 @@ export function writeConfigAtomically(configPath: string, content: string) {
   }
 
   const tmpPath = `${configPath}.${process.pid}.${Date.now()}.tmp`;
-  fs.writeFileSync(tmpPath, content, 'utf-8');
+  fs.writeFileSync(tmpPath, content, {encoding:'utf8',mode:0o600});
   fs.renameSync(tmpPath, configPath);
   pruneConfigBackups(configPath);
 }
 
 function createConfigBackup(configPath: string, content: string) {
   const backupPath = `${configPath}.backup-${Date.now()}`;
-  fs.writeFileSync(backupPath, sanitizeExistingConfigBackup(content), 'utf-8');
+  fs.writeFileSync(backupPath, sanitizeExistingConfigBackup(content), {encoding:'utf8',mode:0o600});
 }
 
 function sanitizeExistingConfigBackup(content: string) {
   try {
     const normalized = normalizeConfig(JSON.parse(content));
-    return JSON.stringify(stripAgentPromptFields(sanitizeConfigForStorage(normalized)), null, 2);
+    return JSON.stringify(stripRuntimeInstructions(sanitizeConfigForStorage(normalized)), null, 2);
   } catch {
     return redactPlainConfigSecrets(content);
   }

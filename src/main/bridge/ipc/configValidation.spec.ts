@@ -1,10 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  AgentConfigInputSchema,
-  DeleteAgentInputSchema,
-  AgentInitInputSchema,
+  AgentPermissionInputSchema,
   AppearanceConfigInputSchema,
-  IdInputSchema,
   LlmProviderInputSchema,
   ModelConfigInputSchema,
   parseIpcInput
@@ -64,46 +61,14 @@ describe('configValidation', () => {
     expect(payload.provider).toBe('openai');
   });
 
-  it('rejects empty ids used by destructive config actions', () => {
-    expect(() => parseIpcInput(IdInputSchema, '', 'agent id')).toThrow('Invalid agent id');
+  it('accepts explicit wildcard network access for workbench permissions', () => {
+    const permissions = parseIpcInput(AgentPermissionInputSchema, permissionConfig, 'workbench permissions');
+    expect(permissions.network.allowedDomains).toEqual(['*']);
   });
 
-  it('requires explicit workspace deletion confirmation when deleting an agent workspace', () => {
-    expect(() => parseIpcInput(DeleteAgentInputSchema, {
-      id: 'agent-1',
-      deleteWorkspace: true
-    }, 'agent delete request')).toThrow('Invalid agent delete request');
-
-    expect(parseIpcInput(DeleteAgentInputSchema, {
-      id: 'agent-1',
-      deleteWorkspace: true,
-      confirmation: 'delete-agent:agent-1:workspace'
-    }, 'agent delete request')).toEqual({
-      id: 'agent-1',
-      deleteWorkspace: true,
-      confirmation: 'delete-agent:agent-1:workspace'
-    });
-  });
-
-  it('accepts complete agent configs with explicit wildcard network access', () => {
-    const agent = parseIpcInput(AgentConfigInputSchema, {
-      id: 'agent-1',
-      name: 'Agent',
-      workspace: '/tmp/workspace',
-      systemPrompt: '',
-      identityPrompt: '',
-      userPrompt: '',
-      soulPrompt: '',
-      model: 'openai/gpt-4o',
-      permissions: permissionConfig
-    }, 'agent config');
-
-    expect(agent.permissions.network.allowedDomains).toEqual(['*']);
-  });
-
-  it('rejects unsupported agent init payload shapes', () => {
-    expect(() => parseIpcInput(AgentInitInputSchema, {
-      agentId: 'agent-1'
-    }, 'agent init request')).toThrow('Invalid agent init request');
+  it('rejects incomplete workbench permission policies', () => {
+    expect(() => parseIpcInput(AgentPermissionInputSchema, {
+      ...permissionConfig, policy: { approvalMode: 'never' }
+    }, 'workbench permissions')).toThrow('Invalid workbench permissions');
   });
 });

@@ -99,32 +99,6 @@
   font-size: 0.9rem;
 }
 
-.skill-store-header {
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 0.5rem;
-}
-
-.skill-store-header-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 1rem;
-  width: 100%;
-}
-
-.skill-store-title-icon {
-  width: 32px;
-  height: 32px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  margin-right: 0.75rem;
-  border-radius: var(--radius-md);
-  background: var(--primary);
-  color: var(--primary-fg);
-}
-
 .skill-store-alert {
   margin-bottom: 0.75rem;
   padding: 0.82rem;
@@ -148,51 +122,6 @@
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   gap: 0.75rem;
   align-items: stretch;
-}
-
-.skills-overview-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 0.875rem;
-  margin-bottom: 0.75rem;
-}
-
-.skill-installed-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.8rem;
-  margin-bottom: 0.75rem;
-  padding: 0.82rem 0.9rem;
-}
-
-.skill-installed-toolbar-copy {
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-  min-width: 0;
-}
-
-.skill-overview-card {
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 0.4rem;
-  margin-bottom: 0;
-  padding: 0.78rem 0.9rem;
-  background: var(--card-soft);
-}
-
-.skill-overview-label {
-  color: var(--muted-fg);
-  font-size: 0.85rem;
-  font-weight: 500;
-}
-
-.skill-overview-value {
-  font-size: 1.55rem;
-  line-height: 1;
-  font-weight: 700;
-  color: var(--foreground);
 }
 
 .skill-marketplace-scope-select {
@@ -290,14 +219,11 @@
   min-width: 0;
   overflow-x: auto;
   padding: 0.15rem 0 0;
-  scrollbar-width: none;
   position: relative;
   z-index: 1;
 }
 
-.skill-marketplace-tab-list::-webkit-scrollbar {
-  display: none;
-}
+
 
 .skill-marketplace-tab-item {
   position: relative;
@@ -589,68 +515,6 @@
   grid-column: 1 / -1;
 }
 
-.skill-section-panel {
-  margin-bottom: 0.75rem;
-  border: 1px solid var(--border-muted);
-  border-radius: var(--radius-lg);
-  background: var(--card-soft);
-  overflow: hidden;
-  box-shadow: var(--shadow-sm);
-}
-
-.skill-section-summary {
-  list-style: none;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  cursor: pointer;
-  padding: 0.8rem 0.9rem;
-  font-weight: 600;
-  color: var(--foreground);
-  user-select: none;
-  transition: background 0.2s ease;
-}
-
-.skill-section-summary::-webkit-details-marker {
-  display: none;
-}
-
-.skill-section-summary:hover {
-  background: var(--surface-panel-ghost);
-}
-
-.skill-section-title {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.skill-section-title::before {
-  content: '▶';
-  font-size: 0.72rem;
-  color: var(--muted-fg);
-  transition: transform 0.2s ease;
-}
-
-.skill-section-panel[open] .skill-section-title::before {
-  transform: rotate(90deg);
-}
-
-.skill-section-count {
-  background: var(--surface-panel-ghost);
-  color: var(--foreground);
-  border-radius: 999px;
-  padding: 0.15rem 0.65rem;
-  font-size: 0.78rem;
-  line-height: 1.3;
-  border: 1px solid var(--border-strong);
-}
-
-.skill-section-body {
-  padding: 0 0.9rem 0.9rem;
-}
-
 .skill-card {
   display: flex;
   flex-direction: column;
@@ -905,31 +769,6 @@
 
 .skill-marketplace-complete {
   margin-top: 1rem;
-}
-
-.modal-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  padding: 1.2rem;
-  background: var(--overlay-soft);
-  backdrop-filter: blur(10px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 2000;
-}
-
-.modal-content {
-  background: var(--card);
-  border: 1px solid var(--border-soft);
-  border-radius: var(--radius-lg);
-  padding: 1.2rem;
-  width: 90%;
-  max-width: 400px;
-  box-shadow: var(--shadow-dialog), var(--shine-strong);
 }
 
 .skill-install-modal {
@@ -1203,10 +1042,8 @@
 }
 
 @media (max-width: 720px) {
-  .skill-store-header-row,
   .skill-marketplace-source-heading,
   .skill-install-modal-header,
-  .skill-installed-toolbar,
   .skill-import-directory-row,
   .skill-card-heading {
     flex-direction: column;
@@ -1308,33 +1145,6 @@
   gap: 1rem;
 }
 
-.plugin-panel-header {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 0.75rem;
-}
-
-.plugin-panel-header-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  width: 100%;
-}
-
-.plugin-panel-title-icon {
-  width: 2rem;
-  height: 2rem;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  margin-right: 0.75rem;
-  border-radius: 0.8rem;
-  background: var(--primary);
-  color: var(--primary-fg);
-}
-
 .plugin-panel-content {
   overflow-y: auto;
 }
@@ -1351,24 +1161,16 @@
   background: var(--surface-muted-strong);
 }
 
-.plugin-uninstall-btn.is-native {
-  opacity: 0.5;
-}
-
 .plugin-card,
 .skill-card,
-.skill-overview-card,
-.skill-installed-toolbar,
 .skill-source-preset-card,
 .skill-marketplace-toolbar,
 .skill-marketplace-source-card,
-.skill-section-panel,
 .skill-install-hero,
 .skill-install-review-hero,
 .skill-install-form-card,
 .skill-install-process,
-.skill-install-finding,
-.modal-content {
+.skill-install-finding {
   border-radius: 1.35rem;
   border: 1px solid var(--border-soft);
   background: var(--card-soft);
@@ -1379,7 +1181,7 @@
   display: flex;
   flex-direction: column;
   gap: 0.62rem;
-  min-height: 100%;
+  min-height: 0;
   padding: 0.88rem;
 }
 
@@ -1401,10 +1203,7 @@
   box-shadow: var(--shine-strong);
   flex-shrink: 0;
 }
-
-.plugin-panel-title-icon svg,
 .plugin-card-icon svg,
-.skill-store-title-icon svg,
 .skill-card-icon svg {
   width: 1.2rem;
   height: 1.2rem;
@@ -1604,19 +1403,6 @@
   justify-content: flex-end;
 }
 
-.skill-overview-card {
-  gap: 0.3rem;
-}
-
-.skill-overview-value {
-  color: var(--primary);
-}
-
-.skill-installed-toolbar {
-  gap: 1rem;
-  background: var(--card-accent);
-}
-
 .skill-marketplace-status-badge.is-pending {
   background: rgba(var(--primary-rgb), 0.12);
   color: var(--primary);
@@ -1630,23 +1416,6 @@
 
 .store-card-actions {
   margin-top: 0.15rem;
-}
-
-/* Store panels: align plugin and skill management with the dense product shell. */
-.plugin-panel-header,
-.skill-store-header {
-  gap: 10px;
-}
-
-.plugin-panel-title-icon,
-.skill-store-title-icon {
-  width: 32px;
-  height: 32px;
-  border: 1px solid var(--border-soft);
-  border-radius: 8px;
-  background: var(--surface-muted);
-  color: var(--primary);
-  box-shadow: none;
 }
 
 .store-tabs {
@@ -1697,9 +1466,6 @@
 .plugin-card,
 .skill-card,
 .skill-list-item,
-.skill-section-panel,
-.skill-overview-card,
-.skill-installed-toolbar,
 .skill-marketplace-source-card,
 .skill-source-preset-card,
 .skill-marketplace-toolbar,
@@ -1765,7 +1531,6 @@
 .plugin-chip,
 .skill-badge,
 .skill-meta-chip,
-.skill-section-count,
 .skill-marketplace-status-badge {
   min-height: 22px;
   padding: 3px 7px;
@@ -1780,15 +1545,6 @@
 .plugin-capability-item {
   border-radius: 8px;
   background: var(--surface-muted);
-}
-
-.skill-overview-value {
-  color: var(--foreground);
-  font-size: 22px;
-}
-
-.skill-installed-toolbar {
-  padding: 10px 12px;
 }
 
 .skill-marketplace-tab-bar {
@@ -1862,18 +1618,6 @@
   box-shadow: none;
 }
 
-.skill-section-summary {
-  padding: 9px 12px;
-}
-
-.skill-section-title::before {
-  color: var(--muted-fg);
-}
-
-.skill-section-body {
-  padding: 0 12px 12px;
-}
-
 .plugin-modal-title {
   font-size: 16px;
   font-weight: 650;
@@ -1889,9 +1633,6 @@
 :root[data-theme='dark'] .plugin-card,
 :root[data-theme='dark'] .skill-card,
 :root[data-theme='dark'] .skill-list-item,
-:root[data-theme='dark'] .skill-section-panel,
-:root[data-theme='dark'] .skill-overview-card,
-:root[data-theme='dark'] .skill-installed-toolbar,
 :root[data-theme='dark'] .skill-marketplace-source-card,
 :root[data-theme='dark'] .skill-source-preset-card,
 :root[data-theme='dark'] .skill-marketplace-toolbar,
@@ -1909,7 +1650,6 @@
 .skill-marketplace-source-card,
 .skill-marketplace-toolbar,
 .skill-source-form-card,
-.skill-section-panel,
 .plugin-card,
 .skill-card,
 .plugin-install-review {
@@ -1922,7 +1662,6 @@
 .skill-source-preset-card:hover,
 .skill-marketplace-tab-item:hover,
 .skill-marketplace-source-card:hover,
-.skill-section-panel:hover,
 .plugin-card:hover,
 .skill-card:hover {
   transform: none;
@@ -1940,7 +1679,6 @@
 .skill-marketplace-source-card,
 .skill-marketplace-toolbar,
 .skill-source-form-card,
-.skill-section-panel,
 .plugin-card,
 .skill-card {
   border-radius: var(--radius-lg);

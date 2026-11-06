@@ -1,10 +1,13 @@
-import { memo, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { IconChevronDown, IconFolder, IconRefresh, IconSkill, IconTrash } from './Icons';
+import { WorkbenchDialog } from './WorkbenchDialog';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import { IconChevronDown, IconRefresh, IconSkill, IconTrash, IconSearch, IconCheck, IconSettings, IconPlus } from './Icons';
 import './PluginStorePanel.css';
+import './CapabilityLibrary.css';
+import {CapabilityListItem} from './CapabilityListItem';
 import { useTranslation } from '../hooks/useTranslation';
 import type { TranslationKey } from '../i18n';
 import { Select, type SelectOption } from './Select';
-import type { AgentConfig, SkillSummary } from '../types';
+import type { SkillSummary } from '../types';
 import {
   DEFAULT_SKILL_MARKETPLACE_PRESETS,
   SKILL_IMPORT_ERROR,
@@ -52,7 +55,6 @@ export const SkillStorePanel = memo(function SkillStorePanel() {
   const { t } = useTranslation();
   const [skills, setSkills] = useState<Record<string, SkillSummary[]>>({});
   const [storeSkillsByTab, setStoreSkillsByTab] = useState<Record<string, SkillStoreEntry[]>>({});
-  const [agents, setAgents] = useState<AgentConfig[]>([]);
   const [registryEntries, setRegistryEntries] = useState<SkillsRegistryEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [marketplaceLoadingByTab, setMarketplaceLoadingByTab] = useState<Record<string, boolean>>({});
@@ -78,6 +80,7 @@ export const SkillStorePanel = memo(function SkillStorePanel() {
   const [importLoading, setImportLoading] = useState(false);
   const [uninstallTarget, setUninstallTarget] = useState<{ skill: SkillSummary; scope: string } | null>(null);
   const [uninstallLoading, setUninstallLoading] = useState(false);
+  const [installedSearchText, setInstalledSearchText] = useState('');
   const [marketplaceSearchText, setMarketplaceSearchText] = useState('');
   const [marketplacePage, setMarketplacePage] = useState(1);
 
@@ -85,13 +88,11 @@ export const SkillStorePanel = memo(function SkillStorePanel() {
     setLoading(true);
     setError(null);
     try {
-      const [fetchedSkills, fetchedAgents, fetchedRegistry] = await Promise.all([
+      const [fetchedSkills, fetchedRegistry] = await Promise.all([
         window.kairo.invoke(KAIRO_INVOKE.skillsGetAll),
-        window.kairo.invoke(KAIRO_INVOKE.configGetAgents),
         window.kairo.invoke(KAIRO_INVOKE.skillsGetRegistry)
       ]);
       setSkills(fetchedSkills as Record<string, SkillSummary[]>);
-      setAgents(fetchedAgents as AgentConfig[]);
       const normalizedRegistry = Array.isArray(fetchedRegistry) ? fetchedRegistry as SkillsRegistryEntry[] : [];
       const effectiveRegistry = normalizedRegistry.length > 0 ? normalizedRegistry : DEFAULT_REGISTRY_ENTRIES;
       setRegistryEntries(effectiveRegistry);
@@ -150,33 +151,8 @@ export const SkillStorePanel = memo(function SkillStorePanel() {
     void loadBaseData();
   }, [loadBaseData]);
 
-  const getCategoryTitle = useCallback((agentId: string) => {
-    if (agentId === 'public') return t('skills.publicCategory');
-    const agent = agents.find(a => a.id === agentId);
-    return agent ? t('skills.agentCategory', { agent: agent.name }) : t('skills.agentCategory', { agent: agentId });
-  }, [agents, t]);
-
-  const getScopeLabel = (scope: string) => {
-    if (scope === 'public') {
-      return t('skills.publicScope');
-    }
-
-    if (scope.startsWith('agent:')) {
-      const agentId = scope.slice('agent:'.length);
-      const agent = agents.find((item) => item.id === agentId);
-      return t('skills.agentScope', { agent: agent?.name ?? agentId });
-    }
-
-    return scope;
-  };
-
-  const scopeOptions = useMemo(() => ([
-    { value: 'public', label: t('skills.publicScope') },
-    ...agents.map((agent) => ({
-      value: `agent:${agent.id}`,
-      label: t('skills.agentScope', { agent: agent.name })
-    }))
-  ]), [agents, t]);
+  const getScopeLabel = (scope: string) => scope === 'public' ? t('skills.publicScope') : t('workbench.workbenchScope');
+  const scopeOptions = useMemo(() => ([{value:'public',label:t('skills.publicScope')}]), [t]);
   const scopeSelectOptions = useMemo<SelectOption[]>(() => scopeOptions.map((option) => ({
     value: option.value,
     label: option.label
@@ -524,6 +500,22 @@ export const SkillStorePanel = memo(function SkillStorePanel() {
     }
   };
 
+  const handleRollbackSkill = async (skill: SkillSummary, scope: string) => {
+    setError(null);
+    try {
+      const result = await window.kairo.invoke(KAIRO_INVOKE.skillsRollback, {
+        id: skill.id,
+        scope
+      }) as { success?: boolean; error?: string } | undefined;
+      if (!result?.success) {
+        throw new Error(result?.error || 'Failed to rollback skill');
+      }
+      await loadBaseData();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to rollback skill');
+    }
+  };
+
   const handleCloseSourceModal = () => {
     setSourceModalOpen(false);
     setSavingRegistry(false);
@@ -620,53 +612,38 @@ export const SkillStorePanel = memo(function SkillStorePanel() {
     }
   };
 
-  const publicSkills = useMemo(() => skills.public ?? [], [skills]);
-  const sortedPublicSkills = useMemo(
-    () => [...publicSkills].sort((a, b) => a.name.localeCompare(b.name)),
-    [publicSkills]
-  );
-  const agentSkillEntries = useMemo(
-    () =>
-      Object.entries(skills)
-        .filter(([key]) => key !== 'public')
-        .sort(([agentA], [agentB]) => getCategoryTitle(agentA).localeCompare(getCategoryTitle(agentB))),
-    [getCategoryTitle, skills]
-  );
-  const totalInstalled = publicSkills.length + agentSkillEntries.reduce((sum, [, agentSkills]) => sum + agentSkills.length, 0);
-  const agentInstalled = totalInstalled - publicSkills.length;
+  const installedSkills = useMemo(() => Object.entries(skills).flatMap(([source, entries]) =>
+    entries.map(skill => ({skill, scope: source === 'public' ? 'public' : `agent:${source}`}))
+  ).sort((a,b) => a.skill.name.localeCompare(b.skill.name)), [skills]);
+  const filteredInstalledSkills = useMemo(() => {
+    const query = installedSearchText.trim().toLowerCase();
+    return installedSkills.filter(({skill}) => `${skill.name} ${skill.description} ${skill.id}`.toLowerCase().includes(query));
+  }, [installedSearchText, installedSkills]);
 
   return (
-    <div className="config-panel">
-      <div className="config-header skill-store-header">
-        <div className="skill-store-header-row">
+    <div className="config-panel capability-library skill-library">
+      <div className="config-header capability-header">
+        <div className="capability-header-row">
           <div>
-            <div className="config-title">
-              <div className="skill-store-title-icon">
-                <IconSkill size={20} />
-              </div>
-              {t('skills.title')}
-            </div>
+            <div className="config-title">{t('skills.title')}</div>
             <div className="config-subtitle">{t('skills.subtitle')}</div>
           </div>
-          <button
-            type="button"
-            onClick={() => { void handleRefresh(); }}
-            className={`btn btn-secondary ${loading || hasMarketplaceLoading ? 'is-loading' : ''}`}
-            disabled={loading || savingRegistry || hasMarketplaceLoading}
-            title={t('common.refresh')}
-          >
-            <IconRefresh size={16} className={loading || hasMarketplaceLoading ? 'spinning' : ''} />
-          </button>
+          <div className="capability-actions">
+            {activeTab === 'installed' && <label className="capability-search"><IconSearch size={17}/><input type="search" aria-label={t('skills.searchInstalled')} placeholder={t('skills.searchInstalled')} value={installedSearchText} onChange={event=>setInstalledSearchText(event.target.value)}/></label>}
+            <button type="button" onClick={() => { void handleRefresh(); }} className="capability-icon-button" disabled={loading || savingRegistry || hasMarketplaceLoading} aria-label={t('common.refresh')} title={t('common.refresh')}><IconRefresh size={18} className={loading || hasMarketplaceLoading ? 'spinning' : ''}/></button>
+            <button type="button" className="capability-icon-button" onClick={()=>{handleOpenSourceModal();}} disabled={savingRegistry} aria-label={t('skills.addMarketplaceSource')} title={t('skills.addMarketplaceSource')}><IconSettings size={18}/></button>
+            <button type="button" className="btn btn-primary capability-add" onClick={handleOpenImportModal} disabled={savingRegistry || reviewLoading || importLoading}><IconPlus size={16}/>{t('common.add')}</button>
+          </div>
         </div>
 
         <div className="store-tabs">
-          <button 
+          <button
             className={`store-tab ${activeTab === 'installed' ? 'active' : ''}`}
             onClick={() => setActiveTab('installed')}
           >
             {t('skills.installed')}
           </button>
-          <button 
+          <button
             className={`store-tab ${activeTab === 'store' ? 'active' : ''}`}
             onClick={() => setActiveTab('store')}
           >
@@ -675,7 +652,7 @@ export const SkillStorePanel = memo(function SkillStorePanel() {
         </div>
       </div>
 
-      <div className="config-content skill-store-content">
+      <div className="config-content capability-content">
         {error && (
           <div className="skill-store-alert">
             {error}
@@ -689,89 +666,10 @@ export const SkillStorePanel = memo(function SkillStorePanel() {
         )}
 
         {!loading && activeTab === 'installed' && (
-          <div className="installed-skills-container">
-            <div className="skills-overview-grid">
-              <div className="config-card skill-overview-card">
-                <div className="skill-overview-label">{t('skills.totalInstalled')}</div>
-                <div className="skill-overview-value">{totalInstalled}</div>
-              </div>
-              <div className="config-card skill-overview-card">
-                <div className="skill-overview-label">{t('skills.publicInstalled')}</div>
-                <div className="skill-overview-value">{publicSkills.length}</div>
-              </div>
-              <div className="config-card skill-overview-card">
-                <div className="skill-overview-label">{t('skills.agentInstalled')}</div>
-                <div className="skill-overview-value">{agentInstalled}</div>
-              </div>
-            </div>
-
-            <div className="config-card skill-installed-toolbar">
-              <div className="skill-installed-toolbar-copy">
-                <div className="skill-card-title">{t('skills.importSkill')}</div>
-                <div className="config-subtitle">{t('skills.importSkillHint')}</div>
-              </div>
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={handleOpenImportModal}
-                disabled={savingRegistry || reviewLoading || importLoading}
-              >
-                <IconFolder size={16} />
-                {t('skills.importSkill')}
-              </button>
-            </div>
-
-            <SkillSectionPanel
-              title={getCategoryTitle('public')}
-              count={sortedPublicSkills.length}
-              defaultOpen={true}
-            >
-              {sortedPublicSkills.length === 0 ? (
-                <div className="empty-state">{t('skills.noPublic')}</div>
-              ) : (
-                <div className="skills-grid">
-                  {sortedPublicSkills.map(skill => (
-                    <SkillItem
-                      key={skill.id}
-                      skill={skill}
-                      scope="public"
-                      uninstalling={uninstallLoading && uninstallTarget?.skill.id === skill.id && uninstallTarget.scope === 'public'}
-                      onUninstall={handleOpenUninstallModal}
-                    />
-                  ))}
-                </div>
-              )}
-            </SkillSectionPanel>
-
-            {agentSkillEntries.map(([agentId, agentSkills]) => {
-              const sortedAgentSkills = [...agentSkills].sort((a, b) => a.name.localeCompare(b.name));
-
-              return (
-                <SkillSectionPanel
-                  key={agentId}
-                  title={getCategoryTitle(agentId)}
-                  count={sortedAgentSkills.length}
-                  defaultOpen={false}
-                >
-                  <div className="skills-grid">
-                    {sortedAgentSkills.length === 0 ? (
-                      <div className="empty-state">{t('skills.noAgent')}</div>
-                    ) : (
-                      sortedAgentSkills.map(skill => (
-                        <SkillItem
-                          key={skill.id}
-                          skill={skill}
-                          scope={`agent:${agentId}`}
-                          uninstalling={uninstallLoading && uninstallTarget?.skill.id === skill.id && uninstallTarget.scope === `agent:${agentId}`}
-                          onUninstall={handleOpenUninstallModal}
-                        />
-                      ))
-                    )}
-                  </div>
-                </SkillSectionPanel>
-              );
-            })}
-          </div>
+          <section className="installed-skills-container" aria-label={t('skills.installed')}>
+            {filteredInstalledSkills.length === 0 ? <div className="empty-state">{installedSkills.length ? t('skills.noSearchResults') : t('skills.noInstalled')}</div> :
+              <div className="capability-grid">{filteredInstalledSkills.map(({skill,scope})=><SkillItem key={`${scope}:${skill.id}`} skill={skill} scope={scope} uninstalling={uninstallLoading && uninstallTarget?.skill.id===skill.id && uninstallTarget.scope===scope} onUninstall={handleOpenUninstallModal} onRollback={handleRollbackSkill}/>)}</div>}
+          </section>
         )}
 
         {!loading && activeTab === 'store' && (
@@ -933,15 +831,17 @@ export const SkillStorePanel = memo(function SkillStorePanel() {
       </div>
 
       {sourceModalOpen && (
-        <div className="modal-overlay">
-          <div className="modal-content skill-source-modal">
-            <div className="skill-install-modal-header">
-              <div>
-                <div className="skill-card-title">{t('skills.addMarketplaceSource')}</div>
-                <div className="config-subtitle skill-install-modal-subtitle">{t('skills.addMarketplaceSourceHint')}</div>
-              </div>
-            </div>
-            <div className="skill-install-modal-body">
+        <WorkbenchDialog kind="skill-source" className="skill-source-modal" title={t('skills.addMarketplaceSource')} onClose={handleCloseSourceModal} busy={savingRegistry} actions={<>
+                <button type="button" className="btn btn-secondary" onClick={handleCloseSourceModal} disabled={savingRegistry}>
+                  {t('common.cancel')}
+                </button>
+                <button type="button" className={`btn btn-primary ${savingRegistry ? 'is-loading' : ''}`} onClick={() => { void handleAddRegistrySource(); }} disabled={savingRegistry}>
+                  {savingRegistry && <IconRefresh size={14} className="spinning" />}
+                  {savingRegistry ? t('skills.savingSource') : t('skills.saveSource')}
+                </button>
+              </>}><p className="config-subtitle">{t('skills.addMarketplaceSourceHint')}</p>
+
+
               <div className="skill-source-form-card">
                 <div className="skill-source-form-grid">
                   <label className="skill-source-field">
@@ -973,30 +873,32 @@ export const SkillStorePanel = memo(function SkillStorePanel() {
                   </label>
                 </div>
               </div>
-              <div className="skill-install-modal-actions skill-source-modal-actions">
-                <button type="button" className="btn btn-secondary" onClick={handleCloseSourceModal} disabled={savingRegistry}>
-                  {t('common.cancel')}
-                </button>
-                <button type="button" className={`btn btn-primary ${savingRegistry ? 'is-loading' : ''}`} onClick={() => { void handleAddRegistrySource(); }} disabled={savingRegistry}>
-                  {savingRegistry && <IconRefresh size={14} className="spinning" />}
-                  {savingRegistry ? t('skills.savingSource') : t('skills.saveSource')}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+
+
+        </WorkbenchDialog>
       )}
 
       {importModalOpen && (
-        <div className="modal-overlay">
-          <div className="modal-content skill-install-modal">
-            <div className="skill-install-modal-header">
-              <div>
-                <div className="skill-card-title">{t('skills.importSkill')}</div>
-                <div className="config-subtitle skill-install-modal-subtitle">{t('skills.importSkillHint')}</div>
-              </div>
-            </div>
-            <div className="skill-install-modal-body">
+        <WorkbenchDialog kind="skill-import" className="skill-install-modal" title={t('skills.importSkill')} onClose={resetImportState} busy={importLoading} actions={<>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={resetImportState}
+                  disabled={importLoading}
+                >
+                  {t('common.cancel')}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={() => { void handleConfirmImport(); }}
+                  disabled={importLoading}
+                >
+                  {importLoading ? t('skills.importingSkill') : t('skills.confirmImportSkill')}
+                </button>
+              </>}><p className="config-subtitle">{t('skills.importSkillHint')}</p>
+
+
               <div className="skill-install-form-card">
                 <div className="skill-card-detail-label">{t('skills.installScope')}</div>
                 <div className="skill-install-form-help">{t('skills.importScopePrompt')}</div>
@@ -1033,48 +935,13 @@ export const SkillStorePanel = memo(function SkillStorePanel() {
                   {importError}
                 </div>
               )}
-              <div className="skill-install-modal-actions">
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  onClick={resetImportState}
-                  disabled={importLoading}
-                >
-                  {t('common.cancel')}
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  onClick={() => { void handleConfirmImport(); }}
-                  disabled={importLoading}
-                >
-                  {importLoading ? t('skills.importingSkill') : t('skills.confirmImportSkill')}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+
+
+        </WorkbenchDialog>
       )}
 
       {uninstallTarget && (
-        <div className="modal-overlay">
-          <div className="modal-content skill-install-modal">
-            <div className="skill-install-modal-header">
-              <div>
-                <div className="skill-card-title">{t('skills.uninstallDialogTitle', { skill: uninstallTarget.skill.name })}</div>
-                <div className="config-subtitle skill-install-modal-subtitle">{t('skills.uninstallDialogSubtitle')}</div>
-              </div>
-            </div>
-            <div className="skill-install-modal-body">
-              <div className="skill-install-form-card">
-                <div className="skill-card-detail-label">{t('skills.installScope')}</div>
-                <div className="skill-card-detail-description">{getScopeLabel(uninstallTarget.scope)}</div>
-              </div>
-              <div className="skill-install-form-card">
-                <div className="skill-card-detail-label">{t('skills.description')}</div>
-                <div className="skill-card-detail-description">{uninstallTarget.skill.description}</div>
-              </div>
-              <div className="skill-install-modal-actions">
+        <WorkbenchDialog kind="skill-uninstall" className="skill-install-modal" title={t('skills.uninstallDialogTitle', { skill: uninstallTarget.skill.name })} onClose={handleCloseUninstallModal} busy={uninstallLoading} actions={<>
                 <button
                   type="button"
                   className="btn btn-secondary"
@@ -1091,24 +958,49 @@ export const SkillStorePanel = memo(function SkillStorePanel() {
                 >
                   {uninstallLoading ? t('skills.uninstalling') : t('skills.confirmUninstall')}
                 </button>
+              </>}><p className="config-subtitle">{t('skills.uninstallDialogSubtitle')}</p>
+
+
+              <div className="skill-install-form-card">
+                <div className="skill-card-detail-label">{t('skills.installScope')}</div>
+                <div className="skill-card-detail-description">{getScopeLabel(uninstallTarget.scope)}</div>
               </div>
-            </div>
-          </div>
-        </div>
+              <div className="skill-install-form-card">
+                <div className="skill-card-detail-label">{t('skills.description')}</div>
+                <div className="skill-card-detail-description">{uninstallTarget.skill.description}</div>
+              </div>
+
+
+        </WorkbenchDialog>
       )}
 
       {reviewSkill && (
-        <div className="modal-overlay">
-          <div className="modal-content skill-install-modal">
-            <div className="skill-install-modal-header">
-              <div>
-                <div className="skill-card-title">{t('skills.installDialogTitle', { skill: reviewSkill.name })}</div>
-                <div className="config-subtitle skill-install-modal-subtitle">{t('skills.installDialogSubtitle')}</div>
-              </div>
-            </div>
+        <WorkbenchDialog kind="skill-review" className="skill-install-modal" title={t('skills.installDialogTitle', { skill: reviewSkill.name })} onClose={() => { void closeInstallModal(); }} busy={reviewLoading} actions={(reviewResult ? <>
+                  <button type="button" className="btn btn-secondary" onClick={handleRejectInstall} disabled={reviewLoading}>
+                    {t('skills.rejectInstall')}
+                  </button>
+                  <button type="button" className="btn btn-primary" onClick={handleConfirmInstall} disabled={reviewLoading}>
+                    {reviewLoading ? t('skills.installing') : t('skills.confirmInstall')}
+                  </button>
+                </> : <>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => {
+                      void closeInstallModal();
+                    }}
+                    disabled={reviewLoading}
+                  >
+                    {t('common.cancel')}
+                  </button>
+                  <button type="button" className="btn btn-primary" onClick={handlePrepareInstall} disabled={reviewLoading}>
+                    {reviewLoading ? t('skills.preparingReview') : t('skills.startReview')}
+                  </button>
+                </>)}><p className="config-subtitle">{t('skills.installDialogSubtitle')}</p>
 
-            {!reviewResult && (
-              <div className="skill-install-modal-body">
+
+            {!reviewResult && (<>
+
                 <div className="skill-install-hero">
                   <div className="skill-install-hero-header">
                     <div>
@@ -1152,26 +1044,12 @@ export const SkillStorePanel = memo(function SkillStorePanel() {
                   <div className="skill-install-process-item">{t('skills.reviewStepVet')}</div>
                   <div className="skill-install-process-item">{t('skills.reviewStepReport')}</div>
                 </div>
-                <div className="skill-install-modal-actions">
-                  <button
-                    type="button"
-                    className="btn btn-secondary"
-                    onClick={() => {
-                      void closeInstallModal();
-                    }}
-                    disabled={reviewLoading}
-                  >
-                    {t('common.cancel')}
-                  </button>
-                  <button type="button" className="btn btn-primary" onClick={handlePrepareInstall} disabled={reviewLoading}>
-                    {reviewLoading ? t('skills.preparingReview') : t('skills.startReview')}
-                  </button>
-                </div>
-              </div>
-            )}
 
-            {reviewResult && (
-              <div className="skill-install-modal-body">
+
+            </>)}
+
+            {reviewResult && (<>
+
                 <div className="skill-install-review-hero">
                   <div className="skill-install-review-summary">
                     <span className={`skill-badge skill-review-badge is-${reviewResult.recommendation}`}>
@@ -1201,6 +1079,19 @@ export const SkillStorePanel = memo(function SkillStorePanel() {
                       <div className="skill-install-metric-value">{formatBytes(reviewResult.downloadedBytes)}</div>
                     </div>
                   </div>
+                  {reviewResult.versionDiff && (
+                    <div className="skill-install-findings-overview">
+                      <div className="skill-install-findings-overview-title">{t('skills.versionDiff')}</div>
+                      <div className="skill-install-findings-overview-chips">
+                        <span className="skill-meta-chip">
+                          {(reviewResult.versionDiff.fromVersion || '-')} → {(reviewResult.versionDiff.toVersion || '-')}
+                        </span>
+                        {reviewResult.versionDiff.fromHash && (
+                          <span className="skill-meta-chip">{reviewResult.versionDiff.fromHash.slice(0, 8)} → {reviewResult.versionDiff.toHash?.slice(0, 8)}</span>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
                 <div className="skill-install-findings-overview">
                   <div className="skill-install-findings-overview-title">{t('skills.reviewFindingsTitle')}</div>
@@ -1231,137 +1122,45 @@ export const SkillStorePanel = memo(function SkillStorePanel() {
                   <div className="skill-card-detail-label">{t('skills.reviewReport')}</div>
                   <pre className="skill-card-code">{reviewResult.report}</pre>
                 </div>
-                <div className="skill-install-modal-actions">
-                  <button type="button" className="btn btn-secondary" onClick={handleRejectInstall} disabled={reviewLoading}>
-                    {t('skills.rejectInstall')}
-                  </button>
-                  <button type="button" className="btn btn-primary" onClick={handleConfirmInstall} disabled={reviewLoading}>
-                    {reviewLoading ? t('skills.installing') : t('skills.confirmInstall')}
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
+
+
+            </>)}
+        </WorkbenchDialog>
       )}
     </div>
   );
 });
 
-function SkillSectionPanel({
-  title,
-  count,
-  defaultOpen,
-  children
-}: {
-  title: string;
-  count: number;
-  defaultOpen: boolean;
-  children: ReactNode;
-}) {
-  return (
-    <details className="skill-section-panel" open={defaultOpen}>
-      <summary className="skill-section-summary">
-        <span className="skill-section-title">{title}</span>
-        <span className="skill-section-count">{count}</span>
-      </summary>
-      <div className="skill-section-body">
-        {children}
-      </div>
-    </details>
-  );
-}
-
 function SkillItem({
   skill,
   scope,
   uninstalling,
-  onUninstall
+  onUninstall,
+  onRollback
 }: {
   skill: SkillSummary;
   scope: string;
   uninstalling: boolean;
   onUninstall: (skill: SkillSummary, scope: string) => void;
+  onRollback: (skill: SkillSummary, scope: string) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const { t } = useTranslation();
-  const sourceLabel = skill.source === 'public' ? t('skills.publicTag') : t('skills.agentTag');
+  const sourceLabel = skill.source === 'public' ? t('skills.publicTag') : t('workbench.workbenchScope');
 
-  return (
-    <article className={`config-card skill-card ${expanded ? 'expanded' : ''}`}>
-      <div className="skill-card-header">
-        <div className="skill-card-icon">
-          <IconSkill size={22} />
-        </div>
-        <div className="skill-card-main">
-          <div className="skill-card-heading">
-            <h4 className="skill-card-title">{skill.name}</h4>
-            <span className={`skill-badge ${skill.source === 'public' ? 'is-public' : 'is-agent'}`}>
-              {sourceLabel}
-            </span>
-          </div>
-          <div className="skill-card-meta-row">
-            <span className="skill-card-id">ID: {skill.id}</span>
-            {skill.version && (
-              <span className="skill-badge">
-                {t('skills.versionLabel', { version: skill.version })}
-              </span>
-            )}
-          </div>
-        </div>
-      </div>
-
-      <p className="skill-card-description">
-        {skill.description}
-      </p>
-
-      <div className="skill-card-chips">
-        <span className="skill-meta-chip">
-          {t('skills.allowedToolsCount', { count: skill.allowedTools.length })}
-        </span>
-        <span className="skill-meta-chip">
-          {t('skills.promptLength', { count: skill.content.length })}
-        </span>
-      </div>
-
-      <div className="skill-card-footer skill-card-footer-between">
-        <button
-          type="button"
-          className={`skill-card-toggle ${expanded ? 'expanded' : ''}`}
-          onClick={() => setExpanded((value) => !value)}
-        >
-          <span>{expanded ? t('skills.hideContent') : t('skills.showContent')}</span>
-          <IconChevronDown size={16} />
-        </button>
-        {skill.removable && (
-          <button
-            type="button"
-            className={`btn btn-secondary btn-sm btn-danger ${uninstalling ? 'is-loading' : ''}`}
-            onClick={() => onUninstall(skill, scope)}
-            disabled={uninstalling}
-          >
-            {uninstalling ? <IconRefresh size={14} className="spinning" /> : <IconTrash size={14} />}
-            <span className="btn-text-inline">{uninstalling ? t('skills.uninstalling') : t('skills.uninstall')}</span>
-          </button>
-        )}
-      </div>
-
-      {expanded && (
-        <div className="skill-card-details">
-          <div className="skill-card-detail-section">
-            <div className="skill-card-detail-label">{t('skills.description')}</div>
-            <p className="skill-card-detail-description">{skill.description}</p>
-          </div>
-          <div className="skill-card-code-wrap">
-            <div className="skill-card-detail-label">{t('skills.content')}</div>
-            <pre className="skill-card-code">
-              {skill.content}
-            </pre>
-          </div>
-        </div>
-      )}
-    </article>
-  );
+  return <>
+    <CapabilityListItem id={skill.id} kind="skill" name={skill.name} description={skill.description} icon={<IconSkill size={23}/>} status={<IconCheck size={20}/>} statusLabel={t('skills.installed')} label={t('skills.showContent')} onOpen={()=>setExpanded(true)}/>
+    {expanded && <WorkbenchDialog title={skill.name} kind="skill-details" onClose={()=>setExpanded(false)} actions={<>
+      {skill.rollbackAvailable && <button type="button" className="btn btn-secondary" onClick={()=>onRollback(skill,scope)}>{t('skills.rollback')}</button>}
+      {skill.removable && <button type="button" className="btn btn-secondary btn-danger" disabled={uninstalling} onClick={()=>{setExpanded(false);onUninstall(skill,scope);}}><IconTrash size={14}/>{uninstalling?t('skills.uninstalling'):t('skills.uninstall')}</button>}
+      <button type="button" className="btn btn-primary" onClick={()=>setExpanded(false)}>{t('common.close')}</button>
+    </>}>
+      <div className="capability-detail-meta"><span>{sourceLabel}</span><code>{skill.id}</code>{skill.version&&<span>{t('skills.versionLabel',{version:skill.version})}</span>}</div>
+      <p className="skill-card-detail-description">{skill.description}</p>
+      <div className="skill-card-chips"><span className="skill-meta-chip">{t('skills.allowedToolsCount',{count:skill.allowedTools.length})}</span><span className="skill-meta-chip">{t('skills.promptLength',{count:skill.content.length})}</span></div>
+      <div className="skill-card-code-wrap"><div className="skill-card-detail-label">{t('skills.content')}</div><pre className="skill-card-code">{skill.content}</pre></div>
+    </WorkbenchDialog>}
+  </>;
 }
 
 function StoreSkillItem({

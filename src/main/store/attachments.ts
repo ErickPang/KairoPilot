@@ -307,11 +307,6 @@ export async function deleteSessionAttachmentFiles(workspace: string, sessionId:
   await fs.rm(sessionUploadDir, { recursive: true, force: true });
 }
 
-export async function deleteWorkspaceAttachmentUploads(workspace: string) {
-  const uploadsRoot = getWorkspaceAttachmentUploadsRoot(workspace);
-  await fs.rm(uploadsRoot, { recursive: true, force: true });
-}
-
 export function formatAttachmentContext(attachments: ChatAttachment[]) {
   if (attachments.length === 0) {
     return '';

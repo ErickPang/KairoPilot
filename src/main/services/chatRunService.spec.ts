@@ -3,79 +3,29 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const chatStoreMocks = vi.hoisted(() => ({
   getApprovalRecord: vi.fn(),
   getLatestRun: vi.fn(),
-  getLatestRunSteps: vi.fn(),
   getLatestSessionContextSummary: vi.fn(),
   getPendingApproval: vi.fn(),
   getRunById: vi.fn(),
-  getRunTrace: vi.fn(),
   getSessionById: vi.fn(),
-  queryRuns: vi.fn()
 }));
 
-const configStoreMocks = vi.hoisted(() => ({
-  getActiveAgentId: vi.fn()
-}));
 
-vi.mock('../store/chat', () => chatStoreMocks);
-vi.mock('../store/config', () => configStoreMocks);
+
+vi.mock('../store/chat', () => ({ ...chatStoreMocks, RESTART_INTERRUPTED_ERROR: 'RUN_INTERRUPTED_BY_RESTART: fixture' }));
+vi.mock('../store/taskPages', () => ({ getOwnedSessionSummary: (_agent: string, id: string) => chatStoreMocks.getSessionById(id), getActiveSessionSummary: vi.fn() }));
 
 import {
   getPendingApprovalForActiveAgentSession,
-  getRunTraceForActiveAgent,
-  queryRunsForActiveAgent
 } from './chatRunService';
 
 describe('chatRunService', () => {
   beforeEach(() => {
     for (const mock of [
-      ...Object.values(chatStoreMocks),
-      ...Object.values(configStoreMocks)
+      ...Object.values(chatStoreMocks)
     ]) {
       mock.mockReset();
     }
 
-    configStoreMocks.getActiveAgentId.mockReturnValue('agent-1');
-  });
-
-  it('scopes run queries to the active agent', () => {
-    chatStoreMocks.queryRuns.mockReturnValue({
-      items: [],
-      total: 0,
-      page: 1,
-      pageSize: 20,
-      totalPages: 1,
-      aggregations: {}
-    });
-
-    queryRunsForActiveAgent({
-      page: 2,
-      status: 'completed'
-    });
-
-    expect(chatStoreMocks.queryRuns).toHaveBeenCalledWith({
-      page: 2,
-      status: 'completed',
-      agentId: 'agent-1'
-    });
-  });
-
-  it('blocks run trace access outside the active agent', () => {
-    chatStoreMocks.getRunById.mockReturnValue({
-      id: 'run-1',
-      sessionId: 'session-2',
-      agentId: 'agent-2'
-    });
-    chatStoreMocks.getSessionById.mockReturnValue({
-      id: 'session-2',
-      title: 'Other',
-      agentId: 'agent-2',
-      messages: [],
-      createdAt: 1,
-      updatedAt: 1
-    });
-
-    expect(getRunTraceForActiveAgent({ runId: 'run-1' })).toBeNull();
-    expect(chatStoreMocks.getRunTrace).not.toHaveBeenCalled();
   });
 
   it('loads global pending approval through the approval record', () => {

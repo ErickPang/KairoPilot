@@ -8,10 +8,13 @@ import { PermissionGuard, redactSensitiveValue } from '../security/permissions';
 import { toolError, unwrapToolExecutionResult } from '../tools/result';
 import { normalizeExecuteCommandInput } from '../tools/shell';
 import { getConfiguredWebSearchProviders } from '../tools/web';
+import { withWebRequestPolicy } from '../tools/web/fetch';
 import type { RuntimeUpdate } from './runEngine';
+import { prepareTaskEvidence, recordTaskEvidence } from './taskEvidence';
+import path from 'node:path';
 
 export interface PermissionGuardedToolDefinition extends ToolDefinition {
-  executeApproved: (args: Record<string, unknown>) => Promise<unknown>;
+  executeApproved: (args: Record<string, unknown>, signal?: AbortSignal) => Promise<unknown>;
 }
 
 export type PermissionDecision =
@@ -79,7 +82,7 @@ export function createPermissionGuardedTool(
 
   return {
     ...tool,
-    async execute(args: Record<string, unknown>) {
+    async execute(args: Record<string, unknown>, signal?: AbortSignal) {
       const decision = checkPermission(permissionGuard, tool.name, args);
       if (decision.kind === 'deny') {
         return toolError(decision.error);
@@ -87,14 +90,14 @@ export function createPermissionGuardedTool(
       if (decision.kind === 'approval') {
         return toolError(`Permission Denied: Tool '${tool.name}' requires approval through the runtime approval flow.`);
       }
-      return tool.execute(decision.args);
+      return withWebRequestPolicy(url => permissionGuard.checkNetwork(url), signal, () => tool.execute(decision.args, signal));
     },
-    async executeApproved(args: Record<string, unknown>) {
+    async executeApproved(args: Record<string, unknown>, signal?: AbortSignal) {
       const decision = checkPermission(permissionGuard, tool.name, args);
       if (decision.kind === 'deny') {
         return toolError(decision.error);
       }
-      return tool.execute(decision.args);
+      return withWebRequestPolicy(url => permissionGuard.checkNetwork(url), signal, () => tool.execute(decision.args, signal));
     }
   };
 }
@@ -123,7 +126,7 @@ export async function executeApprovedTool(params: ExecuteApprovedToolParams) {
     : args;
 
   emitUpdate(onUpdate, {
-    type: 'tool-call',
+    type: 'tool-call', callId,
     tool: toolName,
     args: redactedArgs,
     runId,
@@ -131,11 +134,25 @@ export async function executeApprovedTool(params: ExecuteApprovedToolParams) {
     status: 'running'
   });
 
+  let interruptPoller: ReturnType<typeof setInterval> | undefined;
   try {
+    const file = await prepareTaskEvidence(tool, args, permissionGuard);
+    const toolAbortController = new AbortController();
+    interruptPoller = shouldInterrupt ? setInterval(() => {
+      const sig = shouldInterrupt();
+      if (sig) {
+        toolAbortController.abort();
+        clearInterval(interruptPoller);
+      }
+    }, 300) : undefined;
+
     const rawOutput = isPermissionGuardedTool(tool)
-      ? await tool.executeApproved(args)
-      : await tool.execute(args);
+      ? await tool.executeApproved(args, toolAbortController.signal)
+      : await tool.execute(args, toolAbortController.signal);
+
+    if (interruptPoller) clearInterval(interruptPoller);
     const postToolInterrupt = shouldInterrupt?.();
+    await recordTaskEvidence({ runId, toolCallId: toolRecordId, tool, args, output: rawOutput, guard: permissionGuard, file, interrupted: Boolean(postToolInterrupt) });
     if (postToolInterrupt) {
       const cancelled = postToolInterrupt.kind === 'cancel';
       const reason = postToolInterrupt.reason || (cancelled ? 'Run cancelled by user.' : 'Run paused by user.');
@@ -154,13 +171,7 @@ export async function executeApprovedTool(params: ExecuteApprovedToolParams) {
           status: cancelled ? 'cancelled' : 'running'
         });
       }
-      emitUpdate(onUpdate, {
-        type: cancelled ? 'run-cancelled' : 'run-paused',
-        runId,
-        stepId: toolStepId,
-        status: cancelled ? 'cancelled' : 'paused',
-        error: cancelled ? reason : undefined
-      });
+      appendToolMessage(toolName, callId, JSON.stringify({ interrupted: true, reason, sideEffectsMayExist: true }));
       return;
     }
 
@@ -222,7 +233,7 @@ export async function executeApprovedTool(params: ExecuteApprovedToolParams) {
       });
     }
     emitUpdate(onUpdate, {
-      type: 'tool-result',
+      type: 'tool-result', callId,
       tool: toolName,
       result: redactedOutput,
       runId,
@@ -248,6 +259,8 @@ export async function executeApprovedTool(params: ExecuteApprovedToolParams) {
       emitUpdate,
       appendToolMessage
     });
+  } finally {
+    if (interruptPoller) clearInterval(interruptPoller);
   }
 }
 
@@ -326,7 +339,7 @@ export async function recordToolFailure(params: ToolFailureParams) {
   }
 
   emitUpdate(onUpdate, {
-    type: 'tool-error',
+    type: 'tool-error', callId,
     tool: toolName,
     error: redactedErrorMessage,
     runId,
@@ -343,8 +356,9 @@ export function checkPermission(
 ): PermissionDecision {
   const args = { ...rawArgs };
   const executionProfile = permissionGuard.getExecutionProfile();
-  const isWriteTool = toolName === 'write_file' || toolName === 'delete_file';
+  const isWriteTool = toolName === 'write_file' || toolName === 'delete_file' || toolName === 'edit_file';
   const isCommandTool = toolName === 'execute_command' || toolName === 'run_skill_script';
+  if ((toolName === 'grep' || toolName === 'glob') && !args.path) args.path = permissionGuard.getDefaultWorkspacePath();
 
   if (executionProfile === 'chat_only' && toolName !== 'read_attachment') {
     return {
@@ -362,10 +376,11 @@ export function checkPermission(
     };
   }
 
-  if (toolName === 'read_file' || toolName === 'write_file' || toolName === 'list_directory' || toolName === 'delete_file') {
-    const mode = toolName === 'write_file' || toolName === 'delete_file' ? 'write' : 'read';
+  if (toolName === 'read_file' || toolName === 'write_file' || toolName === 'list_directory' || toolName === 'delete_file' || toolName === 'edit_file' || toolName === 'grep' || toolName === 'glob') {
+    const mode = isWriteTool ? 'write' : 'read';
     const targetPath = (args.path || args.file_path) as string;
-    if (!permissionGuard.checkFileSystem(targetPath, mode)) {
+    if (typeof targetPath !== 'string' || !path.isAbsolute(targetPath) || !permissionGuard.checkFileSystem(targetPath, mode)
+      || (toolName === 'edit_file' && !permissionGuard.checkFileSystem(targetPath, 'read'))) {
       return {
         kind: 'deny',
         args,

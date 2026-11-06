@@ -1,0 +1,39 @@
+.capability-library { container-type: inline-size; }
+:root[data-theme] .workbench-app .capability-library .capability-header { flex-direction: column; align-items: stretch; gap: 24px; }
+.capability-library .capability-header-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; }
+.capability-library .capability-header-row > div:first-child { min-width: 120px; }
+.capability-library .config-subtitle { margin-top: 8px; font-size: 13px; }
+.capability-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; justify-content: flex-end; }
+.capability-search { display: flex; align-items: center; gap: 9px; width: clamp(180px, 22vw, 280px); min-height: 36px; padding: 7px 13px; border: 1px solid var(--border); border-radius: 999px; color: var(--muted-fg); background: var(--input-bg); }
+.capability-search:focus-within { border-color: var(--border-strong); box-shadow: 0 0 0 2px var(--ring); }
+:root[data-theme] .workbench-app .capability-search input { width: 100%; min-width: 0; border: 0; padding: 0; border-radius: 0; background: transparent; color: var(--foreground); font: inherit; font-size: 13px; outline: none; box-shadow: none; }
+.capability-search svg { flex-shrink: 0; }
+:root[data-theme] .workbench-app .capability-icon-button { display: grid; place-items: center; width: 32px; height: 36px; padding: 0; border: 0; border-radius: var(--control-radius); background: transparent; color: var(--muted-fg); cursor: pointer; }
+:root[data-theme] .workbench-app .capability-icon-button:hover:enabled { color: var(--foreground); background: var(--surface-muted); }
+:root[data-theme] .workbench-app .capability-add { min-height: 36px; border-radius: 999px; padding: 7px 15px; gap: 6px; }
+.capability-library .store-tabs { align-self: stretch; gap: 22px; padding: 0; margin: 0; border: 0; border-bottom: 1px solid var(--border-soft); border-radius: 0; background: transparent; }
+:root[data-theme] .workbench-app .capability-library .store-tab { min-height: 36px; padding: 0 2px 12px; border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; color: var(--muted-fg); box-shadow: none; font-size: 14px; }
+:root[data-theme] .workbench-app .capability-library .store-tab.active { border-bottom-color: var(--foreground); color: var(--foreground); }
+:root[data-theme] .workbench-app .capability-library .capability-content { padding: 0; background: transparent; }
+.capability-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 28px; }
+.capability-item { min-width: 0; }
+:root[data-theme] .workbench-app .capability-summary { display: flex; align-items: center; gap: 14px; width: 100%; min-width: 0; min-height: 78px; padding: 14px 10px; border: 0; border-radius: var(--radius-lg); background: transparent; color: var(--foreground); text-align: left; cursor: pointer; }
+:root[data-theme] .workbench-app .capability-summary:hover { background: var(--surface-muted); }
+.capability-icon { display: grid; place-items: center; width: 44px; height: 44px; flex: 0 0 44px; border-radius: 13px; background: var(--surface-muted); color: var(--foreground); }
+.capability-copy { display: flex; flex-direction: column; gap: 5px; flex: 1; min-width: 0; }
+.capability-name { font-size: 14px; font-weight: 600; }
+.capability-description { color: var(--muted-fg); font-size: 13px; }
+.capability-name, .capability-description { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.capability-status { display: flex; flex: 0 0 20px; color: var(--border-strong); }
+.capability-detail-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 14px; color: var(--muted-fg); font-size: 12px; overflow-wrap: anywhere; }
+.capability-detail-meta code { min-width: 0; }
+[data-dialog-kind='skill-details'] .skill-card-chips { margin: 16px 0; }
+[data-dialog-kind='skill-details'] .skill-card-code { max-height: 42vh; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+@container (max-width: 720px) {
+  .capability-library .capability-header-row { flex-direction: column; gap: 16px; }
+  .capability-actions { justify-content: flex-start; width: 100%; }
+  .capability-search { flex: 1; }
+}
+@container (max-width: 620px) {
+  .capability-grid { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+}

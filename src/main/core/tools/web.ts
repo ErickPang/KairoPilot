@@ -183,7 +183,8 @@ export const FetchWebpageTool: ToolDefinition = {
       let html: string;
       try {
         html = await fetchHtml(url, FETCH_WEBPAGE_TIMEOUT_MS);
-      } catch {
+      } catch (error) {
+        if (error instanceof Error && /Permission Denied|redirect limit/.test(error.message)) throw error;
         html = await fetchHtml(url, FETCH_WEBPAGE_FALLBACK_TIMEOUT_MS);
       }
 

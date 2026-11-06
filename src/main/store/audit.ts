@@ -1,13 +1,12 @@
 import { app } from 'electron';
 import Database from 'better-sqlite3';
-import Store from 'electron-store';
+
 import fs from 'node:fs';
 import path from 'node:path';
 import { v4 as uuidv4 } from 'uuid';
 import type { AuditLogEntry, AuditLogQuery, AuditLogQueryResult, QueryFacet } from '../../shared/contracts';
 
 const MAX_AUDIT_LOGS = 1000;
-const AUDIT_MIGRATION_KEY = 'migration_v1_completed';
 
 let db: Database.Database | null = null;
 
@@ -38,10 +37,6 @@ function getDb(): Database.Database {
         policy_tags TEXT
       );
 
-      CREATE TABLE IF NOT EXISTS audit_state (
-        key TEXT PRIMARY KEY,
-        value TEXT NOT NULL
-      );
 
       CREATE INDEX IF NOT EXISTS idx_audit_logs_timestamp_desc
         ON audit_logs(timestamp DESC);
@@ -51,19 +46,6 @@ function getDb(): Database.Database {
         ON audit_logs(run_id);
     `);
 
-    try {
-      const columns = db.pragma('table_info(audit_logs)') as { name: string }[];
-      if (!columns.some((column) => column.name === 'run_id')) {
-        db.prepare('ALTER TABLE audit_logs ADD COLUMN run_id TEXT').run();
-      }
-      if (!columns.some((column) => column.name === 'step_id')) {
-        db.prepare('ALTER TABLE audit_logs ADD COLUMN step_id TEXT').run();
-      }
-    } catch (error) {
-      console.error('[Audit DB] Failed to migrate audit_logs columns:', error);
-    }
-
-    migrateFromElectronStore(db);
   }
 
   return db;
@@ -105,68 +87,6 @@ function trimAuditLogs(database: Database.Database) {
   `).run(MAX_AUDIT_LOGS);
 }
 
-function migrateFromElectronStore(database: Database.Database) {
-  const migrationRow = database.prepare(
-    'SELECT value FROM audit_state WHERE key = ?'
-  ).get(AUDIT_MIGRATION_KEY) as { value: string } | undefined;
-
-  if (migrationRow?.value === 'true') {
-    return;
-  }
-
-  try {
-    const oldStore = new Store<{ logs: AuditLogEntry[] }>({
-      name: 'audit-logs',
-      defaults: {
-        logs: []
-      }
-    });
-    const legacyLogs = oldStore.get('logs', []) as AuditLogEntry[];
-
-    if (legacyLogs.length > 0) {
-      const insertLog = database.prepare(`
-        INSERT OR REPLACE INTO audit_logs (
-          id,
-          timestamp,
-          tool,
-          args,
-          result,
-          error,
-          session_id,
-          run_id,
-          step_id,
-          policy_tags
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `);
-
-      const transaction = database.transaction(() => {
-        for (const log of legacyLogs) {
-          insertLog.run(
-            log.id,
-            log.timestamp,
-            log.tool,
-            serializeValue(log.args ?? {}) ?? '{}',
-            serializeValue(log.result),
-            log.error ?? null,
-            log.sessionId ?? null,
-            log.runId ?? null,
-            log.stepId ?? null,
-            serializeValue(log.policyTags)
-          );
-        }
-
-        trimAuditLogs(database);
-        database.prepare('INSERT OR REPLACE INTO audit_state (key, value) VALUES (?, ?)').run(AUDIT_MIGRATION_KEY, 'true');
-      });
-
-      transaction();
-    } else {
-      database.prepare('INSERT OR REPLACE INTO audit_state (key, value) VALUES (?, ?)').run(AUDIT_MIGRATION_KEY, 'true');
-    }
-  } catch (error) {
-    console.error('[Audit DB] Migration failed:', error);
-  }
-}
 
 export function addAuditLog(entry: Omit<AuditLogEntry, 'id' | 'timestamp'>) {
   const newLog: AuditLogEntry = {
