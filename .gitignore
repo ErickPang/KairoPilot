@@ -43,6 +43,8 @@ AGENTS.md
 /docs/*
 !/docs/architecture.md
 !/docs/releases.md
+!/docs/user-guide.md
+!/docs/development.md
 /.github/*
 !/.github/workflows/
 /.github/workflows/*
