@@ -8,12 +8,15 @@ import { isRunUnsettled } from '../hooks/runtimeEventUtils';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { Message } from '../types';
-import type { ContextReference, RunSummary, ConversationItem } from '../../shared/contracts';
+import type { ContextReference, RunSummary, ConversationItem, SkillMention } from '../../shared/contracts';
+import { splitSkillInput } from '../../shared/skillInvocation';
+import { IconSkill } from './Icons';
 import { AttachmentList } from './AttachmentList';
 import { visibleUserText } from './chatMessagePresentation';
 import type { I18nContextValue } from './layout/I18nContext';
 
 interface ChatMessagesPanelProps {
+  skills?: SkillMention[];
   sessionId: string | null;
   run: RunSummary | null;
   feed: ReturnType<typeof useConversationFeed>;
@@ -29,6 +32,7 @@ interface ChatMessagesPanelProps {
 const MARKDOWN_REMARK_PLUGINS = [remarkGfm];
 
 interface MessageBodyProps {
+  skills?: SkillMention[];
   onViewReference: (reference: ContextReference) => void;
   markdownComponents: React.ComponentProps<typeof ReactMarkdown>['components'];
   msg: Message;
@@ -37,6 +41,7 @@ interface MessageBodyProps {
 }
 
 const MessageBody = React.memo(function MessageBody({
+  skills = [],
   onViewReference,
   markdownComponents,
   msg,
@@ -45,9 +50,14 @@ const MessageBody = React.memo(function MessageBody({
   const shouldRenderPrewrap = msg.role === 'user' || msg.role === 'tool';
 
   if (shouldRenderPrewrap) {
+    const content = msg.role === 'user' ? visibleUserText(msg.content || '', msg.attachments) : msg.content;
+    const invocation = msg.role === 'user' ? splitSkillInput(content || '', msg.skillMentions ?? skills, true) : null;
     return (
       <div className="message-prewrap">
-        {msg.role === 'user' ? visibleUserText(msg.content || '', msg.attachments) : msg.content}
+        {invocation?.selected.length ? <div className="message-skill-input">
+          {invocation.selected.map((skill, index) => <span className="composer-skill-token message-skill-token" data-message-skill={skill.id} key={`${skill.id}-${index}`} title={`/${skill.id}`}><IconSkill size={18}/><span>{skill.name}</span></span>)}
+          {invocation.text && <span className="message-skill-text">{invocation.text}</span>}
+        </div> : content}
         <AttachmentList attachments={msg.attachments} compact />
         {msg.references?.length ? <div className="context-reference-list">{msg.references.map((reference) => <button type="button" onClick={() => onViewReference(reference)} className="context-reference-chip" key={reference.id} title={reference.path}>{reference.kind === 'directory' ? '▤' : '▧'} {reference.name}</button>)}</div> : null}
 
@@ -69,6 +79,7 @@ interface MessageRowProps extends MessageBodyProps {
 }
 
 const MessageRow = React.memo(function MessageRow({
+  skills,
   className = '',
   onViewReference,
   markdownComponents,
@@ -80,6 +91,7 @@ const MessageRow = React.memo(function MessageRow({
     <div className={`message ${msg.role} ${className}`}>
       <div className="message-content">
         <MessageBody
+          skills={skills}
           onViewReference={onViewReference}
           markdownComponents={markdownComponents}
           msg={msg}
@@ -99,7 +111,7 @@ export const ChatMessagesPanel = React.memo(function ChatMessagesPanel(props: Ch
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
   }, [loading, run]);
-  const row = (item: ConversationItem) => <MessageRow key={item.id} msg={{ role: item.kind === 'user' ? 'user' : 'assistant', content: item.content, attachments: item.attachments, references: item.references }} onViewReference={props.onViewReference} markdownComponents={props.markdownComponents} t={t} toRenderableMarkdown={props.toRenderableMarkdown}/>;
+  const row = (item: ConversationItem) => <MessageRow key={item.id} skills={props.skills} msg={{ role: item.kind === 'user' ? 'user' : 'assistant', content: item.content, attachments: item.attachments, references: item.references, skillMentions: item.skillMentions }} onViewReference={props.onViewReference} markdownComponents={props.markdownComponents} t={t} toRenderableMarkdown={props.toRenderableMarkdown}/>;
   const rounds = feed.data?.rounds || [];
   return <div ref={containerRef} className="messages-container">
     {feed.error && <p role="alert" className="workbench-error">{feed.error}</p>}

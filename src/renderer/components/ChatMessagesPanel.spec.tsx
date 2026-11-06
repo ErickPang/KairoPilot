@@ -4,7 +4,7 @@ import { ConversationProcess } from './ConversationProcess';
 import { ChatMessagesPanel, ToolActivity } from './ChatMessagesPanel';
 import { useTranslation } from '../hooks/useTranslation';
 import { I18nProvider } from './layout/I18nProvider';
-import type { RunSummary } from '../../shared/contracts';
+import type { RunSummary, SkillMention } from '../../shared/contracts';
 import type { ComponentProps } from 'react';
 const run: RunSummary = { id: 'r', agentId: 'a', sessionId: 's', goal: 'read', userInput: 'read', status: 'completed', createdAt: 1000, updatedAt: 33000, completedAt: 33000 };
 function render(status: RunSummary['status']) {
@@ -25,11 +25,31 @@ describe('conversation process', () => {
  });
 });
 
-function StreamingMessage({ status, content, role = 'draft' }: { status: string; content: string; role?: 'draft' | 'user' }) {
+function StreamingMessage({ status, content, role = 'draft', skills, skillMentions }: { status: string; content: string; role?: 'draft' | 'user'; skills?: SkillMention[]; skillMentions?: SkillMention[] }) {
  const { t } = useTranslation();
- const feed: ComponentProps<typeof ChatMessagesPanel>['feed'] = { before: undefined, earlier: ()=>{}, recent: ()=>{}, error: '', refresh: ()=>{}, data: { rounds: [{ run: { ...run, status: 'running' }, items: [{ id: 'text', runId: run.id, sequence: 1, kind: role, content, status }] }] } };
- return <ChatMessagesPanel sessionId="s" run={{ ...run, status: 'running' }} feed={feed} containerRef={{ current: null }} messagesEndRef={{ current: null }} onViewReference={()=>{}} loading t={t} markdownComponents={{}} toRenderableMarkdown={text=>text||''}/>;
+ const feed: ComponentProps<typeof ChatMessagesPanel>['feed'] = { before: undefined, earlier: ()=>{}, recent: ()=>{}, error: '', refresh: ()=>{}, data: { rounds: [{ run: { ...run, status: 'running' }, items: [{ id: 'text', runId: run.id, sequence: 1, kind: role, content, status, skillMentions }] }] } };
+ return <ChatMessagesPanel skills={skills} sessionId="s" run={{ ...run, status: 'running' }} feed={feed} containerRef={{ current: null }} messagesEndRef={{ current: null }} onViewReference={()=>{}} loading t={t} markdownComponents={{}} toRenderableMarkdown={text=>text||''}/>;
 }
+
+describe('sent skill presentation', () => {
+ const skill = { id: 'search', name: '发送时的搜索技能' };
+ it('renders saved names as non-editable tokens after rename or removal, preserving the body', () => {
+  const html = renderToStaticMarkup(<I18nProvider><StreamingMessage status="completed" role="user" content={'/search 今日新闻\n只看官方来源'} skillMentions={[skill]} skills={[{ ...skill, name: '已更名' }]}/></I18nProvider>);
+  expect(html).toContain('data-message-skill="search"');
+  expect(html).toContain(skill.name);
+  expect(html).not.toContain('已更名');
+  expect(html).toContain('今日新闻\n只看官方来源');
+  expect(html).toContain('composer-skill-token message-skill-token');
+  expect(html).not.toContain('data-selected-skill');
+  const removed = renderToStaticMarkup(<I18nProvider><StreamingMessage status="completed" role="user" content="/search" skillMentions={[skill]}/></I18nProvider>);
+  expect(removed).toContain('data-message-skill="search"');
+ });
+ it('rebuilds old messages from installed skills without turning paths or prose into tokens', () => {
+  const render = (content: string) => renderToStaticMarkup(<I18nProvider><StreamingMessage status="completed" role="user" content={content} skills={[skill]}/></I18nProvider>);
+  expect(render('/search 新闻')).toContain('data-message-skill="search"');
+  for (const content of ['/search/folder', '/unknown 新闻', '正文 /search']) expect(render(content)).not.toContain('data-message-skill');
+ });
+});
 
 describe('streaming message presentation', () => {
  const renderMessage = (status: string, content: string, role?: 'draft' | 'user') => renderToStaticMarkup(<I18nProvider><StreamingMessage status={status} content={content} role={role}/></I18nProvider>);

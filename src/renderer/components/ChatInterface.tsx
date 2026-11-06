@@ -492,6 +492,7 @@ export const ChatInterface = React.memo(function ChatInterface({
 
 
       <ChatMessagesPanel
+        skills={skillCompletion.skills}
         onViewReference={onViewReference}
         containerRef={messagesContainerRef}
         sessionId={sessionId} run={currentRun} feed={conversation}

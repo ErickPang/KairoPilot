@@ -1,4 +1,5 @@
 import type { SkillSummary } from '../../shared/contracts';
+export { splitSkillInput } from '../../shared/skillInvocation';
 
 export interface SlashSkillQuery { start: number; end: number; text: string }
 export type SkillChoice = Pick<SkillSummary, 'id' | 'name' | 'description' | 'whenToUse'>;
@@ -36,21 +37,6 @@ export function filterSkillChoices(skills: SkillChoice[], query: string): SkillC
     : [skill.id, skill.name].some(value => normalize(value).startsWith(needle)) ? 1 : 2;
   return skills.filter(skill => [skill.id, skill.name, skill.description, skill.whenToUse].some(value => normalize(value).includes(needle)))
     .sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
-}
-
-// Keep explicit invocations in the existing draft string; the composer renders
-// its leading commands as tokens and edits only the remaining text.
-export function splitSkillInput(input: string, skills: SkillChoice[]) {
-  const selected: SkillChoice[] = [];
-  let offset = 0;
-  while (offset < input.length) {
-    const match = /^\/([^\s/]+)([ \t]|\r?\n)/.exec(input.slice(offset));
-    const skill = match && skills.find(item => item.id === match[1]);
-    if (!match || !skill) break;
-    selected.push(skill);
-    offset += match[0].length;
-  }
-  return { selected, text: input.slice(offset), prefix: input.slice(0, offset) };
 }
 
 export function skillInput(selected: SkillChoice[], text: string) {

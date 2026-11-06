@@ -339,10 +339,10 @@ async function resolveInitialSkillsForRun(userInput: string, agentId: string): P
       resolvedSkill = await resolveSkillLoad(selectedSkill.id, agentId)
     } catch (error) {
       console.warn(`[Skills] Failed to auto-load skill ${selectedSkill.id}:`, error)
-      throw error
+      throw new Error(`Failed to load requested skill "${selectedSkill.id}": ${error instanceof Error ? error.message : String(error)}`)
     }
     if (!resolvedSkill) {
-      continue
+      throw new Error(`Failed to load requested skill "${selectedSkill.id}": skill is no longer available.`)
     }
 
     loadedSkills.push({

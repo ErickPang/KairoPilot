@@ -292,6 +292,8 @@ export class AgentRuntime {
         waitingApprovalId: null,
         completedAt: Date.now()
       });
+      this.runControl.reconcile(run.id, 'failed');
+      this.emitUpdate(onUpdate, { type: 'run-failed', runId: run.id, status: 'failed', error: message });
       return {
         status: 'failed',
         runId: run.id,

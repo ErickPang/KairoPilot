@@ -1,5 +1,5 @@
 import { describeConversationTool, conversationToolOutput } from '../../shared/conversationActivity';
-import type { ChatAttachment, ContextReference, ConversationItem, ConversationPage, RuntimeUpdateEvent } from '../../shared/contracts';
+import type { ChatAttachment, ContextReference, ConversationItem, ConversationPage, RuntimeUpdateEvent, SkillMention } from '../../shared/contracts';
 import { getDb, getRunById } from './chat';
 import { getOwnedSessionSummary } from './taskPages';
 
@@ -12,8 +12,8 @@ function put(runId: string, key: string, kind: ConversationItem['kind'], content
     details=COALESCE(excluded.details,details),metadata=COALESCE(excluded.metadata,metadata)`)
     .run(id, runId, runId, kind, content, status, details === undefined ? null : JSON.stringify(details), metadata === undefined ? null : JSON.stringify(metadata));
 }
-export function setConversationUser(runId: string, content: string, attachments?: ChatAttachment[], references?: ContextReference[]) {
-  put(runId, 'user', 'user', content, 'completed', undefined, { attachments, references });
+export function setConversationUser(runId: string, content: string, attachments?: ChatAttachment[], references?: ContextReference[], skillMentions?: SkillMention[]) {
+  put(runId, 'user', 'user', content, 'completed', undefined, { attachments, references, skillMentions });
 }
 export function recordConversationUpdate(update: RuntimeUpdateEvent) {
   const run = getRunById(update.runId);

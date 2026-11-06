@@ -1,4 +1,6 @@
 import { recordConversationUpdate, setConversationUser } from '../../store/conversation';
+import { skillsManager } from '../../core/skills/manager';
+import { splitSkillInput } from '../../../shared/skillInvocation';
 import {memorySnapshot,scheduleProjectMemory} from '../../services/projectMemoryService';
 import {PLANNING_PROMPT} from '../../../shared/taskTemplates';
 import {type TaskPlan} from '../../../shared/contracts';
@@ -180,13 +182,17 @@ async function runTaskChatWithinLease(request:AgentChatRequest,sender:WebContent
   if(approvedPlan)executionAgent.systemPrompt+=approvedPlanPrompt(approvedPlan);
   const executionContext={...executionContextForSession(session,executionAgent),memorySnapshot:selectedMemory,phase:planning?'planning' as const:'execution' as const,...(plan?{planId:plan.id,planRevision:plan.approvedRevision || plan.revision}:{})};
   const agent=await ensureAgentRuntime({agent:executionAgent,model:strictTaskModel(executionAgent.model),executionContext},sender);
+  const skillMentions = request.content.startsWith('/')
+    ? splitSkillInput(request.content, await skillsManager.listMergedSkills(WORKBENCH_OWNER), true)
+      .selected.filter(skill => skill.userInvocable !== false).map(({ id, name }) => ({ id, name }))
+    : [];
   if (isWorkbenchShuttingDown()) throw new Error('Application is quitting.');
   agent.setHistory(session.messages);
   try {
     const result=await agent.chat(request.content,createRuntimeUpdateForwarder(sender,session.id),{
       sessionId:session.id,agentId:WORKBENCH_OWNER,attachments,references,executionContext,
       onAccepted:()=>{
-        setConversationUser(agent.getActiveRunId()!, request.content, attachments, references);
+        setConversationUser(agent.getActiveRunId()!, request.content, attachments, references, skillMentions);
         if (!queueId && request.draftRevision === undefined) persistAgentSessionHistory(agent, session.id);
         if(queueId){
           getDb().transaction(()=>{persistAgentSessionHistory(agent,session.id);acceptQueuedMessage(queueId,agent.getActiveRunId()!);})();

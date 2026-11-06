@@ -1299,6 +1299,7 @@ export interface ConversationActivity {
   icon: 'search' | 'read' | 'terminal' | 'tool';
 }
 export type ConversationRun = Pick<RunSummary, 'id' | 'status' | 'createdAt' | 'startedAt' | 'updatedAt' | 'completedAt' | 'error'>;
+export type SkillMention = Pick<SkillSummary, 'id' | 'name'>;
 export interface ConversationItem {
   id: string;
   runId: string;
@@ -1309,6 +1310,7 @@ export interface ConversationItem {
   status: string;
   attachments?: ChatAttachment[];
   references?: ContextReference[];
+  skillMentions?: SkillMention[];
 }
 export interface ConversationRound { run: ConversationRun; items: ConversationItem[] }
 export interface ConversationPage { rounds: ConversationRound[]; before?: number }

@@ -450,5 +450,8 @@
 .composer-skill-token > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .composer-skill-token > button { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 20px; height: 20px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: inherit; cursor: pointer; }
 .composer-skill-token > button:hover:enabled { background: #dbeafe; }
+.message-skill-input { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; }
+.message-skill-token { min-height: 28px; vertical-align: middle; }
+.message-skill-text { min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
 :root[data-theme="dark"] .composer-skill-token { background: #1c2d49; color: #93bdff; }
 :root[data-theme="dark"] .composer-skill-token > button:hover:enabled { background: #293f62; }

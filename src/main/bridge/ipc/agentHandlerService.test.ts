@@ -1,4 +1,5 @@
 vi.mock('../../store/conversation',()=>({recordConversationUpdate:vi.fn(),setConversationUser:vi.fn()}));
+vi.mock('../../core/skills/manager',()=>({skillsManager:{listMergedSkills:vi.fn(async()=>[])}}));
 vi.mock('../../store/taskQueue',()=>({queuedMessages:()=>[]}));
 vi.mock('../../services/taskQueueService',()=>({holdTaskQueue:vi.fn(),holdQueueAfterRun:vi.fn(),nextTaskQueueMessage:()=>undefined}));
 vi.mock('../../services/projectMemoryService',()=>({memorySnapshot:()=>undefined,scheduleProjectMemory:vi.fn()}));
@@ -10,6 +11,7 @@ const agentRuntimeMocks = vi.hoisted(() => ({
 }));
 
 const chatStoreMocks = vi.hoisted(() => ({
+  getDb: vi.fn(() => ({ prepare: () => ({ get: () => undefined }) })),
   getUnsettledRunsForAgent: vi.fn(() => []),
   getApprovalRecord: vi.fn(),
   ensureActiveSession: vi.fn(),
@@ -25,6 +27,7 @@ vi.mock('../../assistant/agentRuntime', () => ({
 }));
 
 vi.mock('../../store/chat', () => ({
+  getDb: chatStoreMocks.getDb,
   getUnsettledRunsForAgent: chatStoreMocks.getUnsettledRunsForAgent,
   getApprovalRecord: chatStoreMocks.getApprovalRecord,
   ensureActiveSession: chatStoreMocks.ensureActiveSession,
@@ -45,6 +48,8 @@ vi.mock('../../services/projectService', () => ({
 }));
 
 import { controlStoredRun, createRuntimeUpdateForwarder, mapRuntimeExecutionResult, mapRuntimeHandlerFailure, persistAgentSessionHistory, resolveRuntimeForApproval, runActiveAgentChat, runApprovalResponse, runStoredAgentAction } from './agentHandlerService';
+import { skillsManager } from '../../core/skills/manager';
+import { setConversationUser } from '../../store/conversation';
 
 describe('agentHandlerService', () => {
   beforeEach(() => {
@@ -58,6 +63,20 @@ describe('agentHandlerService', () => {
     ]) {
       mock.mockReset();
     }
+  });
+
+  it('persists selected skill identities at acceptance without rewriting the original request', async () => {
+    vi.mocked(skillsManager.listMergedSkills).mockResolvedValueOnce([{ id: 'search', name: '搜索助手', userInvocable: true }] as never);
+    const agent = {
+      setHistory: vi.fn(), getActiveRunId: () => 'skill-run', getSessionHistory: () => [],
+      chat: vi.fn(async (_content, _forward, options) => { options.onAccepted(); return { status: 'completed', runId: 'skill-run', content: 'done' }; })
+    };
+    agentRuntimeMocks.ensureAgentRuntime.mockResolvedValue(agent);
+    chatStoreMocks.getSessionById.mockReturnValue({ id: 's', messages: [] });
+    const result = await runActiveAgentChat({ sessionId: 's', content: '/search 今日新闻' }, { isDestroyed: () => false, send: vi.fn() } as never);
+    expect(result.success).toBe(true);
+    expect(setConversationUser).toHaveBeenCalledWith('skill-run', '/search 今日新闻', undefined, [], [{ id: 'search', name: '搜索助手' }]);
+    expect(agent.chat).toHaveBeenCalledWith('/search 今日新闻', expect.any(Function), expect.any(Object));
   });
 
   it('rejects stale approvals and cancelled checkpoints before initializing a runtime', async () => {

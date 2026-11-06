@@ -14,6 +14,7 @@ await build({entryPoints:['src/renderer/main.tsx'],outfile:path.join(output,'ren
 await fs.copyFile('public/icon.png',path.join(output,'icon.png'));
 await fs.writeFile(path.join(output,'index.html'),'<!doctype html><html><head><meta charset="UTF-8"><link rel="stylesheet" href="renderer.css"></head><body><div id="root"></div><script src="renderer.js"></script></body></html>');
 console.log(`Unified workbench evidence: ${output}`);
+if(process.env.GITHUB_ENV) await fs.appendFile(process.env.GITHUB_ENV,`KAIROPILOT_NATIVE_EVIDENCE=${output}\n`);
 for (const phase of ['1','2','3']) {
  const child=spawn(require('electron'),[path.join(output,'entry.cjs')],{cwd:root,env:{...process.env,KAIROPILOT_TEST_ROOT:path.join(output,'data'),KAIROPILOT_UNIFIED_OUTPUT:output,KAIROPILOT_UNIFIED_PHASE:phase},stdio:['ignore','pipe','pipe']});
  let stderr='';child.stdout.resume();child.stderr.on('data',chunk=>{stderr=(stderr+chunk.toString()).slice(-30000);});

@@ -60,5 +60,18 @@ jobs:
       - name: Run isolated native acceptance
         run: npm run smoke:native
 
+      - name: Upload native acceptance failure evidence
+        if: ${{ failure() && env.KAIROPILOT_NATIVE_EVIDENCE != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-workbench-failure-${{ github.run_attempt }}
+          path: |
+            ${{ env.KAIROPILOT_NATIVE_EVIDENCE }}/report-*.json
+            ${{ env.KAIROPILOT_NATIVE_EVIDENCE }}/stderr-*.log
+            ${{ env.KAIROPILOT_NATIVE_EVIDENCE }}/*.png
+            ${{ env.KAIROPILOT_NATIVE_EVIDENCE }}/skills-slash-error.json
+          if-no-files-found: warn
+          retention-days: 7
+
       - name: Package macOS application without publishing
         run: npx electron-builder --mac --dir --publish never

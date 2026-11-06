@@ -88,7 +88,7 @@ export function useSkillCompletion(input: string, setInput: (value: string) => v
   };
   return {
     id, menu, open, choices, activeIndex, loading, error, choose, keyDown,
-    selected, text, remove, setText,
+    skills, selected, text, remove, setText,
     setActive, retry: () => setRetry(value => value + 1),
     inputProps: {
       role: 'combobox' as const, 'aria-autocomplete': 'list' as const, 'aria-expanded': open,

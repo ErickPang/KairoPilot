@@ -45,6 +45,7 @@ export interface Message {
   content?: string;
   attachments?: ChatAttachment[];
   references?: import('../shared/contracts').ContextReference[];
+  skillMentions?: import('../shared/contracts').SkillMention[];
   details?: Record<string, unknown>;
   tool_calls?: Record<string, unknown>[];
   tool_call_id?: string;

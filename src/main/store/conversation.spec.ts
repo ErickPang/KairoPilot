@@ -12,6 +12,14 @@ beforeEach(() => {
  state.run={id:'r',sessionId:'s',agentId:'a',goal:'read',userInput:'read',status:'running',createdAt:1,updatedAt:1};
 });
 describe('persisted conversation', () => {
+ it('returns the sent skill snapshot without needing the current skill catalog', () => {
+  const skillMentions = [{ id: 'search', name: '发送时的技能名称' }];
+  setConversationUser('r', '/search 今天的新闻', undefined, undefined, skillMentions);
+  skillMentions[0].name = '已经改名';
+  expect(getConversationPage('s').rounds[0].items[0]).toMatchObject({
+   content: '/search 今天的新闻', skillMentions: [{ id: 'search', name: '发送时的技能名称' }]
+  });
+ });
  it('keeps streaming identity, commentary order and a distinct final across reloads', () => {
   setConversationUser('r','read');
   recordConversationUpdate({type:'assistant-delta',runId:'r',stepId:'m1',delta:'checking',content:'checking'});

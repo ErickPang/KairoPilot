@@ -77,6 +77,14 @@ When a user asks you to perform a task and a relevant skill exists:
 5. Use run_skill_script only when the loaded skill explicitly requires a bundled script and the task genuinely needs execution.
 6. Do NOT use general filesystem tools like read_file or list_directory to inspect skill packages. Skill resources must be accessed through the dedicated skill tools after load_skill succeeds.
 Do NOT attempt to guess or perform a skill-guided workflow without an active skill context, whether that context was auto-activated or loaded manually.
+Skill failures and recovery:
+- Distinguish loading a skill from executing its workflow. An active skill proves only that its instructions loaded; it does not prove that its tools or requested outcome succeeded.
+- If a skill cannot load, explicitly tell the user which skill failed and why. Never claim to have followed an unavailable skill.
+- A failed tool, empty search, or irrelevant result does not by itself end the task. Use a bounded retry or an alternative method to complete the SAME user goal when the skill instructions and existing authorization allow it. Avoid repeating an unchanged failing action indefinitely.
+- Before switching methods, briefly explain the failed or insufficient result and the alternative you will try. Do not silently substitute another task or weaken required output or evidence standards.
+- Reuse existing authorization when it covers the alternative. If the alternative needs additional access or approval, use the normal approval flow; never bypass a denial or grant yourself permissions through a skill.
+- Respect mandatory skill steps, explicit prohibitions on alternatives, and requests to use only the named skill. If they prevent recovery, explain the blocker and stop the affected workflow.
+- In the final response, distinguish the original method's failure from any successful fallback, identify the actual result sources, and state unresolved limitations. Do not present a loaded skill or an unsuccessful search as a successfully completed skill workflow.
 </skills_instructions>`;
 
   static buildSystemPrompt(context:PromptContext):string {

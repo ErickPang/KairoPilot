@@ -1,10 +1,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { BrowserWindow } from 'electron';
-import type { SessionSummary, TaskDraft } from '../src/shared/contracts';
+import type { SessionSummary, TaskDraft, SkillSummary } from '../src/shared/contracts';
 import { KAIRO_INVOKE as C } from '../src/shared/ipc';
 
-export async function verifySlashSkills(
+async function verifySlashSkillFlow(
   window: BrowserWindow,
   invoke: <T = unknown>(channel: string, ...args: unknown[]) => Promise<T>,
   output: string,
@@ -33,14 +33,46 @@ export async function verifySlashSkills(
   assert(await wait(`document.querySelector('.chat-interface[data-session-id="${task.id}"][data-save-state="saved"] .input-textarea:not(:disabled)')`), 'slash: ready composer restores the selected task');
   await type('/');
   const listed = await wait(`document.querySelector('[data-skill-choice="b2-manual"]') && document.querySelector('[data-skill-choice="b2-workflow"]')`);
-  if (!listed) {
-    fs.writeFileSync(path.join(output, 'skills-slash-error.png'), (await window.webContents.capturePage()).toPNG());
-    fs.writeFileSync(path.join(output, 'skills-slash-error.json'), JSON.stringify(await js(`(()=>{const input=document.querySelector('.input-textarea');return {value:input.value,caret:input.selectionStart,focused:document.activeElement===input,html:input.outerHTML,menu:document.querySelector('[data-skill-completion]')?.outerHTML};})()`), null, 2));
-  }
   assert(listed, 'slash: empty query lists installed skills including manual-only skills');
   assert(await js(`!document.querySelector('[data-skill-choice="b2-hidden"]')`), 'slash: skills that disallow user invocation are excluded');
-  assert(await js(`(()=>{const list=document.querySelector('.skill-completion-options');const row=list.querySelector('[role="option"]');return list.querySelectorAll('[role="option"]').length>5 && Math.abs(list.clientHeight-row.getBoundingClientRect().height*5)<1 && list.scrollHeight>list.clientHeight;})()`), 'slash: full catalog stays available in a five-row scroll viewport');
+  const groups = await invoke<Record<string, SkillSummary[]>>(C.skillsGetAll);
+  const catalog = new Map([...(groups.public || []), ...(groups.workbench || [])].map(skill => [skill.id, skill]));
+  const expectedIds = [...catalog.values()].filter(skill => skill.userInvocable !== false).map(skill => skill.id).sort();
+  const layoutFits = `(()=>{
+    const popup=document.querySelector('[data-skill-completion]');
+    const list=popup?.querySelector('.skill-completion-options');
+    const rows=Array.from(list?.querySelectorAll('[role="option"]')||[]);
+    if(!rows.length || list.getAttribute('aria-busy')==='true')return false;
+    const ids=rows.map(row=>row.dataset.skillChoice).sort();
+    const box=popup.getBoundingClientRect(),anchor=popup.parentElement.getBoundingClientRect();
+    const top=document.querySelector('[data-global-titlebar]')?.getBoundingClientRect().bottom||0;
+    const rowHeight=rows[0].getBoundingClientRect().height;
+    const chrome=box.height-list.getBoundingClientRect().height;
+    const available=Math.floor(anchor.top-top-8-chrome);
+    const expectedHeight=Math.min(rowHeight*5,available);
+    return JSON.stringify(ids)===${JSON.stringify(JSON.stringify(expectedIds))} && rows.length>5
+      && rowHeight>0 && list.clientHeight>=rowHeight && Math.abs(list.clientHeight-expectedHeight)<=3
+      && list.scrollHeight>list.clientHeight && getComputedStyle(list).overflowY==='auto'
+      && box.top>=top-3 && box.bottom<=anchor.top+1 && box.left>=0 && box.right<=innerWidth+1;
+  })()`;
+  assert(await wait(layoutFits), 'slash: full catalog uses five rows when space permits and fits the available viewport');
   fs.writeFileSync(path.join(output, 'skills-slash-all.png'), (await window.webContents.capturePage()).toPNG());
+  const originalContentSize = window.getContentSize();
+  {
+    window.setContentSize(980, 650);
+    assert(await wait(`innerHeight<=650 && ${layoutFits} && document.querySelector('.skill-completion-options').clientHeight<document.querySelector('[role="option"]').getBoundingClientRect().height*5`), 'slash: shorter window retains every skill in a smaller scroll viewport');
+    await type('/picker-demo');
+    assert(await wait(`document.querySelectorAll('[data-skill-choice]').length===7`), 'slash: short-window filtering retains all matching skills');
+    for (let index=0;index<6;index++) {
+      await key('ArrowDown');
+      assert(await wait(`document.querySelector('[data-skill-choice="picker-demo-${index+1}"]').getAttribute('aria-selected')==='true'`), `slash: short-window Down selects skill ${index+2}`);
+    }
+    assert(await wait(`(()=>{const list=document.querySelector('.skill-completion-options');const active=list.querySelector('[aria-selected="true"]');const box=list.getBoundingClientRect(),row=active.getBoundingClientRect();return active.dataset.skillChoice==='picker-demo-6' && list.scrollTop>0 && row.top>=box.top-1 && row.bottom<=box.bottom+1;})()`), 'slash: last skill scrolls fully into view in a short window');
+    fs.writeFileSync(path.join(output, 'skills-slash-short.png'), (await window.webContents.capturePage()).toPNG());
+  }
+  window.setContentSize(...originalContentSize);
+  await type('/');
+  assert(await wait(layoutFits), 'slash: restoring window size recomputes the catalog viewport');
   await type('/picker-demo');
   await wait(`document.querySelectorAll('[data-skill-choice]').length===7`);
   assert(await wait(`document.querySelector('[data-skill-choice="picker-demo-0"]').getAttribute('aria-selected')==='true'`), 'slash: filtering starts navigation at the first skill');
@@ -142,4 +174,43 @@ export async function verifySlashSkills(
   assert(await wait(`document.querySelector('[data-run-summary="completed"]') && document.querySelector('.messages-container')?.textContent.includes('B2_DONE')`), 'slash: selected skill request completes through the real composer');
   assert(requestCount() > before && hasLoadedSkill(), 'slash: manual-only skill body is preloaded into the actual model request');
   assert(await wait(`!document.querySelector('[data-selected-skill]') && document.querySelector('.input-textarea').value===''`), 'slash: successful send clears the skill token and body together');
+  const sentSkill = `document.querySelector('.message.user [data-message-skill="b2-manual"]')`;
+  assert(await wait(`${sentSkill} && document.querySelector('.message-skill-text')?.textContent==='B2_SLASH_PICKER'`), 'slash: sent skill remains a separate token beside the original request');
+  assert(await js(`(()=>{const token=${sentSkill};return Boolean(token.querySelector('svg')) && !token.querySelector('button') && token.title==='/b2-manual';})()`), 'slash: sent token has an icon and invocation identity without composer actions');
+  await window.reload();
+  assert(await wait(`${sentSkill} && document.querySelector('.message-skill-text')?.textContent==='B2_SLASH_PICKER'`), 'slash: reloading the task restores the persisted skill token and request');
+  for (const theme of ['light', 'dark']) {
+    window.setSize(980, height);
+    await js(`document.documentElement.dataset.theme=${JSON.stringify(theme)};${sentSkill}.scrollIntoView({block:'center'})`);
+    assert(await js(`(()=>{const token=${sentSkill};const body=document.querySelector('.message-skill-text');return getComputedStyle(token).color!==getComputedStyle(body).color && document.documentElement.scrollWidth<=innerWidth+1;})()`), `slash: sent token stays distinct without overflow in ${theme}`);
+    await new Promise(resolve=>setTimeout(resolve,200));
+    fs.writeFileSync(path.join(output, `skills-sent-${theme}.png`), (await window.webContents.capturePage()).toPNG());
+  }
+  window.setSize(width, height);
+  await js(`document.documentElement.dataset.theme='light'`);
+}
+
+export async function verifySlashSkills(...args: Parameters<typeof verifySlashSkillFlow>) {
+  const [window, , output] = args;
+  try {
+    await verifySlashSkillFlow(...args);
+  } catch (error) {
+    try {
+      const measurements = await window.webContents.executeJavaScript(`(()=>{
+        const popup=document.querySelector('[data-skill-completion]');
+        const list=popup?.querySelector('.skill-completion-options');
+        const rows=Array.from(list?.querySelectorAll('[role="option"]')||[]);
+        return {viewport:{width:innerWidth,height:innerHeight,scale:devicePixelRatio},screen:{width:screen.width,height:screen.height},
+          query:document.querySelector('.input-textarea')?.value,popup:popup?.getBoundingClientRect().toJSON(),
+          anchor:popup?.parentElement.getBoundingClientRect().toJSON(),header:document.querySelector('[data-global-titlebar]')?.getBoundingClientRect().toJSON(),
+          list:list?{clientHeight:list.clientHeight,scrollHeight:list.scrollHeight,scrollTop:list.scrollTop,maxHeight:getComputedStyle(list).maxHeight,available:getComputedStyle(list).getPropertyValue('--skill-menu-space'),busy:list.getAttribute('aria-busy')}:null,
+          rows:rows.map(row=>({id:row.dataset.skillChoice,selected:row.getAttribute('aria-selected'),rect:row.getBoundingClientRect().toJSON()}))};
+      })()`);
+      const diagnostic = { error: error instanceof Error ? error.message : String(error), window: window.getBounds(), measurements };
+      fs.writeFileSync(path.join(output, 'skills-slash-error.json'), JSON.stringify(diagnostic, null, 2));
+      console.error('Slash skill diagnostics:', JSON.stringify(diagnostic));
+      fs.writeFileSync(path.join(output, 'skills-slash-error.png'), (await window.webContents.capturePage()).toPNG());
+    } catch (diagnosticError) { console.error('Could not capture slash skill diagnostics:', diagnosticError); }
+    throw error;
+  }
 }

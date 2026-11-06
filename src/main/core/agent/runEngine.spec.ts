@@ -47,6 +47,34 @@ describe('executeRunEngine', () => {
     chatStoreMocks.createRunStep.mockReturnValue({ id: 'step-1' });
   });
 
+  it.each([false, true])('continues after insufficient search results, respecting fallback approval (required=%s)', async requiresApproval => {
+    const history: ChatMessage[] = [{ role: 'user', content: '/search 今日新闻' }];
+    const chat = vi.fn()
+      .mockResolvedValueOnce({ role: 'assistant', content: '先执行技能中的搜索。', tool_calls: [{ id: 'search', function: { name: 'web_search', arguments: '{}' } }] })
+      .mockResolvedValueOnce({ role: 'assistant', content: '搜索没有取得有效结果，改为读取新闻频道。', tool_calls: [{ id: 'fetch', function: { name: 'fetch_webpage', arguments: '{}' } }] })
+      .mockResolvedValueOnce({ role: 'assistant', content: '搜索未取得有效结果，以下内容来自新闻频道页面。' });
+    const handleToolCall = vi.fn(async ({ call }: { call: { id: string; function: { name: string } } }) => {
+      if (call.function.name === 'fetch_webpage' && requiresApproval) return { type: 'waiting_approval' as const, approvalId: 'fallback-approval' };
+      history.push({ role: 'tool', tool_call_id: call.id, content: call.function.name === 'web_search' ? 'Error: no usable results' : 'Verified source content' });
+      return { type: 'continue' as const };
+    });
+    const result = await executeRunEngine({
+      llm: { chat } as unknown as LLMProvider, tools: [], runId: 'recover', userInput: '/search 今日新闻', options: { sessionId: 's' },
+      buildModelContext: () => ({ messages: [...history], metadata: createEmptyMetadata('') }),
+      handleToolCall, persistSnapshot: vi.fn(), emitUpdate: vi.fn(), pushHistory: message => { history.push(message); }, shouldBlockSensitiveDisclosure: () => false
+    });
+    expect(chat.mock.calls[1][0]).toEqual(expect.arrayContaining([expect.objectContaining({ role: 'tool', content: 'Error: no usable results' })]));
+    expect(handleToolCall).toHaveBeenCalledTimes(2);
+    if (requiresApproval) {
+      expect(result).toMatchObject({ status: 'waiting_approval', approvalId: 'fallback-approval' });
+      expect(chat).toHaveBeenCalledTimes(2);
+      expect(history).not.toContainEqual(expect.objectContaining({ role: 'tool', tool_call_id: 'fetch' }));
+    } else {
+      expect(result).toMatchObject({ status: 'completed', content: '搜索未取得有效结果，以下内容来自新闻频道页面。' });
+      expect(chat).toHaveBeenCalledTimes(3);
+    }
+  });
+
   it.each([false, true])('静默模型请求可以取消，包括最终汇总（summary=%s）', async (summary) => {
     let cancelRequested = false;
     let calls = 0;

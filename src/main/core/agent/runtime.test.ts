@@ -56,6 +56,21 @@ describe('AgentRuntime', () => {
     runtimeMocks.createRunStep.mockReturnValue({ id: 'summary-step' });
   });
 
+  it('reports an explicit skill loading failure before calling the model', async () => {
+    runtimeMocks.createRun.mockReturnValue({ id: 'skill-run' });
+    const chat = vi.fn();
+    const resolveSkills = vi.fn().mockRejectedValue(new Error('Failed to load requested skill "search": missing script'));
+    const runtime = new AgentRuntime({ chat } as never, {} as never, '/tmp/workspace', '', undefined, undefined, undefined, resolveSkills);
+    // Context assembly is unrelated to this pre-inference loading failure.
+    vi.spyOn(runtime as unknown as { buildModelContext: () => unknown }, 'buildModelContext').mockReturnValue({ metadata: {} });
+    const onUpdate = vi.fn();
+    const result = await runtime.chat('/search 新闻', onUpdate, { sessionId: 's' });
+    expect(result).toMatchObject({ status: 'failed', error: 'Failed to load requested skill "search": missing script' });
+    expect(onUpdate).toHaveBeenCalledWith(expect.objectContaining({ type: 'run-failed', runId: 'skill-run', error: result.error }));
+    expect(chat).not.toHaveBeenCalled();
+    expect(runtimeMocks.updateRun).toHaveBeenCalledWith('skill-run', expect.objectContaining({ status: 'failed', waitingApprovalId: null }));
+  });
+
   it('暂停态取消会立即将 run 标记为 cancelled', async () => {
     runtimeMocks.getRunById.mockReturnValue({
       id: 'run-1',
