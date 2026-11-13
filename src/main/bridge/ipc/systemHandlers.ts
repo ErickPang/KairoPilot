@@ -26,6 +26,12 @@ const TEXT_PREVIEW_EXTENSIONS = new Set([
 
 const IMAGE_PREVIEW_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg']);
 
+async function checkOllama(baseUrl: string) {
+  const response = await fetch(baseUrl, { signal: AbortSignal.timeout(1000) });
+  if (!response.ok) throw new Error(`HTTP Status: ${response.status}`);
+  return { running: true, message: await response.text() };
+}
+
 function registerSystemHandlers() {
   ipcMain.handle(KAIRO_INVOKE.systemStats, async () => {
     const currentCpus = os.cpus();
@@ -98,18 +104,15 @@ function registerSystemHandlers() {
     try {
       const payload = parseIpcInput(OllamaBaseUrlInputSchema, baseUrl, 'Ollama base URL');
       const url = payload || 'http://localhost:11434';
-      const response = await fetch(url);
-      if (response.ok) {
-        return { running: true, message: await response.text() };
-      }
-      return { running: false, error: `HTTP Status: ${response.status}` };
+      return await checkOllama(url);
     } catch (error) {
       return { running: false, error: error instanceof Error ? error.message : 'Unknown error' };
     }
   });
 
   ipcMain.handle(KAIRO_INVOKE.ollamaStart, async () => {
-    return new Promise((resolve) => {
+    try {
+      let startupError: string | undefined;
       const child = spawn('ollama', ['serve'], {
         detached: true,
         stdio: 'ignore',
@@ -117,15 +120,19 @@ function registerSystemHandlers() {
       });
 
       child.on('error', (err: Error) => {
-        resolve(ipcFailure(err));
+        startupError = err.message;
       });
+      child.on('exit', () => { startupError = 'Ollama exited before becoming ready.'; });
 
       child.unref();
 
-      setTimeout(() => {
-        resolve(ipcSuccess());
-      }, 2000);
-    });
+      for (let attempt = 0; attempt < 10; attempt++) {
+        if (startupError) return ipcFailure(startupError);
+        try { await checkOllama('http://localhost:11434'); return ipcSuccess(); } catch { /* Retry until the local service is ready. */ }
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+      return ipcFailure(startupError || 'Ollama did not become ready within the startup deadline.');
+    } catch (error) { return ipcFailure(error); }
   });
 
   ipcMain.handle(KAIRO_INVOKE.ollamaPull, async (event, input) => {
@@ -149,26 +156,35 @@ function registerSystemHandlers() {
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
-
-      let isDone = false;
-      while (!isDone) {
-        const { value, done } = await reader.read();
-        if (done) {
-          isDone = true;
-          continue;
-        }
-        const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split('\n').filter(line => line.trim() !== '');
-        for (const line of lines) {
-          try {
-            const data = JSON.parse(line);
-            event.sender.send(KAIRO_EVENT.ollamaPullProgress, data);
-          } catch (_error) {
-            continue;
+      let buffer = '';
+      let completed = false;
+      const progress = (line: string) => {
+        if (!line.trim()) return;
+        const data = JSON.parse(line);
+        if (!data || typeof data !== 'object') throw new Error('Invalid Ollama pull progress.');
+        if (data.error) throw new Error(String(data.error));
+        completed = data.status === 'success';
+        event.sender.send(KAIRO_EVENT.ollamaPullProgress, data);
+      };
+      try {
+        for (;;) {
+          const { value, done } = await reader.read();
+          buffer += done ? decoder.decode() : decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop()!;
+          for (const line of lines) progress(line);
+          if (done) {
+            progress(buffer);
+            break;
           }
         }
+      } catch (error) {
+        await reader.cancel().catch(() => {});
+        throw error;
+      } finally {
+        reader.releaseLock();
       }
-
+      if (!completed) return ipcFailure('Ollama pull ended before reporting success.');
       return ipcSuccess();
     } catch (error) {
       return ipcFailure(error);

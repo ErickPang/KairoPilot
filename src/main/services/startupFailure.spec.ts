@@ -12,6 +12,6 @@ it('reports a redacted initialization failure and exits instead of retaining an 
 });
 it('still exits if the operating system cannot display the startup error dialog', () => {
   electron.dialog.showErrorBox.mockImplementation(() => { throw new Error('Dialog unavailable'); });
-  expect(() => handleStartupFailure(new Error('Migration failed'))).toThrow('Dialog unavailable');
+  expect(() => handleStartupFailure(new Error('Migration failed'))).not.toThrow();
   expect(electron.app.quit).toHaveBeenCalledOnce();
 });

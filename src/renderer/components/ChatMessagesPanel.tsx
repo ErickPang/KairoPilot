@@ -8,21 +8,21 @@ import { isRunUnsettled } from '../hooks/runtimeEventUtils';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { Message } from '../types';
-import type { ContextReference, RunSummary, ConversationItem, SkillMention } from '../../shared/contracts';
+import type { ContextReference, RunSummary, ConversationItem } from '../../shared/contracts';
 import { splitSkillInput } from '../../shared/skillInvocation';
 import { IconSkill } from './Icons';
 import { AttachmentList } from './AttachmentList';
-import { visibleUserText } from './chatMessagePresentation';
+import { ConversationNavigation } from './ConversationNavigation';
 import type { I18nContextValue } from './layout/I18nContext';
 
 interface ChatMessagesPanelProps {
-  skills?: SkillMention[];
   sessionId: string | null;
   run: RunSummary | null;
   feed: ReturnType<typeof useConversationFeed>;
   onViewReference: (reference: ContextReference) => void;
   containerRef: React.RefObject<HTMLDivElement>;
   loading: boolean;
+  onNavigate?: () => void;
   markdownComponents: React.ComponentProps<typeof ReactMarkdown>['components'];
   messagesEndRef: React.RefObject<HTMLDivElement>;
   t: I18nContextValue['t'];
@@ -32,7 +32,6 @@ interface ChatMessagesPanelProps {
 const MARKDOWN_REMARK_PLUGINS = [remarkGfm];
 
 interface MessageBodyProps {
-  skills?: SkillMention[];
   onViewReference: (reference: ContextReference) => void;
   markdownComponents: React.ComponentProps<typeof ReactMarkdown>['components'];
   msg: Message;
@@ -41,7 +40,6 @@ interface MessageBodyProps {
 }
 
 const MessageBody = React.memo(function MessageBody({
-  skills = [],
   onViewReference,
   markdownComponents,
   msg,
@@ -50,8 +48,8 @@ const MessageBody = React.memo(function MessageBody({
   const shouldRenderPrewrap = msg.role === 'user' || msg.role === 'tool';
 
   if (shouldRenderPrewrap) {
-    const content = msg.role === 'user' ? visibleUserText(msg.content || '', msg.attachments) : msg.content;
-    const invocation = msg.role === 'user' ? splitSkillInput(content || '', msg.skillMentions ?? skills, true) : null;
+    const content = msg.content;
+    const invocation = msg.role === 'user' ? splitSkillInput(content || '', msg.skillMentions ?? [], true) : null;
     return (
       <div className="message-prewrap">
         {invocation?.selected.length ? <div className="message-skill-input">
@@ -79,7 +77,6 @@ interface MessageRowProps extends MessageBodyProps {
 }
 
 const MessageRow = React.memo(function MessageRow({
-  skills,
   className = '',
   onViewReference,
   markdownComponents,
@@ -91,7 +88,6 @@ const MessageRow = React.memo(function MessageRow({
     <div className={`message ${msg.role} ${className}`}>
       <div className="message-content">
         <MessageBody
-          skills={skills}
           onViewReference={onViewReference}
           markdownComponents={markdownComponents}
           msg={msg}
@@ -111,16 +107,16 @@ export const ChatMessagesPanel = React.memo(function ChatMessagesPanel(props: Ch
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
   }, [loading, run]);
-  const row = (item: ConversationItem) => <MessageRow key={item.id} skills={props.skills} msg={{ role: item.kind === 'user' ? 'user' : 'assistant', content: item.content, attachments: item.attachments, references: item.references, skillMentions: item.skillMentions }} onViewReference={props.onViewReference} markdownComponents={props.markdownComponents} t={t} toRenderableMarkdown={props.toRenderableMarkdown}/>;
+  const row = (item: ConversationItem) => <MessageRow key={item.id} msg={{ role: item.kind === 'user' ? 'user' : 'assistant', content: item.content, attachments: item.attachments, references: item.references, skillMentions: item.skillMentions }} onViewReference={props.onViewReference} markdownComponents={props.markdownComponents} t={t} toRenderableMarkdown={props.toRenderableMarkdown}/>;
   const rounds = feed.data?.rounds || [];
-  return <div ref={containerRef} className="messages-container">
+  return <div className="conversation-viewport"><div ref={containerRef} className="messages-container">
     {feed.error && <p role="alert" className="workbench-error">{feed.error}</p>}
-    {(feed.data?.before || feed.before) && <div className="workbench-history-toolbar">
-      <button disabled={!feed.data?.before} onClick={feed.earlier}>{t('workbench.viewHistory')}</button>
-      {feed.before && <button onClick={feed.recent}>{t('workbench.returnRecent')}</button>}
+    {(feed.data?.before || feed.isHistory) && <div className="workbench-history-toolbar">
+      <button disabled={!feed.data?.before} onClick={() => { props.onNavigate?.(); feed.earlier(); }}>{t('workbench.viewHistory')}</button>
+      {feed.isHistory && <button onClick={feed.recent}>{t('workbench.returnRecent')}</button>}
     </div>}
     {!rounds.length && !loading && <div className="chat-empty-state"><h2 className="chat-empty-title">{t('chat.startTaskTitle')}</h2><p className="chat-empty-description">{t('chat.startTaskDescription')}</p></div>}
-    {rounds.map(round => <React.Fragment key={round.run.id}>
+    {rounds.map(round => <section className="conversation-round" data-conversation-round={round.run.id} key={round.run.id}>
       {round.items.filter(item => item.kind === 'user').map(row)}
       <ConversationProcess run={round.run} now={now} live={isRunUnsettled(round.run) && round.run.status !== 'paused'}>
         <div className="conversation-process-body">
@@ -130,9 +126,9 @@ export const ChatMessagesPanel = React.memo(function ChatMessagesPanel(props: Ch
         </div>
       </ConversationProcess>
       {round.items.filter(item => item.kind === 'final').map(item => <div className="conversation-final-answer" key={item.id}>{row(item)}</div>)}
-    </React.Fragment>)}
+    </section>)}
     <div ref={messagesEndRef}/>
-  </div>;
+  </div><ConversationNavigation sessionId={sessionId} feed={feed} containerRef={containerRef} onNavigate={props.onNavigate}/></div>;
 });
 
 export function ToolActivity({ item, sessionId }: { item: ConversationItem; sessionId: string }) {

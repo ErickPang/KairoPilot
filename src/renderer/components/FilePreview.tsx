@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { KAIRO_INVOKE } from '../../shared/ipc';
@@ -84,21 +84,26 @@ export function FilePreview({ filePath, onInsertPath, isExpanded, onToggleExpand
   const [loading, setLoading] = useState(false);
   const [mode, setMode] = useState<PreviewMode>('code');
 
-  const loadPreview = useCallback(async () => {
+  useEffect(() => {
+    let current = true;
+    setPreview(null);
     if (!filePath) {
-      setPreview(null);
+      setLoading(false);
       return;
     }
-
     setLoading(true);
-    const result = await window.kairo.invoke(KAIRO_INVOKE.systemReadFilePreview, filePath) as FilePreviewPayload;
-    setPreview(result);
-    setLoading(false);
+    void (async () => {
+      try {
+        const result = await window.kairo.invoke(KAIRO_INVOKE.systemReadFilePreview, filePath) as FilePreviewPayload;
+        if (current) setPreview(result);
+      } catch (error) {
+        if (current) setPreview({ kind: 'error', path: filePath, error: error instanceof Error ? error.message : String(error) });
+      } finally {
+        if (current) setLoading(false);
+      }
+    })();
+    return () => { current = false; };
   }, [filePath]);
-
-  useEffect(() => {
-    void loadPreview();
-  }, [loadPreview]);
 
   useEffect(() => {
     setMode(getDefaultPreviewMode(preview));

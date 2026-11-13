@@ -1,5 +1,6 @@
 export const KAIRO_INVOKE = {
   chatConversation: 'chat:conversation',
+  chatConversationNavigation: 'chat:conversation-navigation',
   chatConversationDetails: 'chat:conversation-details',
   usageOverview:'usage:overview',
   taskQueueList:'task:queue-list',
@@ -80,6 +81,10 @@ export const KAIRO_INVOKE = {
   ollamaListModels: 'ollama:listModels',
   ollamaDeleteModel: 'ollama:deleteModel',
   pluginsGetInstalled: 'plugins:getInstalled',
+  pluginsConnectionList: 'plugins:connection-list',
+  pluginsConnectionConnect: 'plugins:connection-connect',
+  pluginsConnectionApprove: 'plugins:connection-approve',
+  pluginsConnectionDisconnect: 'plugins:connection-disconnect',
   pluginsGetStoreByRegistry: 'plugins:getStoreByRegistry',
   pluginsGetStore: 'plugins:getStore',
   pluginsPrepareInstall: 'plugins:prepareInstall',

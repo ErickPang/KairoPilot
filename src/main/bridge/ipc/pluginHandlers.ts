@@ -30,8 +30,44 @@ import {
   PluginSetEnabledInputSchema
 } from './skillPluginValidation';
 import { ipcFailure, ipcSuccess } from './ipcResult';
+import { z } from 'zod';
+import { pluginManager } from '../../core/plugins/manager';
+import { getActiveSessionSummary } from '../../store/taskPages';
+import { permissionGuardForSession } from '../../services/projectService';
+import { assertTaskMutable } from '../../services/workbenchExecution';
+import { addAuditLog } from '../../store/audit';
+
+const ConnectionInput = z.object({ id: z.string().min(1), scope: z.string().min(1), sessionId: z.string().min(1), connectionId: z.string().min(1).optional(), expectedHash: z.string().optional(), catalogHash: z.string().optional(), token: z.string().max(16000).optional() }).strict();
+function connectionContext(sessionId: string, mutable = false) {
+  const task = getActiveSessionSummary(undefined);
+  if (!task || task.id !== sessionId || task.archivedAt) throw new Error('Select the active, unarchived task before changing a connection.');
+  if (mutable) assertTaskMutable(task.id);
+  return { sessionId, guard: permissionGuardForSession(task) };
+}
 
 function registerPluginHandlers() {
+  ipcMain.handle(KAIRO_INVOKE.pluginsConnectionList, async (_, value) => {
+    const input = ConnectionInput.parse(value);
+    return pluginManager.connectionStates(input.id, input.scope, connectionContext(input.sessionId));
+  });
+  for (const [channel, action] of [[KAIRO_INVOKE.pluginsConnectionConnect, 'connect'], [KAIRO_INVOKE.pluginsConnectionApprove, 'approve'], [KAIRO_INVOKE.pluginsConnectionDisconnect, 'disconnect']] as const) {
+    ipcMain.handle(channel, async (_, value) => {
+      try {
+        const input = ConnectionInput.parse(value); const context = connectionContext(input.sessionId, action !== 'disconnect');
+        if (!input.connectionId) throw new Error('Connection ID is required.');
+        let state;
+        if (action === 'connect') {
+          if (!input.expectedHash) throw new Error('Reviewed package hash is required.');
+          state = await pluginManager.connect(input.id, input.scope, input.connectionId, input.expectedHash, context, input.token);
+        } else if (action === 'approve') {
+          if (!input.catalogHash) throw new Error('Reviewed catalog hash is required.');
+          state = await pluginManager.approveCatalog(input.id, input.scope, input.connectionId, input.catalogHash, context);
+        } else await pluginManager.disconnect(input.id, input.scope, input.sessionId, input.connectionId);
+        addAuditLog({ tool: `plugin_connection_${action}`, args: { pluginId: input.id, scope: input.scope, connectionId: input.connectionId, packageHash: input.expectedHash, catalogHash: input.catalogHash }, sessionId: input.sessionId, result: { success: true }, policyTags: ['plugin:connection', `decision:${action}`] });
+        return { success: true, state };
+      } catch { return ipcFailure('MCP connection action failed. Check task permissions, package integrity, endpoint access and connection mode.'); }
+    });
+  }
   ipcMain.handle(KAIRO_INVOKE.pluginsGetStore, async () => {
     return getStorePlugins();
   });

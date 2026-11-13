@@ -2,12 +2,12 @@ import { DatabaseSync } from 'node:sqlite';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RunSummary } from '../../shared/contracts';
 const state = vi.hoisted(() => ({ db: null as unknown as DatabaseSync, run: null as unknown as RunSummary }));
-vi.mock('./chat', () => ({ getDb: () => state.db, getRunById: () => state.run }));
+vi.mock('./chat', () => ({ getDb: () => state.db, getRunById: (id: string) => ({ ...state.run, id }) }));
 vi.mock('./taskPages', () => ({ getOwnedSessionSummary: (_: unknown, id: string) => id === 's' ? { id } : null }));
-import { setConversationUser, recordConversationUpdate, getConversationPage, getConversationDetails } from './conversation';
+import { setConversationUser, recordConversationUpdate, getConversationPage, getConversationDetails, getConversationNavigation } from './conversation';
 beforeEach(() => {
  state.db?.close(); state.db = new DatabaseSync(':memory:');
- state.db.exec(`CREATE TABLE runs(id TEXT PRIMARY KEY,session_id TEXT);INSERT INTO runs VALUES('r','s');
+ state.db.exec(`CREATE TABLE runs(id TEXT PRIMARY KEY,session_id TEXT,status TEXT DEFAULT 'completed');INSERT INTO runs(id,session_id) VALUES('r','s');
  CREATE TABLE conversation_items(id TEXT PRIMARY KEY,run_id TEXT,sequence INTEGER,kind TEXT,content TEXT,status TEXT,details TEXT,metadata TEXT,UNIQUE(run_id,sequence));`);
  state.run={id:'r',sessionId:'s',agentId:'a',goal:'read',userInput:'read',status:'running',createdAt:1,updatedAt:1};
 });
@@ -44,5 +44,45 @@ describe('persisted conversation', () => {
   expect(getConversationDetails('s',tools[1].id)).toEqual({output:'loaded',error:''});
   expect(getConversationDetails('s',tools[0].id)).toEqual({output:'',error:'bad argument'});
   expect(()=>getConversationDetails('foreign',tools[0].id)).toThrow();
+ });
+});
+
+
+describe('conversation navigation', () => {
+ function seed(count: number) {
+  const insert = state.db.prepare("INSERT INTO runs(id,session_id) VALUES(?,'s')");
+  for (let index = 1; index <= count; index++) { insert.run(`r${index}`); setConversationUser(`r${index}`, `Question ${index}`); }
+ }
+ it('pages bounded previews in chronological order without exposing details or attachment metadata', () => {
+  seed(125);
+  state.db.prepare("UPDATE conversation_items SET content=?,details=?,metadata=? WHERE id='r125:user'").run('Q'.repeat(500), 'SECRET_DETAILS', JSON.stringify({ attachments: [{ name: 'SECRET_ATTACHMENT' }] }));
+  state.db.prepare("INSERT INTO conversation_items VALUES('f','r125',1,'final',?,'completed',NULL,NULL)").run('A'.repeat(500));
+  const page = getConversationNavigation('s');
+  expect(page.entries).toHaveLength(100);
+  expect(page.entries[0].runId).toBe('r26');
+  expect(page.entries[page.entries.length - 1]).toMatchObject({ runId: 'r125', question: 'Q'.repeat(160), answer: 'A'.repeat(240) });
+  expect(JSON.stringify(page)).not.toContain('SECRET');
+  const older = getConversationNavigation('s', page.before);
+  expect(older.entries).toHaveLength(25);
+  expect(older.entries.map(entry => entry.runId)).not.toContain('r26');
+  expect(older.before).toBeUndefined();
+ });
+ it('loads a selected old round and its following context without rendering the entire history', () => {
+  seed(65);
+  expect(getConversationPage('s').rounds[0].run.id).toBe('r46');
+  const selected = getConversationPage('s', undefined, 'r5');
+  expect(selected.rounds).toHaveLength(20);
+  expect(selected.rounds[0].run.id).toBe('r5');
+  expect(selected.rounds[selected.rounds.length - 1]?.run.id).toBe('r24');
+  expect(getConversationPage('s', selected.before).rounds.map(round => round.run.id)).toEqual(['r1','r2','r3','r4']);
+  expect(getConversationPage('s', undefined, 'r65').rounds.slice(-1)[0]?.run.id).toBe('r65');
+ });
+ it('rejects a foreign or empty round even when the session itself is valid', () => {
+  state.db.prepare("INSERT INTO runs(id,session_id) VALUES('foreign','other')").run();
+  setConversationUser('foreign','private');
+  expect(() => getConversationNavigation('other')).toThrow('Task not found');
+  expect(() => getConversationPage('s',undefined,'foreign')).toThrow('not found in this task');
+  expect(() => getConversationPage('s',undefined,'r')).toThrow('not found in this task');
+  expect(getConversationNavigation('s').entries).toEqual([]);
  });
 });

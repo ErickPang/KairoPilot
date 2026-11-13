@@ -5,7 +5,7 @@ import path from 'node:path';
 import http from 'node:http';
 import {z} from 'zod';
 import {ensureAppPaths} from '../src/main/services/appRuntime';
-import {readKairoPilotConfig,initializeKairoPilotConfig} from '../src/main/store/configRepository';
+import {loadKairoPilotConfigFromDiskAsync,initializeKairoPilotConfig} from '../src/main/store/configRepository';
 import {splitAgentModel} from '../src/main/store/configModelUtils';
 import {DEFAULT_CONFIG} from '../src/main/store/configDefaults';
 import {createDefaultAgentPermissions,createDefaultPolicyConfig} from '../src/shared/contracts';
@@ -37,7 +37,7 @@ let server:http.Server|undefined;
 async function run(){
  await app.whenReady();
  // Read the configured model and credential only. Never initialize or write the real profile.
- const source=readKairoPilotConfig(path.join(os.homedir(),'.kairopilot','kairopilot.json'));
+ const source=(await loadKairoPilotConfigFromDiskAsync(path.join(os.homedir(),'.kairopilot','kairopilot.json'))).config;
  binding=source.workbench!.defaultModel;
  const selected=splitAgentModel(binding);
  const provider=selected?source.models.providers[selected.providerKey]:undefined;
@@ -71,7 +71,7 @@ async function run(){
  const permissions={...createDefaultAgentPermissions(),executionProfile:'read_only_workspace' as const,policy:{...createDefaultPolicyConfig('read_only_workspace'),approvalMode:'never' as const},fileSystem:{read:true,write:false,allowedPaths:[]},shell:{enabled:false,allowedCommands:[]},network:{enabled:false,allowedDomains:[]}};
  config.workbench={version:2,defaultModel:`acceptance/${selected.modelId}`,permissions,managementRoot:path.join(paths.userDataPath,'workbench'),instructionRoot:paths.userDataPath,instructions:''};
  fs.writeFileSync(path.join(paths.userDataPath,'kairopilot.json'),JSON.stringify(config),{mode:0o600});
- initializeKairoPilotConfig();
+ await initializeKairoPilotConfig();
  const root=path.join(paths.userDataPath,'synthetic-project');fs.mkdirSync(root);
  fs.writeFileSync(path.join(root,'alpha.txt'),'Synthetic Atlas alpha module: timeout=17; owner=Team Cedar; validation=unit-alpha.');
  fs.writeFileSync(path.join(root,'beta.txt'),'Synthetic Atlas beta module: timeout=29; owner=Team Pine; validation=unit-beta.');

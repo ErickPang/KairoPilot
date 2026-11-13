@@ -469,6 +469,10 @@ export interface ProjectSummary {
 
 
 
+export type QuitDraftFailureReason = 'conflict' | 'save_failed' | 'preparation_pending' | 'not_ready' | 'unsaved_input';
+
+export type QuitDraftResponse = { id: string; saved: true } | { id: string; saved: false; reason: QuitDraftFailureReason };
+
 export interface SessionSummary extends SessionProjectContext {
   id: string
   title: string
@@ -946,6 +950,34 @@ export interface PluginToolManifest {
   name: string
   description: string
   requiredPermissions?: PluginPermissionRequirement
+  connectionId?: string
+  inputSchema?: Record<string, unknown>
+}
+
+export type PluginConnection = {
+  id: string
+  name: string
+} & ({ transport: 'http'; url: string } | {
+  transport: 'stdio'
+  command: string
+  args: string[]
+  executionMode: 'restricted-local' | 'trusted-local'
+})
+
+export interface PluginPackage {
+  manifest: PluginManifest
+  /** UTF-8 resources owned by this package; never evaluated by the application. */
+  files: Record<string, string>
+}
+
+export interface PluginConnectionState {
+  id: string
+  name: string
+  transport: 'http' | 'stdio'
+  executionMode: 'remote' | 'restricted-local' | 'trusted-local'
+  status: 'disconnected' | 'connected' | 'catalog_changed' | 'unavailable'
+  tools: Array<{ name: string; description: string; inputSchema: Record<string, unknown> }>
+  catalogHash?: string
 }
 
 export interface PluginPermissionRequirement {
@@ -973,6 +1005,7 @@ export interface PluginCapabilityDeclaration {
 }
 
 export interface PluginManifest {
+  packageVersion?: 1
   id: string
   name: string
   description: string
@@ -985,6 +1018,8 @@ export interface PluginManifest {
   checksum?: string
   signature?: string
   entry?: string
+  connections?: PluginConnection[]
+  skills?: string[]
   tools: PluginToolManifest[]
   capabilities: PluginCapabilityDeclaration[]
   riskLevel: RiskLevel
@@ -1002,6 +1037,7 @@ export interface PluginRegistryEntry extends PluginManifest {
   }
   enabled?: boolean
   previousVersion?: PluginRollbackSnapshot
+  runtimeStatus?: 'ready' | 'legacy_blocked' | 'unavailable'
 }
 
 export interface PluginRollbackSnapshot {
@@ -1022,7 +1058,7 @@ export interface PluginStoreInlineSource {
   code: string
 }
 
-export type PluginStoreSource = PluginStoreHttpSource | PluginStoreInlineSource
+export type PluginStoreSource = PluginStoreHttpSource | PluginStoreInlineSource | { type: 'package'; package: PluginPackage }
 
 export interface PluginStoreEntry extends PluginManifest {
   marketplace?: string
@@ -1314,3 +1350,11 @@ export interface ConversationItem {
 }
 export interface ConversationRound { run: ConversationRun; items: ConversationItem[] }
 export interface ConversationPage { rounds: ConversationRound[]; before?: number }
+export interface ConversationNavigationEntry {
+  runId: string;
+  cursor: number;
+  question: string;
+  answer: string;
+  status: RunSummary['status'];
+}
+export interface ConversationNavigationPage { entries: ConversationNavigationEntry[]; before?: number }

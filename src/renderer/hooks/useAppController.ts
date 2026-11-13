@@ -79,7 +79,6 @@ export function useAppController(beforeNavigate?: () => Promise<void>) {
   const {
     activeAgentName,
     agents,
-    availableModels,
     describeProvider,
     fetchModels,
     handleDeleteModel,
@@ -161,7 +160,6 @@ export function useAppController(beforeNavigate?: () => Promise<void>) {
     activeTab,
     agents,
     actionConfirmation,
-    availableModels,
     confirmationRequest: sessionContext.confirmationRequest,
     reportAppError,
     reportAppNotice,

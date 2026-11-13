@@ -9,6 +9,7 @@ import { WORKBENCH_OWNER } from '../store/configWorkbench';
 import {readAgentsDirectory,writeAgentsFile,instructionHash} from '../core/instructions/agents';
 import { assertWorkbenchIdle } from './workbenchExecution';
 import { clearSessionApprovalGrants } from '../store/approvalGrants';
+import { revokePluginConnections } from '../core/plugins/connectionManager';
 
 export function getWorkbenchConfig(): WorkbenchConfig {
  const config=readKairoPilotConfig().workbench!;const source=readAgentsDirectory(config.instructionRoot||config.managementRoot,'global');
@@ -55,7 +56,7 @@ export function saveWorkbenchConfig(value: WorkbenchSettingsInput) {
   try {
     writeAgentsFile(globalRoot,instructions,name);
     config.workbench={...current,...settings,instructions:'',version:2};saveKairoPilotConfig(config);
-    if (JSON.stringify(current.permissions)!==JSON.stringify(config.workbench.permissions)) clearSessionApprovalGrants();
+    if (JSON.stringify(current.permissions)!==JSON.stringify(config.workbench.permissions)) { clearSessionApprovalGrants(); revokePluginConnections(); }
 
   }catch(error){if(previous!==undefined)writeAgentsFile(globalRoot,previous,name);else if(fs.existsSync(file))fs.unlinkSync(file);throw error;}
 }

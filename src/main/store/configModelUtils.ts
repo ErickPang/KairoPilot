@@ -4,36 +4,19 @@ import { resolveConfigSecret } from './configSecrets';
 
 const PROVIDER_TYPES: ProviderType[] = ['openai', 'openrouter', 'ollama', 'anthropic', 'deepseek', 'zhipu', 'kimi', 'qianwen', 'custom'];
 
-function resolveProviderType(value: unknown, providerKey: string): ProviderType {
-  if (typeof value === 'string' && PROVIDER_TYPES.includes(value as ProviderType)) {
-    return value as ProviderType;
-  }
-  const normalizedKey = providerKey.toLowerCase();
-  if (PROVIDER_TYPES.includes(normalizedKey as ProviderType)) {
-    return normalizedKey as ProviderType;
-  }
-  return 'custom';
-}
-
 export function isValidProviderKey(value: string): boolean {
   return /^[a-zA-Z][a-zA-Z0-9_-]*$/.test(value);
 }
 
-export function normalizeProvider(provider: Partial<ProviderConfig> & { model?: unknown }, fallbackProviderKey: string): ProviderConfig {
-  const resolvedProviderType = resolveProviderType(provider.provider, fallbackProviderKey);
-  const rawModel = provider.model;
-  const rawModelObject = rawModel && typeof rawModel === 'object' ? rawModel as { list?: unknown[] } : undefined;
-  const rawModelList = Array.isArray(rawModel)
-    ? rawModel
-    : (Array.isArray(rawModelObject?.list) ? rawModelObject.list : []);
-  const modelList = rawModelList
-    .filter(item => item && typeof item === 'object' && typeof (item as { id?: unknown }).id === 'string')
-    .map(item => {
-      const model=item as {id:string;name?:string;contextWindowTokens?:number};
-      const validLimit=typeof model.contextWindowTokens==='number'&&Number.isInteger(model.contextWindowTokens)&&model.contextWindowTokens>=4096&&model.contextWindowTokens<=2000000;
-      return {id:String(model.id),name:String(model.name||model.id),...(validLimit?{contextWindowTokens:model.contextWindowTokens}:{})};
-    });
-  const finalModelList = modelList.length > 0 ? modelList : [{ id: 'gpt-4o', name: 'gpt-4o' }];
+export function normalizeProvider(provider: Partial<ProviderConfig> & { model?: unknown }, providerKey: string): ProviderConfig {
+  if (!PROVIDER_TYPES.includes(provider.provider as ProviderType)) throw new Error(`Invalid provider type for ${providerKey}.`);
+  const resolvedProviderType = provider.provider!;
+  if (!Array.isArray(provider.model) || provider.model.length === 0) throw new Error(`Model list is required for ${providerKey}.`);
+  const modelList = provider.model.map(item => {
+    if (!item || typeof item.id !== 'string' || !item.id.trim() || typeof item.name !== 'string' || !item.name.trim()) throw new Error(`Invalid model entry for ${providerKey}.`);
+    if (item.contextWindowTokens !== undefined && (!Number.isInteger(item.contextWindowTokens) || item.contextWindowTokens < 4096 || item.contextWindowTokens > 2000000)) throw new Error(`Invalid model context limit for ${providerKey}.`);
+    return { ...item };
+  });
 
   const resolvedApiKey = resolveConfigSecret(provider.apiKey, provider.apiKeyEncrypted);
   return {
@@ -42,7 +25,7 @@ export function normalizeProvider(provider: Partial<ProviderConfig> & { model?: 
     apiKey: resolvedApiKey,
     apiKeyEncrypted: provider.apiKeyEncrypted,
     apiKeyStored: Boolean(resolvedApiKey),
-    model: finalModelList
+    model: modelList
   };
 }
 

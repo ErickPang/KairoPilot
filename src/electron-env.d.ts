@@ -72,7 +72,7 @@ interface KairoBridge {
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.chatGetMessagePage, input: import('./shared/contracts').MessagePageQuery): Promise<import('./shared/contracts').SessionMessagePage<import('./renderer/types').Message>>;
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.chatGetTaskChanges, sessionId: string): Promise<import('./shared/contracts').TaskChangeSummary[]>;
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.chatGetTaskChangeDiff, input: { sessionId: string; path: string;runId?:string }): Promise<import('./shared/contracts').ArtifactDiff>;
-  invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.appQuitDraftResponse, input: { id: string; saved: boolean }): Promise<boolean>;
+  invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.appQuitDraftResponse, input: import('./shared/contracts').QuitDraftResponse): Promise<boolean>;
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.chatCreateReference, input: {sessionId: string; path: string}): Promise<import('./shared/contracts').ContextReference>;
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.chatGetDraft, sessionId: string): Promise<import('./shared/contracts').TaskDraft>;
   invoke(channel: typeof import('./shared/ipc').KAIRO_INVOKE.chatSaveDraft, input: {sessionId: string; revision: number; data: import('./shared/contracts').TaskDraftInput}): Promise<number>;

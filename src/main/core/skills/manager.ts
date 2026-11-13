@@ -1,3 +1,4 @@
+import { listPluginSkills } from '../plugins/pluginSkills'
 import { app } from 'electron'
 import { getKairoPilotDataRoot } from '../../services/dataRoot'
 import { existsSync, readFileSync, realpathSync, watch, type FSWatcher } from 'fs'
@@ -326,7 +327,7 @@ export class SkillsManager {
 
   async listPublicSkills(options?: { force?: boolean }) {
     await this.loadAllSkills(options)
-    return Array.from(this.publicSkillIndex.values()).map((skill) => this.toManagedSkillSummary(skill))
+    return [...this.publicSkillIndex.values(), ...await listPluginSkills()].map((skill) => this.toManagedSkillSummary(skill))
   }
 
   async listAgentSkills(agentId: string, options?: { force?: boolean }) {
@@ -345,12 +346,13 @@ export class SkillsManager {
     for (const skill of this.getAgentIndex(agentId).values()) {
       merged.set(skill.id, skill)
     }
+    for (const skill of await listPluginSkills(agentId)) merged.set(skill.id, skill)
 
     return Array.from(merged.values()).map((skill) => this.toManagedSkillSummary(skill))
   }
 
   async getSkillCatalogSnapshot(agentId: string, options?: { force?: boolean }) {
-    if (!options?.force) {
+    if (!options?.force && !readKairoPilotConfig().plugins?.registry?.length) {
       const cachedSnapshot = this.skillCatalogCache.get(agentId)
       if (cachedSnapshot) {
         return cloneSkillCatalogSnapshot(cachedSnapshot)
@@ -765,6 +767,8 @@ export class SkillsManager {
   }
 
   private async findSkill(skillName: string, agentId?: string) {
+    const pluginSkill = (await listPluginSkills(agentId)).find(skill => skill.id === skillName)
+    if (pluginSkill) return pluginSkill
     return findSkillRecord({
       skillName,
       agentId,
@@ -797,7 +801,7 @@ export class SkillsManager {
     const rollbackMetadata = this.readSkillRollbackMetadata(skill.skillDir)
     return {
       ...toSkillSummary(skill),
-      removable: this.isSkillRecordRemovable(skill),
+      removable: !skill.id.startsWith('plugin-') && this.isSkillRecordRemovable(skill),
       rollbackAvailable: Boolean(rollbackMetadata),
       previousVersion: rollbackMetadata?.version
     }

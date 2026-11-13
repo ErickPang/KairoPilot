@@ -624,7 +624,7 @@ async function registerRuntimeTools(params: {
   runtime.registerTool(createReadSkillResourceTool(agentId, runtimeRef));
   runtime.registerTool(createRunSkillScriptTool(agentId, runtimeRef, permissions, workspace));
 
-  const discovery=createPluginDiscovery(agentId,permissions,tool=>runtime.registerTool(tool));
+  const discovery=createPluginDiscovery(agentId,permissions,tool=>runtime.registerTool(tool),()=>runtime.getActiveSessionId());
   runtime.registerTool(discovery.search);
   runtime.setDeferredToolLoader(discovery.load);
 }
@@ -648,7 +648,7 @@ async function initializeAgent(config: ResolvedAgentConfig, sender?: WebContents
 
   const pluginSummary=async()=>{
     if(planning||permissions.getExecutionProfile()==='chat_only')return '';
-    const catalog=await pluginManager.listToolCatalog(WORKBENCH_OWNER,permissions);
+    const catalog=await pluginManager.listToolCatalog(WORKBENCH_OWNER,permissions,config.executionContext?.sessionId);
     const groups=Array.from(new Map(catalog.map(item=>[`${item.scope}:${item.pluginId}`,`- ${item.pluginId}: ${item.pluginDescription.slice(0,180)}`])).values());
     return `Plugin capabilities (use search_tools to discover schemas; discovery runs no actions):\n${groups.slice(0,20).join('\n')}\n${groups.length>20?'More plugins are searchable.':''}`;
   };

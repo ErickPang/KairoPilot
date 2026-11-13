@@ -213,6 +213,7 @@ export class PermissionGuard {
   }
 
   getToolRiskLevel(toolName: string, args: Record<string, unknown> = {}): RiskLevel {
+    if (toolName.startsWith('plugin_')) return 'high';
     if (toolName === 'delete_file') {
       return 'critical';
     }
@@ -253,6 +254,8 @@ export class PermissionGuard {
     if (approvalMode === 'never') {
       return false;
     }
+    // Third-party annotations cannot downgrade external actions or grant session-wide permission.
+    if (toolName.startsWith('plugin_')) return true;
 
     const operation = this.getSessionApprovalOperation(toolName, args);
     if (operation && this.sessionApprovalPolicy?.allows(operation.key)) return false;

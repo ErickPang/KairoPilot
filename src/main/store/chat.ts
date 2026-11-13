@@ -1247,3 +1247,7 @@ export function getTokenUsageDetails(query: MonitoringTokenQuery = {}): Monitori
     }
   };
 }
+
+export function isStoredAttachmentReferenced(storedPath: string): boolean {
+  return Boolean(getDb().prepare('SELECT id FROM message_attachments WHERE stored_path = ? LIMIT 1').get(storedPath));
+}

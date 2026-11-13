@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { prepareChatAttachments } from './attachments';
+import { prepareChatAttachments, cleanupOldAttachmentFiles, getSessionAttachmentUploadDir } from './attachments';
 
 const tempRoots: string[] = [];
 
@@ -17,6 +17,21 @@ afterEach(async () => {
 });
 
 describe('prepareChatAttachments', () => {
+  it('only cleans expired uploads without a stored reference', async () => {
+    const root = await createTempRoot();
+    const directory = getSessionAttachmentUploadDir(root, 'fixture');
+    await fs.mkdir(directory, { recursive: true });
+    const kept = path.join(directory, 'referenced.txt');
+    const orphan = path.join(directory, 'orphan.txt');
+    for (const file of [kept, orphan]) {
+      await fs.writeFile(file, 'synthetic');
+      const old = new Date(Date.now() - 31 * 86400000);
+      await fs.utimes(file, old, old);
+    }
+    expect(await cleanupOldAttachmentFiles(root, file => file === kept)).toMatchObject({ removedFiles: 1 });
+    expect(await fs.readFile(kept, 'utf8')).toBe('synthetic');
+    expect(await fs.stat(orphan).catch(() => null)).toBeNull();
+  });
   it('preserves the original display name while bounding the stored file name', async () => {
     const tempRoot = await createTempRoot();
     const workspace = path.join(tempRoot, 'workspace');

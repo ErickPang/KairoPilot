@@ -24,7 +24,7 @@ export function normalizeConfig(rawConfig: unknown): KairoPilotConfig {
   if (rawProviders && typeof rawProviders === 'object') {
     for (const [providerKey, providerValue] of Object.entries(rawProviders)) {
       if (!providerValue || typeof providerValue !== 'object') {
-        continue;
+        throw new Error(`Invalid provider configuration: ${providerKey}.`);
       }
       providers[providerKey] = normalizeProvider(providerValue as ProviderConfig, providerKey);
     }

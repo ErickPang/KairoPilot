@@ -24,6 +24,13 @@ import {
 } from './toolPipeline';
 
 describe('toolPipeline', () => {
+  it('requires per-call approval for external tools and blocks them in read-only tasks', () => {
+    for (const profile of ['read_only_workspace', 'chat_only', 'approved_execution'] as const) {
+      const guard = new PermissionGuard({ executionProfile: profile, fileSystem: { read: true, write: true, allowedPaths: ['/tmp'] }, shell: { enabled: true, allowedCommands: ['node'] }, network: { enabled: true }, policy: { approvalMode: 'on_write' } });
+      expect(checkPermission(guard, 'plugin_fixture__echo', {})).toMatchObject({ kind: profile === 'approved_execution' ? 'approval' : 'deny' });
+      expect(guard.getToolRiskLevel('plugin_fixture__echo')).toBe('high');
+    }
+  });
   beforeEach(() => {
     chatStoreMocks.createRunStep.mockReset();
     chatStoreMocks.updateRunStep.mockReset();

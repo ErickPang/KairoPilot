@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const chatStoreMocks = vi.hoisted(() => ({
   registerPreparedAttachments: vi.fn(),
+  isStoredAttachmentReferenced: vi.fn(),
   getSessionById: vi.fn(),
 }));
 

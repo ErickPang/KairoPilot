@@ -5,15 +5,16 @@ import type {PermissionGuard} from '../security/permissions';
 import type {ToolDefinition} from '../llm/types';
 import {toolOk} from '../tools/result';
 
-export interface DeferredToolSelection {pluginId:string;scope:string;names:string[]}
+export interface DeferredToolSelection {pluginId:string;scope:string;names:string[];packageHash?:string;catalogHash?:string}
 export function pluginToolName(pluginId:string,scope:string,name:string) {
   const prefix=createHash('sha256').update(`${scope}:${pluginId}`).digest('hex').slice(0,12);
   const suffix=createHash('sha256').update(name).digest('hex').slice(0,8);
   return `plugin_${prefix}__${name.replace(/[^a-zA-Z0-9_-]/g,'_').slice(0,31)}_${suffix}`;
 }
-export function createPluginDiscovery(agentId:string,permissions:PermissionGuard,register:(tool:ToolDefinition)=>void) {
+export function createPluginDiscovery(agentId:string,permissions:PermissionGuard,register:(tool:ToolDefinition)=>void,getSessionId:()=>string|null=()=>null) {
   const load=async (selection:DeferredToolSelection) => {
-    const tools=await pluginManager.loadPluginTools(selection,agentId,permissions);
+    const tools=await pluginManager.loadPluginTools(selection,agentId,permissions,getSessionId()||undefined);
+    if ((selection.packageHash || selection.catalogHash) && (tools.length !== selection.names.length || tools.some(tool => selection.packageHash && tool.metadata?.pluginPackageHash !== selection.packageHash || selection.catalogHash && tool.metadata?.pluginCatalogHash !== selection.catalogHash))) throw new Error('The approved plugin package or tool catalog changed. Start a new run.');
     return tools.map(tool=>{
       const exposed={...tool,metadata:{...tool.metadata,originalToolName:tool.name},name:pluginToolName(selection.pluginId,selection.scope,tool.name)};
       register(exposed);return {name:exposed.name,description:exposed.description,pluginId:selection.pluginId};
@@ -26,7 +27,7 @@ export function createPluginDiscovery(agentId:string,permissions:PermissionGuard
     execute:async args=>{
       const query=String(args.query).toLowerCase();
       const tokens=query.match(/[\p{L}\p{N}_-]+/gu)||[];
-      const catalog=await pluginManager.listToolCatalog(agentId,permissions);
+      const catalog=await pluginManager.listToolCatalog(agentId,permissions,getSessionId()||undefined);
       const matches=catalog.map(item=>{
         const identity=`${item.pluginId} ${item.pluginName} ${item.name}`.toLowerCase();
         const text=`${identity} ${item.description} ${item.pluginDescription}`.toLowerCase();

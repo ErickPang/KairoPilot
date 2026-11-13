@@ -1,11 +1,23 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import electron from 'vite-plugin-electron/simple';
+import type { WarningHandlerWithDefault } from 'rollup';
+
+// Zod mentions PURE markers in prose; only suppress these two known explanatory comments.
+const onBuildWarning: WarningHandlerWithDefault = (warning, fallback) => {
+  const id = (warning.id || '').replace(/\\/g, '/');
+  if (warning.code === 'INVALID_ANNOTATION' && (
+    id.endsWith('/node_modules/zod/v4/core/regexes.js') && warning.message.includes('Anchors a pattern source.') ||
+    id.endsWith('/node_modules/zod/v4/core/util.js') && warning.message.includes('Wrapped in a `@__PURE__` IIFE')
+  )) return;
+  fallback(warning);
+};
 
 // https://vitejs.dev/config/
 export default defineConfig({
   build: {
     rollupOptions: {
+      onwarn: onBuildWarning,
       output: { manualChunks: { react: ['react', 'react-dom'], markdown: ['react-markdown', 'remark-gfm'] } }
     }
   },
@@ -18,6 +30,7 @@ export default defineConfig({
         vite: {
           build: {
             rollupOptions: {
+              onwarn: onBuildWarning,
               external: ['better-sqlite3'],
             },
           },

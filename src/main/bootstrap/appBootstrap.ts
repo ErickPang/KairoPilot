@@ -24,6 +24,9 @@ let mainWindow: BrowserWindow | null = null;
 let trayState: TrayServiceState | null = null;
 let isQuitting = false;
 let stopClipboardMonitor: (() => void) | null = null;
+let startupFinished = false;
+let startupCancelled = false;
+let executionInitialized = false;
 
 function getMainWindow(): BrowserWindow | null {
   return mainWindow;
@@ -38,8 +41,11 @@ function createWindowFromContext(context: BootstrapContext) {
   });
 }
 
-export function bindAppLifecycle(context: BootstrapContext) {
-  const quitDrafts = installQuitDraftProtection(getMainWindow, { beforeQuit: stopApplicationExecution });
+function bindAppLifecycle(context: BootstrapContext) {
+  const quitDrafts = installQuitDraftProtection(getMainWindow, {
+    isStartup: () => !startupFinished,
+    beforeQuit: async () => { if (executionInitialized) await stopApplicationExecution(); }
+  });
   // When all windows are closed, don't quit — keep running in tray
   app.on('window-all-closed', () => {
     // On macOS it's standard to keep the app open without windows
@@ -52,6 +58,7 @@ export function bindAppLifecycle(context: BootstrapContext) {
   });
 
   app.on('before-quit', () => {
+    if (!startupFinished) startupCancelled = true;
     if (!quitDrafts.isApproved()) return;
     isQuitting = true;
     skillsManager.dispose();
@@ -79,6 +86,7 @@ export function bindAppLifecycle(context: BootstrapContext) {
   });
 
   app.on('activate', () => {
+    if (!startupFinished || startupCancelled || isQuitting) return;
     if (BrowserWindow.getAllWindows().length === 0) {
       mainWindow = createWindowFromContext(context);
     } else if (mainWindow) {
@@ -89,11 +97,15 @@ export function bindAppLifecycle(context: BootstrapContext) {
 }
 
 export function bootstrapMainProcess(context: BootstrapContext) {
-  const appPaths = ensureAppPaths();
+  let appPaths: ReturnType<typeof ensureAppPaths>;
+  try { appPaths = ensureAppPaths(); }
+  catch (error) { handleStartupFailure(error); return; }
   if (!app.requestSingleInstanceLock()) {
     app.quit();
     return;
   }
+  // A rejected secondary process must never install hooks that recover shared task data.
+  bindAppLifecycle(context);
   app.on('second-instance', () => {
     mainWindow?.show();
     mainWindow?.focus();
@@ -101,8 +113,10 @@ export function bootstrapMainProcess(context: BootstrapContext) {
 
   app.whenReady().then(async () => {
     if (!process.env.KAIROPILOT_TEST_ROOT) initSentry();
-    initializeKairoPilotConfig();
+    await initializeKairoPilotConfig();
+    if (startupCancelled) return;
     startApplicationConversation();
+    executionInitialized = true;
 
     registerKairopilotProtocol(() => appPaths.allowedProtocolRoots);
 
@@ -111,7 +125,9 @@ export function bootstrapMainProcess(context: BootstrapContext) {
     }
 
     await seedBuiltinSkills(appPaths);
+    if (startupCancelled) return;
     await skillsManager.initialize();
+    if (startupCancelled) return;
     setupHandlers();
     mainWindow = createWindowFromContext(context);
 
@@ -120,5 +136,6 @@ export function bootstrapMainProcess(context: BootstrapContext) {
 
     // Start clipboard monitor for code/error detection
     if (!process.env.KAIROPILOT_TEST_ROOT) stopClipboardMonitor = startClipboardMonitor(getMainWindow, () => getAppearanceConfig().clipboardSuggestions === true);
-  }).catch(handleStartupFailure);
+    startupFinished = true;
+  }).catch(error => { if (!startupCancelled) handleStartupFailure(error); });
 }

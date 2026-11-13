@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { ToolDefinition } from '../llm/types';
 import { ShellExecutionPolicy } from '../security/permissions';
 import { toolError, toolOk } from './result';
+import { terminateProcessTree } from './processTree';
 const EXECUTION_MAX_BUFFER_BYTES = 1024 * 1024;
 const SHELL_CONTROL_PATTERN = /[|&;<>()$`\n\r]/;
 const INTERACTIVE_COMMANDS = new Set(['vim', 'vi', 'nano', 'top', 'less', 'more', 'man']);
@@ -162,6 +163,7 @@ export const createExecuteCommandTool = (options: string | ExecuteCommandToolOpt
       if (!shellPolicy.allowInteractive && isInteractiveShellCommand(normalized.command, normalized.args)) {
         throw new Error('Interactive shell commands are not allowed.');
       }
+      if (signal?.aborted) return toolError('Command cancelled by user.');
 
       let stdout = '';
       let stderr = '';
@@ -170,72 +172,65 @@ export const createExecuteCommandTool = (options: string | ExecuteCommandToolOpt
       const child = spawn(normalized.command, normalized.args, {
         cwd: resolvedOptions.cwd,
         windowsHide: true,
+        detached: process.platform !== 'win32',
         stdio: ['ignore', 'pipe', 'pipe'],
       });
 
-      const output = await new Promise<{ stdout: string; stderr: string; exitCode: number }>((resolve, reject) => {
-        const onAbort = () => {
-          child.kill('SIGTERM');
-          // Force kill after 3s if still alive
-          setTimeout(() => {
-            if (child.exitCode === null) {
-              child.kill('SIGKILL');
-            }
-          }, 3000);
+      const output = await new Promise<{ stdout: string; stderr: string; exitCode: number; error?: string }>((resolve) => {
+        let settled = false;
+        let stopReason: string | undefined;
+        const finish = (exitCode: number, error = stopReason) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timeoutId);
+          signal?.removeEventListener('abort', onAbort);
+          child.stdout?.destroy();
+          child.stderr?.destroy();
+          resolve({ stdout: stdout.trim(), stderr: stderr.trim(), exitCode, error });
         };
-
-        if (signal) {
-          if (signal.aborted) {
-            onAbort();
-            return;
-          }
-          signal.addEventListener('abort', onAbort, { once: true });
-        }
-
-        // Timeout
-        const timeoutId = setTimeout(() => {
-          child.kill('SIGTERM');
-        }, shellPolicy.timeoutMs);
+        const stop = (reason: string) => {
+          if (settled || stopReason) return;
+          stopReason = reason;
+          clearTimeout(timeoutId);
+          void terminateProcessTree(child).then(
+            () => finish(child.exitCode ?? 1),
+            () => finish(1, `${reason} Unable to terminate the command process tree.`)
+          );
+        };
+        const onAbort = () => stop('Command cancelled by user.');
+        const timeoutId = setTimeout(() => stop(`Command timed out after ${shellPolicy.timeoutMs} ms.`), shellPolicy.timeoutMs);
 
         child.stdout?.on('data', (chunk: Buffer) => {
+          if (stopReason || settled) return;
           totalBuffer += chunk.length;
           if (totalBuffer > shellPolicy.maxBufferBytes) {
-            child.kill('SIGTERM');
-            reject(new Error(`Command output exceeded max buffer size of ${shellPolicy.maxBufferBytes} bytes.`));
+            stop(`Command output exceeded max buffer size of ${shellPolicy.maxBufferBytes} bytes.`);
             return;
           }
           stdout += chunk.toString();
         });
 
         child.stderr?.on('data', (chunk: Buffer) => {
+          if (stopReason || settled) return;
           totalBuffer += chunk.length;
           if (totalBuffer > shellPolicy.maxBufferBytes) {
-            child.kill('SIGTERM');
-            reject(new Error(`Command output exceeded max buffer size of ${shellPolicy.maxBufferBytes} bytes.`));
+            stop(`Command output exceeded max buffer size of ${shellPolicy.maxBufferBytes} bytes.`);
             return;
           }
           stderr += chunk.toString();
         });
 
-        child.on('error', (err) => {
-          clearTimeout(timeoutId);
-          if (signal) signal.removeEventListener('abort', onAbort);
-          reject(err);
-        });
+        child.on('error', (err) => { if (!stopReason) finish(1, err.message); });
 
         child.on('close', (exitCode) => {
-          clearTimeout(timeoutId);
-          if (signal) signal.removeEventListener('abort', onAbort);
-          resolve({
-            stdout: stdout.trim(),
-            stderr: stderr.trim(),
-            exitCode: exitCode ?? 1,
-          });
+          if (!stopReason) finish(exitCode ?? 1);
         });
+        signal?.addEventListener('abort', onAbort, { once: true });
+        if (signal?.aborted) onAbort();
       });
 
-      if (signal?.aborted) {
-        return toolError('Command cancelled by user.', {
+      if (output.error) {
+        return toolError(output.error, {
           stdout: output.stdout,
           stderr: output.stderr,
           exitCode: output.exitCode,

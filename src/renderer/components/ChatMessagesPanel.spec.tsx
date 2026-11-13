@@ -25,16 +25,16 @@ describe('conversation process', () => {
  });
 });
 
-function StreamingMessage({ status, content, role = 'draft', skills, skillMentions }: { status: string; content: string; role?: 'draft' | 'user'; skills?: SkillMention[]; skillMentions?: SkillMention[] }) {
+function StreamingMessage({ status, content, role = 'draft', skillMentions }: { status: string; content: string; role?: 'draft' | 'user'; skillMentions?: SkillMention[] }) {
  const { t } = useTranslation();
- const feed: ComponentProps<typeof ChatMessagesPanel>['feed'] = { before: undefined, earlier: ()=>{}, recent: ()=>{}, error: '', refresh: ()=>{}, data: { rounds: [{ run: { ...run, status: 'running' }, items: [{ id: 'text', runId: run.id, sequence: 1, kind: role, content, status, skillMentions }] }] } };
- return <ChatMessagesPanel skills={skills} sessionId="s" run={{ ...run, status: 'running' }} feed={feed} containerRef={{ current: null }} messagesEndRef={{ current: null }} onViewReference={()=>{}} loading t={t} markdownComponents={{}} toRenderableMarkdown={text=>text||''}/>;
+ const feed: ComponentProps<typeof ChatMessagesPanel>['feed'] = { before: undefined, isHistory: false, navigationTarget: undefined, finishNavigation: ()=>{}, jumpTo: ()=>{}, earlier: ()=>{}, recent: ()=>{}, error: '', refresh: ()=>{}, data: { rounds: [{ run: { ...run, status: 'running' }, items: [{ id: 'text', runId: run.id, sequence: 1, kind: role, content, status, skillMentions }] }] } };
+ return <ChatMessagesPanel sessionId="s" run={{ ...run, status: 'running' }} feed={feed} containerRef={{ current: null }} messagesEndRef={{ current: null }} onViewReference={()=>{}} loading t={t} markdownComponents={{}} toRenderableMarkdown={text=>text||''}/>;
 }
 
 describe('sent skill presentation', () => {
  const skill = { id: 'search', name: '发送时的搜索技能' };
  it('renders saved names as non-editable tokens after rename or removal, preserving the body', () => {
-  const html = renderToStaticMarkup(<I18nProvider><StreamingMessage status="completed" role="user" content={'/search 今日新闻\n只看官方来源'} skillMentions={[skill]} skills={[{ ...skill, name: '已更名' }]}/></I18nProvider>);
+  const html = renderToStaticMarkup(<I18nProvider><StreamingMessage status="completed" role="user" content={'/search 今日新闻\n只看官方来源'} skillMentions={[skill]}/></I18nProvider>);
   expect(html).toContain('data-message-skill="search"');
   expect(html).toContain(skill.name);
   expect(html).not.toContain('已更名');
@@ -44,9 +44,9 @@ describe('sent skill presentation', () => {
   const removed = renderToStaticMarkup(<I18nProvider><StreamingMessage status="completed" role="user" content="/search" skillMentions={[skill]}/></I18nProvider>);
   expect(removed).toContain('data-message-skill="search"');
  });
- it('rebuilds old messages from installed skills without turning paths or prose into tokens', () => {
-  const render = (content: string) => renderToStaticMarkup(<I18nProvider><StreamingMessage status="completed" role="user" content={content} skills={[skill]}/></I18nProvider>);
-  expect(render('/search 新闻')).toContain('data-message-skill="search"');
+ it('renders text literally without a sent skill snapshot', () => {
+  const render = (content: string) => renderToStaticMarkup(<I18nProvider><StreamingMessage status="completed" role="user" content={content}/></I18nProvider>);
+  expect(render('/search 新闻')).not.toContain('data-message-skill');
   for (const content of ['/search/folder', '/unknown 新闻', '正文 /search']) expect(render(content)).not.toContain('data-message-skill');
  });
 });

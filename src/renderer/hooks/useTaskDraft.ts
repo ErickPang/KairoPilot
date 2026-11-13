@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ChatAttachment, ContextReference, TaskDraft, TaskDraftInput, RuntimeUpdateEvent } from '../../shared/contracts';
 import { KAIRO_EVENT, KAIRO_INVOKE } from '../../shared/ipc';
 import { useTranslation } from './useTranslation';
-import { DraftSaveQueue, isDraftConflict } from './draftSaveQueue';
+import { DraftSaveQueue, DraftQuitError, isDraftConflict } from './draftSaveQueue';
 
 export interface ComposerHandle {
   flush: () => Promise<number | undefined>;
@@ -80,7 +80,7 @@ export function useTaskDraft(sessionId: string | null, input: string, setInput: 
     try {
       setStatus('saving');
       const revision = await queue.save(latest.current);
-      if (alive.current) { setStatus(queue.matches(latest.current) ? 'saved' : 'saving'); setError(''); setErrorKind(null); }
+      if (alive.current) { setStatus(queue.isSettled(latest.current) ? 'saved' : 'saving'); setError(''); setErrorKind(null); }
       return revision;
     } catch (reason) {
       paused.current = true;
@@ -90,7 +90,8 @@ export function useTaskDraft(sessionId: string | null, input: string, setInput: 
   }, [queue, sessionId, t]);
 
   useEffect(() => {
-    if (!ready || !sessionId || sending.current || paused.current || queue.matches(latest.current)) return;
+    if (!ready || !sessionId || sending.current || paused.current) return;
+    if (queue.isSettled(latest.current)) { setStatus('saved'); return; }
     setStatus('saving');
     const timer = window.setTimeout(() => { if (!sending.current && !paused.current) void flush().catch(() => undefined); }, 350);
     return () => window.clearTimeout(timer);
@@ -147,17 +148,19 @@ export function useTaskDraft(sessionId: string | null, input: string, setInput: 
   }, [applyDraft, localRecovery]);
 
   const flushForQuit = useCallback(async () => {
-    if (pendingReferences.current > 0) throw new Error('Reference preparation is still in progress.');
+    if (pendingReferences.current > 0) throw new DraftQuitError('preparation_pending');
     if (!sessionId) {
       if (latest.current.input.trim()) {
         setError(t('workbench.draft.untitledQuit')); setStatus('error');
-        throw new Error('Untitled input has not been saved.');
+        throw new DraftQuitError('unsaved_input');
       }
       return;
     }
-    if (loading.current) await loading.current;
+    try { if (loading.current) await loading.current; }
+    catch { throw new DraftQuitError('not_ready'); }
     if (acceptance.current) await acceptance.current.promise;
-    await flush();
+    try { await flush(); }
+    catch (reason) { throw new DraftQuitError(isDraftConflict(reason) ? 'conflict' : 'save_failed'); }
   }, [flush, sessionId, t]);
 
   const addReference = useCallback(async (path: string) => {

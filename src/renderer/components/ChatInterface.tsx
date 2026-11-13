@@ -14,6 +14,7 @@ import { InputRecoveryNotice } from './InputRecoveryNotice';
 import { AttachmentList } from './AttachmentList';
 import { ChatMessagesPanel } from './ChatMessagesPanel';
 import { useTaskDraft, type ComposerHandle } from '../hooks/useTaskDraft';
+import { DraftQuitError } from '../hooks/draftSaveQueue';
 import type { ExecutionProfile,ContextReference,TaskExecutionSettings,QueuedTaskMessage,RunSummary } from '../../shared/contracts';
 import React, { useEffect, useState } from 'react';
 import { AgentConfig, ChatAttachment, ModelConfig } from '../types';
@@ -120,7 +121,7 @@ export const ChatInterface = React.memo(function ChatInterface({
     composerRef.current = {
       flush: flushDraft,
       flushForQuit: async () => {
-        if (preparingAttachments.current > 0) throw new Error('Attachment preparation is still in progress.');
+        if (preparingAttachments.current > 0) throw new DraftQuitError('preparation_pending');
         await flushForQuit();
       },
       addReference
@@ -132,6 +133,7 @@ export const ChatInterface = React.memo(function ChatInterface({
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
   const skillCompletion = useSkillCompletion(input, setInput, textareaRef, !draft.ready || draft.isRecovering || isQuitPending || Boolean(approvalRequest));
   const shouldAutoScrollRef = React.useRef(true);
+  const wasViewingHistory = React.useRef(false);
   const autoScrollFrameRef = React.useRef<number | null>(null);
   const autoScrollTimeoutRef = React.useRef<number | null>(null);
   const lastAutoScrollAtRef = React.useRef(0);
@@ -304,8 +306,19 @@ export const ChatInterface = React.memo(function ChatInterface({
     }
 
     const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
-    shouldAutoScrollRef.current = distanceFromBottom < 96;
-  }, []);
+    shouldAutoScrollRef.current = !conversation.isHistory && distanceFromBottom < 96;
+  }, [conversation.isHistory]);
+
+  useEffect(() => {
+    if (conversation.isHistory) {
+      wasViewingHistory.current = true;
+    } else if (wasViewingHistory.current && conversation.data) {
+      wasViewingHistory.current = false;
+      shouldAutoScrollRef.current = true;
+      const container = messagesContainerRef.current;
+      if (container) container.scrollTop = container.scrollHeight;
+    }
+  }, [conversation.isHistory, conversation.data]);
 
   useEffect(() => {
     const container = messagesContainerRef.current;
@@ -326,7 +339,7 @@ export const ChatInterface = React.memo(function ChatInterface({
   }, [updateAutoScrollState, viewCache, viewKey]);
 
   useEffect(() => {
-    if (!hasMessages) return;
+    if (!hasMessages || conversation.isHistory) return;
     if (!hasRestoredScroll.current && hasMessages) {
       hasRestoredScroll.current = true;
       const savedScroll = viewCache.get(viewKey)?.scrollTop;
@@ -353,6 +366,7 @@ export const ChatInterface = React.memo(function ChatInterface({
     autoScrollTimeoutRef.current = window.setTimeout(() => {
       autoScrollTimeoutRef.current = null;
       autoScrollFrameRef.current = window.requestAnimationFrame(() => {
+        if (!shouldAutoScrollRef.current) { autoScrollFrameRef.current = null; return; }
         const container = messagesContainerRef.current;
         if (container) {
           container.scrollTop = container.scrollHeight;
@@ -363,7 +377,7 @@ export const ChatInterface = React.memo(function ChatInterface({
         autoScrollFrameRef.current = null;
       });
     }, waitMs);
-  }, [loading, conversation.data, hasMessages, viewCache, viewKey]);
+  }, [loading, conversation.data, conversation.isHistory, hasMessages, viewCache, viewKey]);
 
   useEffect(() => {
     return () => {
@@ -492,7 +506,11 @@ export const ChatInterface = React.memo(function ChatInterface({
 
 
       <ChatMessagesPanel
-        skills={skillCompletion.skills}
+        onNavigate={() => {
+          shouldAutoScrollRef.current = false;
+          if (autoScrollTimeoutRef.current !== null) { window.clearTimeout(autoScrollTimeoutRef.current); autoScrollTimeoutRef.current = null; }
+          if (autoScrollFrameRef.current !== null) { window.cancelAnimationFrame(autoScrollFrameRef.current); autoScrollFrameRef.current = null; }
+        }}
         onViewReference={onViewReference}
         containerRef={messagesContainerRef}
         sessionId={sessionId} run={currentRun} feed={conversation}

@@ -1,0 +1,101 @@
+import { app, BrowserWindow } from 'electron';
+import fs from 'node:fs';
+import path from 'node:path';
+const output = process.env.KAIROPILOT_NAVIGATION_OUTPUT!;
+fs.mkdirSync(path.join(output, 'profile'), { recursive: true });
+app.setPath('userData', path.join(output, 'profile'));
+app.setName('KairoPilot navigation verification');
+const checks: string[] = [];
+const errors: string[] = [];
+let window: BrowserWindow | undefined;
+const assert = (ok: unknown, label: string) => { if (!ok) throw new Error(label); checks.push(label); };
+const js = (source: string) => window!.webContents.executeJavaScript(source);
+const wait = (condition: string) => js(`new Promise(resolve => {
+  const deadline = Date.now() + 6000;
+  const timer = setInterval(() => { if (${condition}) { clearInterval(timer); resolve(true); } else if (Date.now() > deadline) { clearInterval(timer); resolve(false); } }, 20);
+})`);
+const check = async (condition: string, label: string) => assert(await wait(condition), label);
+const tick = (id: string) => `[data-navigation-run="${id}"]`;
+const round = (id: string) => `[data-conversation-round="${id}"]`;
+const screenshot = async (name: string) => fs.writeFileSync(path.join(output, `${name}.png`), (await window!.webContents.capturePage()).toPNG());
+async function main() {
+await app.whenReady();
+try {
+  window = new BrowserWindow({ width: 1024, height: 820, show: false, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false } });
+  window.webContents.on('console-message', ({ message }) => { if (/TypeError|ReferenceError|Warning:|Error:/.test(message)) errors.push(message); });
+  await window.loadFile(path.join(output, 'index.html'));
+  await check(`document.querySelectorAll('[data-navigation-run]').length === 100 && document.querySelectorAll('[data-conversation-round]').length === 20`, 'long history renders only 20 rounds with 100 lightweight index entries');
+  await check(`document.querySelector('${tick('a-125')}')?.getAttribute('aria-current') === 'location'`, 'bottom position highlights the current final round');
+  await check(`document.querySelector('.chat-interface[data-save-state="saved"] textarea:not(:disabled)')`, 'composer has completed initial hydration');
+  window.webContents.focus();
+  await screenshot('navigation-idle');
+  await js(`document.querySelector('${tick('a-120')}').focus()`);
+  await check(`document.querySelector('[role="tooltip"]')?.textContent.includes('第 120 轮')`, 'keyboard focus previews the selected question and response');
+  assert(await js(`document.querySelector('[role="tooltip"]').textContent.includes('已完成第 120 轮')`), 'preview contains the response rather than tool output');
+  await js(`document.querySelector('${tick('a-120')}').blur()`);
+  const pointer = await js(`(() => { const rect = document.querySelector('${tick('a-120')}').getBoundingClientRect(); return { x: Math.round(rect.left + rect.width / 2), y: Math.round(rect.top + rect.height / 2) }; })()`);
+  window.webContents.sendInputEvent({ type: 'mouseMove', ...pointer });
+  await check(`document.querySelector('[role="tooltip"]')?.textContent.includes('第 120 轮')`, 'mouse hover previews a round without clicking');
+  await check(`getComputedStyle(document.querySelector('${tick('a-120')} span')).backgroundColor === getComputedStyle(document.querySelector('.workbench-app')).color`, 'hovered tick darkens alongside its preview');
+  await screenshot('navigation-preview-light');
+  await js(`document.querySelector('${tick('a-120')}').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
+  await check(`!document.querySelector('[role="tooltip"]')`, 'Escape dismisses the preview');
+  await js(`document.querySelector('${tick('a-110')}').click()`);
+  await check(`document.querySelector('${round('a-110')}')?.classList.contains('is-navigation-target')`, 'click locates and briefly highlights a loaded round');
+  assert(await js(`Math.abs(document.querySelector('${round('a-110')}').getBoundingClientRect().top - document.querySelector('.messages-container').getBoundingClientRect().top - 24) < 3`), 'loaded round aligns with the top of the message viewport');
+  const beforeStream = await js(`document.querySelector('.messages-container').scrollTop`);
+  await js(`window.navigationFixture.stream()`);
+  await check(`document.querySelector('.messages-container').textContent.includes('流式更新的新内容')`, 'live response refreshes while reading an older loaded round');
+  assert(await js(`Math.abs(document.querySelector('.messages-container').scrollTop - ${beforeStream}) < 3`), 'streaming cannot pull the reader back to the bottom');
+
+  await js(`document.querySelector('${tick('a-30')}').click()`);
+  await check(`document.querySelector('${round('a-30')}')?.classList.contains('is-navigation-target')`, 'click loads an off-page round and locates it');
+  assert(await js(`document.querySelectorAll('[data-conversation-round]').length === 20 && !document.querySelector('${round('a-125')}')`), 'cross-page jump keeps message rendering bounded');
+  await check(`document.querySelector('${tick('a-30')}')?.getAttribute('aria-current') === 'location'`, 'scroll tracking follows the target after a cross-page jump');
+  await js(`document.querySelector('.conversation-navigation-more').click(); document.querySelector('.conversation-navigation-more').click()`);
+  await check(`document.querySelectorAll('[data-navigation-run]').length === 125`, 'earlier directory page merges without duplicate ticks');
+  assert(await js(`window.navigationFixture.calls.filter(call => call.channel === 'chat:conversation-navigation' && call.query.before === 26).length === 1`), 'repeated load clicks share one in-flight index request');
+  await js(`document.querySelector('${tick('a-1')}').click()`);
+  await check(`document.querySelector('${round('a-1')}')?.classList.contains('is-navigation-target')`, 'earliest conversation can be opened directly from the directory');
+  const historicalScroll = await js(`document.querySelector('.messages-container').scrollTop`);
+  await js(`window.navigationFixture.stream()`);
+  await js(`new Promise(resolve => setTimeout(resolve, 250))`);
+  assert(await js(`!!document.querySelector('${round('a-1')}') && Math.abs(document.querySelector('.messages-container').scrollTop - ${historicalScroll}) < 3`), 'history page remains in place during live run events');
+  await js(`document.querySelector('.workbench-history-toolbar button:last-child').click()`);
+  await check(`!!document.querySelector('${round('a-125')}') && document.querySelector('.messages-container').scrollHeight - document.querySelector('.messages-container').clientHeight - document.querySelector('.messages-container').scrollTop < 4`, 'return to recent restores the latest page and bottom position');
+
+  await js(`window.navigationFixture.delayIndex(); window.navigationFixture.stream()`);
+  await check(`window.navigationFixture.pendingIndex()`, 'index refresh request starts before a task switch');
+  await js(`document.querySelector('#task-b').click()`);
+  await check(`document.querySelectorAll('[data-navigation-run]').length === 3 && !!document.querySelector('${tick('b-1')}')`, 'task switch replaces the previous task directory');
+  await js(`window.navigationFixture.releaseIndex()`);
+  await js(`new Promise(resolve => setTimeout(resolve, 100))`);
+  assert(await js(`document.querySelectorAll('[data-navigation-run]').length === 3 && !document.querySelector('${tick('a-1')}')`), 'late index response cannot repopulate another task');
+  await check(`document.querySelector('.chat-interface[data-save-state="saved"] textarea:not(:disabled)')`, 'second task composer finishes hydration');
+  await js(`document.documentElement.dataset.theme = 'dark'; document.querySelector('${tick('b-2')}').focus()`);
+  await check(`!!document.querySelector('[role="tooltip"]')`, 'dark theme preview opens');
+  await js(`document.querySelector('${tick('b-2')}').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }))`);
+  await check(`document.activeElement?.dataset.navigationRun === 'b-1' && document.querySelector('[role="tooltip"]')?.textContent.includes('第 1 轮')`, 'arrow keys move focus and preview between rounds');
+  await screenshot('navigation-preview-dark');
+  const colors = await js(`({ card: getComputedStyle(document.querySelector('[role="tooltip"]')).backgroundColor, text: getComputedStyle(document.querySelector('[role="tooltip"] strong')).color })`);
+  assert(colors.card !== colors.text, 'dark theme uses separate card and text colors');
+  window.setSize(420, 680);
+  await js(`document.querySelector('${tick('b-1')}').focus()`);
+  assert(await js(`document.querySelector('[role="tooltip"]').getBoundingClientRect().right <= document.documentElement.clientWidth && document.querySelector('.input-container').getBoundingClientRect().bottom <= innerHeight + 1`), 'narrow viewport keeps preview and composer inside the window');
+  await screenshot('navigation-narrow');
+  await js(`document.querySelector('#task-empty').click()`);
+  await check(`!document.querySelector('.conversation-navigation') && !!document.querySelector('.chat-empty-title')`, 'empty task retains the empty state without a navigation rail');
+  await js(`window.navigationFixture.failIndex(); document.querySelector('#task-b').click()`);
+  await check(`document.querySelector('.conversation-navigation-more')?.getAttribute('aria-label').includes('重试')`, 'failed directory request exposes a retry control');
+  await js(`window.navigationFixture.recoverIndex(); document.querySelector('.conversation-navigation-more').click()`);
+  await check(`document.querySelectorAll('[data-navigation-run]').length === 3`, 'directory can recover after a failed read');
+  assert(errors.length === 0, 'renderer has no warnings or runtime errors');
+  fs.writeFileSync(path.join(output, 'report.json'), JSON.stringify({ success: true, checks, errors }, null, 2));
+} catch (error) {
+  if (window && !window.isDestroyed()) await screenshot('failure');
+  fs.writeFileSync(path.join(output, 'report.json'), JSON.stringify({ success: false, checks, errors, error: String(error), diagnostic: await js(`({ activeTag: document.activeElement?.tagName, activeRun: document.activeElement?.dataset.navigationRun, hasFocus: document.hasFocus(), tooltip: document.querySelector('[role=tooltip]')?.textContent })`) }, null, 2));
+  process.exitCode = 1;
+} finally { window?.destroy(); app.exit(process.exitCode || 0); }
+
+}
+void main();

@@ -6,6 +6,7 @@ import { createActiveAgentSession } from './chatService';
 import { stopAllDelegatedTasks } from './delegationService';
 import { stopAllProjectMemoryJobs } from './projectMemoryService';
 import { hasLiveTaskExecution, setWorkbenchShuttingDown } from './workbenchExecution';
+import { pluginConnections } from '../core/plugins/connectionManager';
 
 export function startApplicationConversation() {
   recoverInterruptedRuns();
@@ -21,6 +22,7 @@ export async function stopApplicationExecution() {
     stopAllDelegatedTasks();
     stopAllProjectMemoryJobs();
     await cancelActiveAgentRuntimes();
+    await pluginConnections.disconnect();
     // Give model/tool cancellation time to settle, including the shell's forced-kill fallback.
     const deadline = Date.now() + 5000;
     while (hasLiveTaskExecution() && Date.now() < deadline) {

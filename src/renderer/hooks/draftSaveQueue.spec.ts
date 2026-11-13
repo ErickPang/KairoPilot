@@ -3,6 +3,14 @@ import { DraftSaveQueue } from './draftSaveQueue';
 const draft = (input: string) => ({ input, referenceIds: [], attachmentIds: [] });
 
 describe('draft save queue', () => {
+  it('cannot report an older matching snapshot as saved while a newer write is pending',async()=>{
+    let finish!:(value:number)=>void;const writer=vi.fn(()=>new Promise<number>(resolve=>{finish=resolve;}));
+    const queue=new DraftSaveQueue(writer);queue.adopt(1,draft('old'));
+    const pending=queue.save(draft('temporary'));await Promise.resolve();
+    expect(queue.matches(draft('old'))).toBe(true);expect(queue.isSettled(draft('old'))).toBe(false);
+    await vi.waitFor(()=>expect(writer).toHaveBeenCalledOnce());finish(2);await pending;
+    expect(queue.isSettled(draft('temporary'))).toBe(true);expect(queue.isSettled(draft('old'))).toBe(false);
+  });
   it('serializes overlapping edits using the revision returned by the previous save', async () => {
     const revisions: number[] = [];
     const writer = vi.fn(async (revision: number) => { revisions.push(revision); await Promise.resolve(); return revision + 1; });

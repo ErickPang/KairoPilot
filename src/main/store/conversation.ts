@@ -1,5 +1,5 @@
 import { describeConversationTool, conversationToolOutput } from '../../shared/conversationActivity';
-import type { ChatAttachment, ContextReference, ConversationItem, ConversationPage, RuntimeUpdateEvent, SkillMention } from '../../shared/contracts';
+import type { ChatAttachment, ContextReference, ConversationItem, ConversationPage, ConversationNavigationEntry, ConversationNavigationPage, RuntimeUpdateEvent, SkillMention } from '../../shared/contracts';
 import { getDb, getRunById } from './chat';
 import { getOwnedSessionSummary } from './taskPages';
 
@@ -39,8 +39,29 @@ export function recordConversationUpdate(update: RuntimeUpdateEvent) {
     db.prepare("UPDATE conversation_items SET status=? WHERE run_id=? AND status='running'").run(update.status, run.id);
   }
 }
-export function getConversationPage(sessionId: string, before?: number): ConversationPage {
+export function getConversationNavigation(sessionId: string, before?: number): ConversationNavigationPage {
   if (!getOwnedSessionSummary(undefined, sessionId)) throw new Error('Task not found.');
+  // Read bounded previews only; tool output, attachments and execution context stay out of the index.
+  const entries = getDb().prepare(`SELECT id AS runId,rowid AS cursor,status,
+    COALESCE((SELECT substr(content,1,160) FROM conversation_items WHERE run_id=runs.id AND kind='user' ORDER BY sequence LIMIT 1),'') AS question,
+    COALESCE((SELECT substr(content,1,240) FROM conversation_items WHERE run_id=runs.id AND kind='final' ORDER BY sequence DESC LIMIT 1),'') AS answer
+    FROM runs WHERE session_id=? AND rowid<?
+    AND EXISTS(SELECT 1 FROM conversation_items WHERE run_id=runs.id) ORDER BY rowid DESC LIMIT 101`)
+    .all(sessionId, before ?? Number.MAX_SAFE_INTEGER) as ConversationNavigationEntry[];
+  return { entries: entries.slice(0,100).reverse(), ...(entries.length > 100 ? { before: entries[99].cursor } : {}) };
+}
+
+export function getConversationPage(sessionId: string, before?: number, aroundRunId?: string): ConversationPage {
+  if (!getOwnedSessionSummary(undefined, sessionId)) throw new Error('Task not found.');
+  if (aroundRunId !== undefined) {
+    const target = getDb().prepare(`SELECT rowid AS cursor FROM runs WHERE id=? AND session_id=?
+      AND EXISTS(SELECT 1 FROM conversation_items WHERE run_id=runs.id)`).get(aroundRunId, sessionId) as { cursor: number } | undefined;
+    if (!target) throw new Error('Conversation round not found in this task.');
+    const following = getDb().prepare(`SELECT rowid AS cursor FROM runs WHERE session_id=? AND rowid>=?
+      AND EXISTS(SELECT 1 FROM conversation_items WHERE run_id=runs.id) ORDER BY rowid LIMIT 20`).all(sessionId, target.cursor) as Array<{ cursor: number }>;
+    // Reuse normal page hydration, keeping the selected round at the beginning when possible.
+    before = following[following.length - 1].cursor + 1;
+  }
   const rows = getDb().prepare(`SELECT id,rowid AS cursor FROM runs WHERE session_id=? AND rowid<?
     AND EXISTS(SELECT 1 FROM conversation_items WHERE run_id=runs.id) ORDER BY rowid DESC LIMIT 21`).all(sessionId, before || Number.MAX_SAFE_INTEGER) as Array<{ id: string; cursor: number }>;
   return { rounds: rows.slice(0,20).reverse().map(row => ({ run: conversationRun(row.id), items: (getDb().prepare('SELECT id,run_id AS runId,sequence,kind,content,status,metadata FROM conversation_items WHERE run_id=? ORDER BY sequence').all(row.id) as Array<ConversationItem & { metadata?: string }>).map(item => { const { metadata, ...value } = item; return { ...value, ...(metadata ? JSON.parse(metadata) : {}) }; }) })), ...(rows.length > 20 ? { before: rows[19].cursor } : {}) };

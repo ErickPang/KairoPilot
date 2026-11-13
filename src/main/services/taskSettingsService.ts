@@ -10,6 +10,7 @@ import { getWorkbenchConfig, strictTaskModel } from './workbenchConfigService';
 import { assertTaskMutable } from './workbenchExecution';
 import {intelligenceBudget} from '../../shared/intelligencePolicy';
 import {clearSessionApprovalGrants} from '../store/approvalGrants';
+import {revokePluginConnections} from '../core/plugins/connectionManager';
 
 export function requireTask(id: string) {
   const task = getOwnedSessionSummary(undefined,id);
@@ -41,6 +42,7 @@ export function updateTaskSettings(id: string, value: {model?:string;executionPr
   getDb().prepare('UPDATE sessions SET execution_settings=? WHERE id=?').run(JSON.stringify(settings),id);
   if (JSON.stringify(settings.permissions)!==JSON.stringify(settingsForTask(task).permissions)) clearSessionApprovalGrants(id);
   if(JSON.stringify(settings)!==JSON.stringify(settingsForTask(task))) {
+    revokePluginConnections(id);
     const pending=latestTaskPlan(id);
     if(pending?.status==='pending')updateTaskPlan(pending.id,pending.revision,{status:'superseded'});
   }

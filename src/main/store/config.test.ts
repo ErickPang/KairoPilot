@@ -114,7 +114,7 @@ describe('config permissions normalization', () => {
 
   it('返回给渲染进程的配置会隐藏已保存密钥', () => {
     const redacted = redactKairoPilotConfigSecrets({
-      version: '3.1.0',
+      version: '4.2.0',
       models: {
         providers: {
           openai: {

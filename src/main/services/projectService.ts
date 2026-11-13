@@ -9,6 +9,7 @@ import { getWorkbenchConfig, strictTaskModel, workbenchAgent } from './workbench
 import { requireTask, settingsForTask } from './taskSettingsService';
 import { WORKBENCH_OWNER } from '../store/configWorkbench';
 import {intelligenceBudget} from '../../shared/intelligencePolicy';
+import {revokePluginConnections} from '../core/plugins/connectionManager';
 
 export function listActiveProjects() { return store.listProjects(); }
 export function createActiveProject(name: string, rootPath: string) {
@@ -21,7 +22,7 @@ export function bindActiveProject(projectId: string) {
   store.authorizeProject(projectId); return {...project,authorized:true};
 }
 export function renameActiveProject(projectId: string,name: string) { assertWorkbenchIdle(); if (!store.isProjectAuthorized(projectId)) throw new Error('Authorize the project first.'); store.renameProject(projectId,name); }
-export function detachActiveProject(projectId: string) { assertNoLiveExecution(); store.authorizeProject(projectId,false); }
+export function detachActiveProject(projectId: string) { assertNoLiveExecution(); store.authorizeProject(projectId,false); revokePluginConnections(); }
 export function continueActiveProject(projectId: string,name: string,rootPath: string) {
   assertWorkbenchIdle(); const project=store.getProject(projectId);
   if (!project || !store.isProjectAuthorized(projectId)) throw new Error('Authorize the original project first.');

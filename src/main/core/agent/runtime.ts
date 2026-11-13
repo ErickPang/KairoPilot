@@ -545,7 +545,7 @@ export class AgentRuntime {
       contextSummary: patch.contextSummary,
       pendingToolCall: patch.pendingToolCall,
       runtimeSupportSnapshot: this.runtimeSupportState.snapshot(),
-      deferredTools: Array.from(this.tools.values()).filter(tool=>tool.metadata?.source==='plugin').map(tool=>({pluginId:tool.metadata!.pluginId!,scope:tool.metadata!.pluginScope!,names:[tool.metadata!.originalToolName||tool.name]}))
+      deferredTools: Array.from(this.tools.values()).filter(tool=>tool.metadata?.source==='plugin').map(tool=>({pluginId:tool.metadata!.pluginId!,scope:tool.metadata!.pluginScope!,names:[tool.metadata!.originalToolName||tool.name],packageHash:tool.metadata!.pluginPackageHash,catalogHash:tool.metadata!.pluginCatalogHash}))
     } satisfies RuntimeSnapshot, patch.stepId);
 
     if (patch.contextSummary) {

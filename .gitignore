@@ -42,6 +42,7 @@ AGENTS.md
 # Keep scratch docs/workflows local; explicitly ship workbench documentation and verification.
 /docs/*
 !/docs/architecture.md
+!/docs/plugins.md
 !/docs/releases.md
 !/docs/user-guide.md
 !/docs/development.md

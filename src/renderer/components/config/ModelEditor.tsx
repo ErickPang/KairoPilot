@@ -10,7 +10,7 @@ interface ModelEditorProps {
   editingModel: ModelConfig;
   setEditingModel: (model: ModelConfig) => void;
   isEditingExisting: boolean;
-  availableModels: string[];
+  isSaving?: boolean;
   onClearNotice: () => void;
   onReportNotice: (notice: AppNotice) => void;
   onDescribeProvider: (model: ModelConfig) => Promise<ProviderCapabilitySnapshot | null>;
@@ -34,7 +34,7 @@ export const ModelEditor = memo(function ModelEditor({
   editingModel, 
   setEditingModel, 
   isEditingExisting,
-  availableModels, 
+  isSaving = false,
   onClearNotice,
   onReportNotice,
   onDescribeProvider,
@@ -49,10 +49,16 @@ export const ModelEditor = memo(function ModelEditor({
   const [isModelDropdownOpen, setIsModelDropdownOpen] = useState(false);
   const [activeModelIndex, setActiveModelIndex] = useState(-1);
   const [modelDropdownPlacement, setModelDropdownPlacement] = useState<'top' | 'bottom'>('bottom');
+  const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const listRequest = useRef(0);
+  useEffect(() => {
+    listRequest.current += 1; setAvailableModels([]);
+    return () => { listRequest.current += 1; };
+  }, [editingModel.id, editingModel.provider, editingModel.baseUrl, editingModel.apiKey]);
   const [manualModelId, setManualModelId] = useState('');
-  const [showManualInput, setShowManualInput] = useState(false);
   const modelDropdownRef = useRef<HTMLDivElement>(null);
   const modelTriggerRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => { if (isSaving) setIsModelDropdownOpen(false); }, [isSaving]);
   const selectedModelIds = useMemo(
     () => (editingModel.availableModels && editingModel.availableModels.length > 0)
       ? editingModel.availableModels.map(item => item.id)
@@ -123,7 +129,7 @@ export const ModelEditor = memo(function ModelEditor({
   const providerOptions: SelectOption[] = [
     { value: 'openai', label: 'OpenAI' },
     { value: 'openrouter', label: 'OpenRouter' },
-    { value: 'anthropic', label: 'Anthropic' },
+    { value: 'anthropic', label: t('config.providerAnthropicUnavailable'), description: t('config.providerAnthropicHelp'), disabled: true },
     { value: 'deepseek', label: 'DeepSeek' },
     { value: 'zhipu', label: '智谱 (Zhipu)' },
     { value: 'kimi', label: 'Kimi (Moonshot)' },
@@ -214,13 +220,14 @@ export const ModelEditor = memo(function ModelEditor({
 
   const handleFetchModels = async () => {
     onClearNotice();
+    const request = ++listRequest.current;
     const result = await onFetchModels(editingModel);
+    if (request !== listRequest.current) return;
+    setAvailableModels(result.success ? result.models : []);
     if (result.success) {
-      setShowManualInput(false);
       onReportNotice(createSuccessNotice(t('config.fetchModelsSuccess', { count: String(result.models.length) }), 'fetch_models'));
       return;
     }
-    setShowManualInput(true);
     onReportNotice(createErrorNotice(t('config.fetchModelsFailed', { error: result.error || t('common.error') }), 'fetch_models'));
   };
 
@@ -229,7 +236,7 @@ export const ModelEditor = memo(function ModelEditor({
       <div className="config-header">
         <div className="config-page-title-block">
           <div className="config-page-title-row">
-            <button type="button" onClick={onCancel} className="btn-icon config-back-button" title={t('common.cancel')}>
+            <button type="button" onClick={onCancel} disabled={isSaving} className="btn-icon config-back-button" title={t('common.cancel')}>
               <IconArrowLeft size={24} />
             </button>
             <div className="config-page-icon">
@@ -244,6 +251,7 @@ export const ModelEditor = memo(function ModelEditor({
       </div>
 
       <div className="config-content">
+        <fieldset disabled={isSaving} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
         <div className="config-detail-shell">
         <div className="config-detail-section">
           <div className="form-section-title">{t('config.generalInfo')}</div>
@@ -272,6 +280,7 @@ export const ModelEditor = memo(function ModelEditor({
           <div className="form-group">
             <label>{t('config.provider')}</label>
             <Select 
+              disabled={isSaving}
               value={editingModel.provider || ''}
               onChange={handleProviderChange}
               options={providerOptions}
@@ -415,7 +424,6 @@ export const ModelEditor = memo(function ModelEditor({
               <IconRefresh size={18} /> {t('config.fetchModels')}
             </button>
           </div>
-          {showManualInput && (
             <div className="editor-inline-row editor-inline-row-top">
               <input
                 className="form-control editor-inline-grow"
@@ -437,9 +445,8 @@ export const ModelEditor = memo(function ModelEditor({
                 {t('config.addModelId')}
               </button>
             </div>
-          )}
           <div className="form-help">{t('config.modelIdHelp')}</div>
-          {showManualInput && <div className="form-help">{t('config.manualModelIdHelp')}</div>}
+          <div className="form-help">{t('config.manualModelIdHelp')}</div>
           <details className="form-group" data-model-context-limits>
             <summary>{t('config.contextLimits')}</summary>
             <p className="form-help">{t('config.contextLimitsHelp')}</p>
@@ -458,12 +465,13 @@ export const ModelEditor = memo(function ModelEditor({
         </div>
 
         </div>
+        </fieldset>
       </div>
 
       <div className="config-detail-footer">
         <div className="form-actions config-detail-actions">
-          <button type="button" className="btn btn-secondary" onClick={onCancel}>{t('common.cancel')}</button>
-          <button type="button" className="btn btn-primary" onClick={onSave}>{t('common.save')}</button>
+          <button type="button" className="btn btn-secondary" disabled={isSaving} onClick={onCancel}>{t('common.cancel')}</button>
+          <button type="button" className="btn btn-primary" disabled={isSaving || editingModel.provider === 'anthropic'} onClick={onSave}>{t(isSaving ? 'common.saving' : 'common.save')}</button>
         </div>
       </div>
     </>

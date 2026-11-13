@@ -38,6 +38,10 @@ export function installWorkbenchPreview() {
         const run = runs.get(getSession().id);
         return { rounds: run ? [{ run, items: getSession().messages.map((message,index) => ({ id: `${run.id}:preview:${index}`, runId: run.id, sequence: index, kind: message.role === 'user' ? 'user' : run.status === 'completed' && index === getSession().messages.length - 1 ? 'final' : 'commentary', content: message.content || '', status: 'completed' })) }] : [] };
       }
+      if (channel === KAIRO_INVOKE.chatConversationNavigation) {
+        const messages = getSession().messages;
+        return { entries: run ? [{ runId: run.id, cursor: 1, status: run.status, question: messages.find(message => message.role === 'user')?.content?.slice(0,160) || '', answer: messages.filter(message => message.role === 'assistant').slice(-1)[0]?.content?.slice(0,240) || '' }] : [] };
+      }
       if (channel === KAIRO_INVOKE.chatConversationDetails) return {};
       if (channel === KAIRO_INVOKE.chatQuerySessions) {
         const query = (args[0] || {}) as import('../shared/contracts').SessionListQuery;

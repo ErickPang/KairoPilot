@@ -1,5 +1,5 @@
 import type { DragEvent } from 'react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { KAIRO_INVOKE } from '../../shared/ipc';
 import { IconChevronDown, IconFolder, IconRefresh, IconSearch, IconX } from './Icons';
 import { useTranslation } from '../hooks/useTranslation';
@@ -36,6 +36,7 @@ function buildInitialTree(rootPath: string): TreeNode {
 
 async function loadChildren(nodePath: string): Promise<FileEntry[]> {
   const result = await window.kairo.invoke(KAIRO_INVOKE.systemListDirectory, nodePath);
+  if (result && typeof result === 'object' && 'error' in result && typeof result.error === 'string' && result.error) throw new Error(result.error);
   if (result && typeof result === 'object' && 'children' in result) {
     return (result as { children: FileEntry[] }).children;
   }
@@ -195,9 +196,12 @@ export function FileBrowser({
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [loadingRoot, setLoadingRoot] = useState(false);
   const [loadingPaths, setLoadingPaths] = useState<Set<string>>(new Set());
+  const requestVersion = useRef(0);
 
   const loadRoot = useCallback(async () => {
-    if (!rootPath) return;
+    const version = ++requestVersion.current;
+    setLoadingPaths(new Set());
+    if (!rootPath) { setRoot(null); setError(null); setLoadingRoot(false); return; }
     setLoadingRoot(true);
     setError(null);
     setSelectedPath(null);
@@ -205,6 +209,7 @@ export function FileBrowser({
     setRoot(rootNode);
     try {
       const entries = await loadChildren(rootPath);
+      if (version !== requestVersion.current) return;
       setRoot({
         ...rootNode,
         children: entries.map(toTreeNode),
@@ -212,14 +217,15 @@ export function FileBrowser({
         expanded: true
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load');
+      if (version === requestVersion.current) setError(err instanceof Error ? err.message : 'Failed to load');
     } finally {
-      setLoadingRoot(false);
+      if (version === requestVersion.current) setLoadingRoot(false);
     }
   }, [rootPath]);
 
   useEffect(() => {
     void loadRoot();
+    return () => { requestVersion.current += 1; };
   }, [loadRoot]);
 
   const handleToggle = useCallback(async (node: TreeNode) => {
@@ -232,9 +238,11 @@ export function FileBrowser({
       return;
     }
 
+    const version = requestVersion.current;
     setLoadingPaths((prev) => new Set(prev).add(node.path));
     try {
       const entries = await loadChildren(node.path);
+      if (version !== requestVersion.current) return;
       setRoot((prev) => (
         prev
           ? updateTreeNode(prev, node.path, (current) => ({
@@ -246,9 +254,9 @@ export function FileBrowser({
           : prev
       ));
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load');
+      if (version === requestVersion.current) setError(err instanceof Error ? err.message : 'Failed to load');
     } finally {
-      setLoadingPaths((prev) => {
+      if (version === requestVersion.current) setLoadingPaths((prev) => {
         const next = new Set(prev);
         next.delete(node.path);
         return next;

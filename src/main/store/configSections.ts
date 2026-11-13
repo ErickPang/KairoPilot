@@ -5,6 +5,7 @@ import type {
 } from '../../shared/contracts';
 import { DEFAULT_CONFIG } from './configDefaults';
 import { normalizeWebSearchConfig } from './configWebSearchUtils';
+import { prepareConfigSecret } from './configSecrets';
 import {
   readKairoPilotConfig,
   redactWebSearchConfig,
@@ -35,7 +36,8 @@ export function saveAppearanceConfig(appearance: AppearanceConfig) {
   saveKairoPilotConfig(config);
 }
 
-export function saveWebSearchConfig(webSearch: WebSearchConfig) {
+export async function saveWebSearchConfig(webSearch: WebSearchConfig) {
+  await prepareConfigSecret(webSearch.providers?.tavily?.apiKey);
   const config = readKairoPilotConfig();
   const normalizedWebSearch = normalizeWebSearchConfig(webSearch);
   if (!normalizedWebSearch.providers.tavily.apiKey.trim() && config.webSearch.providers.tavily.apiKey.trim()) {

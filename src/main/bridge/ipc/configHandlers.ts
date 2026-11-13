@@ -85,7 +85,7 @@ function registerConfigHandlers() {
 
   ipcMain.handle(KAIRO_INVOKE.configSaveModel, async (_, model) => {
     const payload = parseIpcInput(ModelConfigInputSchema, model, 'model config');
-    saveModelAndRefreshAgents(payload);
+    await saveModelAndRefreshAgents(payload);
     return ipcSuccess();
   });
 
@@ -97,7 +97,7 @@ function registerConfigHandlers() {
 
   ipcMain.handle(KAIRO_INVOKE.configSaveWebSearch, async (_, webSearch) => {
     const payload = parseIpcInput(WebSearchConfigInputSchema, webSearch, 'web search config');
-    saveWebSearchConfig(payload);
+    await saveWebSearchConfig(payload);
     return ipcSuccess();
   });
 

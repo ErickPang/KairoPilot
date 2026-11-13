@@ -1,4 +1,4 @@
-import { memo, useState, useEffect, useCallback } from 'react';
+import { memo, useState, useEffect, useCallback, useRef } from 'react';
 import { ModelConfig, WorkbenchConfig,WorkbenchSettingsInput, FetchModelsResult, ProviderCapabilitySnapshot, AppNotice } from '../types';
 import { useTranslation } from '../hooks/useTranslation';
 import { ModelList } from './config/ModelList';
@@ -6,7 +6,7 @@ import { WorkbenchSettings } from './config/WorkbenchSettings';
 import { ModelEditor } from './config/ModelEditor';
 import { GeneralSettings } from './config/GeneralSettings';
 import { IconCpu, IconPlus, IconSettings } from './Icons';
-import { createErrorNotice } from '../hooks/errorUtils';
+import { createErrorNotice, getErrorMessage } from '../hooks/errorUtils';
 
 interface ConfigPanelProps {
   models: ModelConfig[];
@@ -14,11 +14,10 @@ interface ConfigPanelProps {
   onSaveWorkbench:(value:WorkbenchSettingsInput)=>Promise<void>;
   onClearNotice: () => void;
   onReportNotice: (notice: AppNotice) => void;
-  onSaveModel: (model: ModelConfig) => void;
+  onSaveModel: (model: ModelConfig) => Promise<boolean>;
   onDeleteModel: (id: string) => void;
   onDescribeProvider: (config: ModelConfig) => Promise<ProviderCapabilitySnapshot | null>;
   onFetchModels: (config: ModelConfig) => Promise<FetchModelsResult>;
-  availableModels: string[];
   activeSection?: string;
 }
 
@@ -32,15 +31,17 @@ const EmptyModelConfig: ModelConfig = {
   availableModels: []
 };
 
-export const ConfigPanel = memo(function ConfigPanel({ 
+export const ConfigPanel = memo(function ConfigPanel({
   models, workbench,onSaveWorkbench,
   onClearNotice, onReportNotice,
-  onSaveModel, onDeleteModel, 
-  onDescribeProvider, onFetchModels, availableModels, activeSection 
+  onSaveModel, onDeleteModel,
+  onDescribeProvider, onFetchModels, activeSection
 }: ConfigPanelProps) {
   const [view, setView] = useState<'list' | 'edit-model'>('list');
   const [editingModel, setEditingModel] = useState<ModelConfig | null>(null);
   const [isEditingExistingModel, setIsEditingExistingModel] = useState(false);
+  const [isSavingModel, setIsSavingModel] = useState(false);
+  const savePending = useRef(false);
 
   const { t } = useTranslation();
 
@@ -54,9 +55,7 @@ export const ConfigPanel = memo(function ConfigPanel({
     setEditingModel({ ...model });
     setIsEditingExistingModel(true);
     setView('edit-model');
-    // Auto-fetch models when opening edit
-    void onFetchModels(model);
-  }, [onFetchModels]);
+  }, []);
 
   const handleCreateModel = useCallback(() => {
     setEditingModel({ ...EmptyModelConfig });
@@ -64,7 +63,8 @@ export const ConfigPanel = memo(function ConfigPanel({
     setView('edit-model');
   }, []);
 
-  const handleSaveModel = useCallback(() => {
+  const handleSaveModel = useCallback(async () => {
+    if (savePending.current) return;
     if (editingModel) {
       onClearNotice();
       const normalizedName = editingModel.name.trim();
@@ -75,6 +75,10 @@ export const ConfigPanel = memo(function ConfigPanel({
       }
       if (!editingModel.provider) {
         onReportNotice(createErrorNotice(t('config.validation.provider'), 'model_validation'));
+        return;
+      }
+      if (editingModel.provider === 'anthropic') {
+        onReportNotice(createErrorNotice(t('config.providerAnthropicHelp'), 'model_validation'));
         return;
       }
       const canReuseStoredApiKey = isEditingExistingModel
@@ -89,9 +93,20 @@ export const ConfigPanel = memo(function ConfigPanel({
         onReportNotice(createErrorNotice(t('config.validation.modelId'), 'model_validation'));
         return;
       }
-      onSaveModel({ ...editingModel, id: normalizedName, name: normalizedName, apiKey: normalizedApiKey });
-      setView('list');
-      setEditingModel(null);
+      savePending.current = true;
+      setIsSavingModel(true);
+      try {
+        const saved = await onSaveModel({ ...editingModel, id: normalizedName, name: normalizedName, apiKey: normalizedApiKey });
+        if (saved) {
+          setView('list');
+          setEditingModel(null);
+        }
+      } catch (error) {
+        onReportNotice(createErrorNotice(t('app.error.saveModel', { error: getErrorMessage(error) }), 'save_model'));
+      } finally {
+        savePending.current = false;
+        setIsSavingModel(false);
+      }
     }
   }, [editingModel, isEditingExistingModel, onClearNotice, onReportNotice, onSaveModel, t]);
 
@@ -152,7 +167,7 @@ export const ConfigPanel = memo(function ConfigPanel({
           </div>
           <div className="config-content config-content-standalone config-detail-shell">
             {(activeSection === 'model' || !activeSection) && (
-              <ModelList 
+              <ModelList
                 models={models}
                 onCreateModel={handleCreateModel}
                 onEditModel={handleEditModel}
@@ -166,23 +181,24 @@ export const ConfigPanel = memo(function ConfigPanel({
       )}
 
       {view === 'edit-model' && editingModel && (
-        <ModelEditor 
+        <ModelEditor
           editingModel={editingModel}
           setEditingModel={setEditingModel}
           isEditingExisting={isEditingExistingModel}
-          availableModels={availableModels}
+          isSaving={isSavingModel}
           onClearNotice={onClearNotice}
           onReportNotice={onReportNotice}
           onDescribeProvider={onDescribeProvider}
           onFetchModels={onFetchModels}
           onSave={handleSaveModel}
           onCancel={() => {
+            if (savePending.current) return;
             setView('list');
             setEditingModel(null);
           }}
         />
       )}
-      
+
 
     </div>
   );

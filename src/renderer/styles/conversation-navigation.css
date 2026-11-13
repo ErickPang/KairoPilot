@@ -1,0 +1,21 @@
+.conversation-viewport { position: relative; display: flex; flex: 1; min-height: 0; min-width: 0; }
+.conversation-viewport > .messages-container { min-height: 0; width: 100%; }
+.conversation-round { flex-shrink: 0; min-width: 0; }
+:root[data-theme] .workbench-app .conversation-viewport:has(.conversation-navigation) > .messages-container { padding-left: clamp(52px, 5vw, 72px); }
+:root[data-theme] .workbench-app .chat-interface.is-empty-session .conversation-viewport { flex: 0 1 auto; }
+.conversation-navigation { position: absolute; left: 6px; top: 50%; transform: translateY(-50%); width: 36px; max-height: calc(100% - 24px); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; z-index: 3; padding: 4px 0; }
+.conversation-navigation::-webkit-scrollbar { display: none; }
+:root[data-theme] .workbench-app .conversation-navigation button { display: flex; align-items: center; justify-content: flex-start; width: 36px; min-height: 18px; height: 18px; padding: 7px 5px; margin: 0; border: 0; border-radius: 3px; background: transparent; box-shadow: none; cursor: pointer; color: var(--muted-fg); }
+.conversation-navigation-tick span { display: block; height: 2px; width: 10px; background: var(--border-muted); transition: width 140ms ease, background 140ms ease; }
+.conversation-navigation-tick[aria-current] span { width: 20px; background: var(--foreground); }
+.conversation-navigation-tick:is(:hover, :focus-visible, .is-previewed) span { width: 26px; background: var(--foreground); }
+:root[data-theme] .workbench-app .conversation-navigation .conversation-navigation-more { padding-block: 0; justify-content: center; height: 24px; font-size: 16px; }
+:root[data-theme] .workbench-app .conversation-navigation .conversation-navigation-more:hover { background: var(--surface-muted); }
+.conversation-navigation-preview { position: absolute; left: 48px; z-index: 10; width: min(420px, calc(100% - 64px)); padding: 14px 16px; border: 1px solid var(--border); border-radius: 16px; background: var(--surface-panel); box-shadow: var(--shadow-floating); pointer-events: none; overflow-wrap: anywhere; }
+.conversation-navigation-preview strong { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 1; overflow: hidden; font-size: 14px; font-weight: 600; line-height: 1.6; color: var(--foreground); }
+.conversation-navigation-preview p { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; margin: 4px 0 0; font-size: 13px; line-height: 1.7; color: var(--muted-fg); }
+.conversation-round.is-navigation-target .message.user .message-content { animation: conversation-target 1.6s ease-out; }
+@keyframes conversation-target { from { outline: 2px solid var(--border-strong); outline-offset: 3px; } to { outline: 2px solid transparent; outline-offset: 6px; } }
+@media (prefers-reduced-motion: reduce) { .conversation-navigation-tick span { transition: none; } .conversation-round.is-navigation-target .message.user .message-content { animation: none; outline: 2px solid var(--border-strong); } }
+
+:root[data-theme] .workbench-app .conversation-navigation button:focus-visible { outline-offset: -2px; }

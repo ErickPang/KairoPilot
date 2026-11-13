@@ -215,7 +215,7 @@ export function getWorkspaceAttachmentUploadsRoot(workspace: string) {
   return path.join(path.resolve(workspace), '.kairopilot', 'uploads');
 }
 
-export async function cleanupOldAttachmentFiles(workspace: string, maxAgeMs = DEFAULT_UPLOAD_RETENTION_MS) {
+export async function cleanupOldAttachmentFiles(workspace: string, isReferenced: (storedPath: string) => boolean, maxAgeMs = DEFAULT_UPLOAD_RETENTION_MS) {
   const uploadsRoot = getWorkspaceAttachmentUploadsRoot(workspace);
   const cutoff = Date.now() - maxAgeMs;
   let removedFiles = 0;
@@ -248,7 +248,7 @@ export async function cleanupOldAttachmentFiles(workspace: string, maxAgeMs = DE
 
       try {
         const stats = await fs.stat(entryPath);
-        if (stats.mtimeMs < cutoff) {
+        if (stats.mtimeMs < cutoff && !isReferenced(entryPath)) {
           await fs.unlink(entryPath);
           removedFiles += 1;
         }
@@ -270,7 +270,7 @@ type CleanupState = {
 
 const cleanupStates = new Map<string, CleanupState>();
 
-export function scheduleAttachmentCleanup(workspace: string, maxAgeMs = DEFAULT_UPLOAD_RETENTION_MS) {
+export function scheduleAttachmentCleanup(workspace: string, isReferenced: (storedPath: string) => boolean, maxAgeMs = DEFAULT_UPLOAD_RETENTION_MS) {
   const normalizedWorkspace = path.resolve(workspace);
   const existing = cleanupStates.get(normalizedWorkspace);
   const now = Date.now();
@@ -288,7 +288,7 @@ export function scheduleAttachmentCleanup(workspace: string, maxAgeMs = DEFAULT_
     state.timer = undefined;
     state.running = true;
     state.lastStartedAt = Date.now();
-    void cleanupOldAttachmentFiles(normalizedWorkspace, maxAgeMs)
+    void cleanupOldAttachmentFiles(normalizedWorkspace, isReferenced, maxAgeMs)
       .catch((error) => {
         console.warn(`[Attachments] Failed to cleanup uploads for ${normalizedWorkspace}:`, error);
       })

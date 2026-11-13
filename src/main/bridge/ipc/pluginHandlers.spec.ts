@@ -33,6 +33,9 @@ vi.mock('../../core/plugins/manager', () => ({
 vi.mock('../../store/audit', () => ({
   addAuditLog: auditMocks.addAuditLog
 }));
+vi.mock('../../store/taskPages', () => ({ getActiveSessionSummary: () => null }));
+vi.mock('../../services/projectService', () => ({ permissionGuardForSession: vi.fn() }));
+vi.mock('../../services/workbenchExecution', () => ({ assertTaskMutable: vi.fn() }));
 
 import { KAIRO_INVOKE } from '../../../shared/ipc';
 import { registerPluginHandlers } from './pluginHandlers';

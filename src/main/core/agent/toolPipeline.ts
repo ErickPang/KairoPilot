@@ -356,6 +356,7 @@ export function checkPermission(
 ): PermissionDecision {
   const args = { ...rawArgs };
   const executionProfile = permissionGuard.getExecutionProfile();
+  if (toolName.startsWith('plugin_') && (executionProfile === 'chat_only' || executionProfile === 'read_only_workspace')) return { kind: 'deny', args, error: 'External MCP tools are unavailable in chat-only and read-only tasks.' };
   const isWriteTool = toolName === 'write_file' || toolName === 'delete_file' || toolName === 'edit_file';
   const isCommandTool = toolName === 'execute_command' || toolName === 'run_skill_script';
   if ((toolName === 'grep' || toolName === 'glob') && !args.path) args.path = permissionGuard.getDefaultWorkspacePath();
@@ -574,6 +575,9 @@ export function getToolMetadataPolicyTags(tool?: ToolDefinition): string[] {
   }
 
   const tags = ['tool_category:plugin'];
+  if (tool.metadata?.pluginConnectionId) tags.push(`plugin_connection:${normalizePolicyTagValue(tool.metadata.pluginConnectionId)}`);
+  if (tool.metadata?.pluginPackageHash) tags.push(`plugin_package:${tool.metadata.pluginPackageHash}`);
+  if (tool.metadata?.pluginCatalogHash) tags.push(`plugin_catalog:${tool.metadata.pluginCatalogHash}`);
   const pluginId = normalizePolicyTagValue(tool.metadata.pluginId || '');
   const pluginScope = normalizePolicyTagValue(tool.metadata.pluginScope || '');
   const riskLevel = tool.metadata.riskLevel;

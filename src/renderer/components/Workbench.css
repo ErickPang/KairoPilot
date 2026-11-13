@@ -1,6 +1,7 @@
 @import '../styles/workbench-tokens.css';
 @import '../styles/workbench-management.css';
 @import '../styles/dialogs.css';
+@import '../styles/conversation-navigation.css';
 
 #root:has(.workbench-app) { width: 100%; min-width: 0; }
 :root[data-theme] .workbench-app {

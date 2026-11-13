@@ -1,4 +1,5 @@
 import {CapabilityListItem} from './CapabilityListItem';
+import {PluginConnectionsPanel} from './PluginConnectionsPanel';
 import {CirclePause} from 'lucide-react';
 import './CapabilityLibrary.css';
 import { WorkbenchDialog } from './WorkbenchDialog';
@@ -211,7 +212,7 @@ export const PluginStorePanel = memo(function PluginStorePanel({ onClearNotice, 
     onClearNotice();
     try {
       const selectedFile = await window.kairo.invoke(KAIRO_INVOKE.systemSelectFile, {
-        filters: [{ name: 'ZIP', extensions: ['zip'] }]
+        filters: [{ name: 'Plugin package', extensions: ['zip', 'json'] }]
       });
       if (typeof selectedFile !== 'string' || !selectedFile.trim()) {
         return;
@@ -586,16 +587,17 @@ function InstalledPluginItem({
 }) {
   const { t } = useTranslation();
   const enabled = plugin.enabled !== false;
+  const blocked = !isNative && plugin.runtimeStatus === 'legacy_blocked';
 
   const [expanded,setExpanded]=useState(false);
   const busy=isWorking||isToggling||isUpdating||isRollingBack;
   return <>
-    <CapabilityListItem id={plugin.id} kind="plugin" name={plugin.name} description={plugin.description} icon={<IconPlugin size={23}/>} status={enabled?<IconCheck size={20}/>:<CirclePause size={20}/>} statusLabel={t(enabled?'plugins.enabled':'plugins.disabled')} label={t('plugins.details')} onOpen={()=>setExpanded(true)}/>
+    <CapabilityListItem id={plugin.id} kind="plugin" name={plugin.name} description={plugin.description} icon={<IconPlugin size={23}/>} status={enabled&&!blocked?<IconCheck size={20}/>:<CirclePause size={20}/>} statusLabel={t(blocked?'plugins.legacyBlocked':enabled?'plugins.enabled':'plugins.disabled')} label={t('plugins.details')} onOpen={()=>setExpanded(true)}/>
     {expanded&&<WorkbenchDialog title={plugin.name} kind="plugin-details" onClose={()=>setExpanded(false)} busy={busy} actions={<>
       {!isNative&&<>
         <button type="button" className="btn btn-secondary" disabled={busy} onClick={()=>{setExpanded(false);onUpdate();}}>{t('plugins.update')}</button>
         {plugin.previousVersion&&<button type="button" className="btn btn-secondary" disabled={busy} onClick={onRollback}>{t('plugins.rollback')}</button>}
-        <button type="button" className="btn btn-secondary" disabled={busy} onClick={onToggleEnabled}>{t(enabled?'plugins.disable':'plugins.enable')}</button>
+        <button type="button" className="btn btn-secondary" disabled={busy || blocked && !enabled} onClick={onToggleEnabled}>{t(enabled?'plugins.disable':'plugins.enable')}</button>
         <button type="button" className="btn btn-secondary btn-danger" disabled={busy} onClick={async()=>{
           setExpanded(false);
           const confirmed=await onRequestConfirmation({title:t('common.confirm'),message:`${t('common.confirm')} ${t('plugins.uninstall')}?`,confirmLabel:t('plugins.uninstall'),variant:'danger'});
@@ -607,6 +609,8 @@ function InstalledPluginItem({
       <div className="capability-detail-meta"><span>{scopeLabel}</span><code>{plugin.id}</code><span>v{plugin.version}</span><span>{t('plugins.by',{author:plugin.author})}</span></div>
       <p className="plugin-card-description">{plugin.description}</p>
       <PluginCapabilitySummary plugin={plugin}/>
+      {blocked&&<p role="alert">{t('plugins.legacyBlocked')}</p>}
+      {plugin.packageVersion===1&&<PluginConnectionsPanel plugin={plugin} confirm={onRequestConfirmation}/>}
       <p className="plugin-card-meta">{t('plugins.installedAt')}: {new Date(plugin.installedAt).toLocaleString()}</p>
       <p className="plugin-card-meta">{t(enabled?'plugins.enabled':'plugins.disabled')}</p>
     </WorkbenchDialog>}

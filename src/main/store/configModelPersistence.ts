@@ -2,7 +2,8 @@ import type { ModelConfig, ProviderConfig } from '../../shared/contracts';
 import { prepareConfigSecretForStorage } from './configSecrets';
 
 export function getProviderDefaultModelId(provider: ProviderConfig): string {
-  return provider.model[0]?.id || 'gpt-4o';
+  if (!provider.model.length) throw new Error('Model list is required.');
+  return provider.model[0].id;
 }
 
 export function buildAgentModel(providerKey: string, modelId: string): string {

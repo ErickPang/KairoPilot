@@ -1,5 +1,6 @@
 import {
   registerPreparedAttachments,
+  isStoredAttachmentReferenced,
   getSessionById
 } from '../store/chat';
 import {
@@ -45,7 +46,7 @@ export async function prepareAttachmentsForActiveAgent(params: {
     files: params.files
   });
   registerPreparedAttachments(session.id, attachments);
-  const cleanup = scheduleAttachmentCleanup(agent.workspace);
+  const cleanup = scheduleAttachmentCleanup(agent.workspace, isStoredAttachmentReferenced);
 
   addAuditLog({
     tool: 'prepare_attachments',

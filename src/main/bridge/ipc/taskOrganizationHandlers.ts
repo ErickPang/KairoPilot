@@ -1,4 +1,4 @@
-import { getConversationPage, getConversationDetails } from '../../store/conversation';
+import { getConversationPage, getConversationDetails, getConversationNavigation } from '../../store/conversation';
 import { updateTaskSettings } from '../../services/taskSettingsService';
 import {IntelligenceBudgetSchema} from '../../../shared/intelligencePolicy';
 import { getActiveSessionSummary, getSessionMessagePage, querySessionPage } from '../../store/taskPages';
@@ -13,8 +13,13 @@ const draft = session.extend({ revision: z.number().int().nonnegative(), data: z
 
 export function registerTaskOrganizationHandlers() {
   ipcMain.handle(KAIRO_INVOKE.chatConversation, (_, value) => {
+    const query = session.extend({ before: z.number().int().positive().optional(), aroundRunId: id.optional() }).strict()
+      .refine(input => input.before === undefined || input.aroundRunId === undefined).parse(value);
+    return getConversationPage(query.sessionId, query.before, query.aroundRunId);
+  });
+  ipcMain.handle(KAIRO_INVOKE.chatConversationNavigation, (_, value) => {
     const query = session.extend({ before: z.number().int().positive().optional() }).strict().parse(value);
-    return getConversationPage(query.sessionId, query.before);
+    return getConversationNavigation(query.sessionId, query.before);
   });
   ipcMain.handle(KAIRO_INVOKE.chatConversationDetails, (_, value) => {
     const query = session.extend({ itemId: id }).strict().parse(value);

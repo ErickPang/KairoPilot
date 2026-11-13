@@ -42,6 +42,9 @@ export interface ToolDefinition {
     pluginName?: string;
     pluginScope?: string;
     originalToolName?: string;
+    pluginConnectionId?: string;
+    pluginPackageHash?: string;
+    pluginCatalogHash?: string;
     riskLevel?: 'low' | 'medium' | 'high' | 'critical';
   };
 }

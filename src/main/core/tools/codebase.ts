@@ -70,19 +70,8 @@ function matchesFileType(filePath: string, type: string): boolean {
 }
 
 function matchesGlob(filePath: string, glob: string): boolean {
-  // Convert glob to regex
-  const regexStr = glob
-    .replace(/\./g, '\\.')
-    .replace(/\*\*\//g, '<<<GLOBSTAR>>>')
-    .replace(/\*/g, '[^/]*')
-    .replace(/<<<GLOBSTAR>>>/g, '.*')
-    .replace(/\?/g, '[^/]')
-    .replace(/\[!/g, '[^');
-  try {
-    return new RegExp(`^${regexStr}$`).test(filePath);
-  } catch {
-    return true;
-  }
+  const normalizedPath = filePath.split(path.sep).join('/');
+  return path.posix.matchesGlob(glob.includes('/') ? normalizedPath : path.posix.basename(normalizedPath), glob);
 }
 
 function isBinaryFile(ext: string): boolean {
@@ -92,7 +81,7 @@ function isBinaryFile(ext: string): boolean {
 // Recursively collect files, respecting binary/text and glob/type filters
 async function collectFiles(
   dir: string,
-  options: { glob?: string; type?: string; maxFiles?: number },
+  options: { glob?: string; type?: string; maxFiles?: number; includeBinary?: boolean },
   relativeRoot: string = dir,
   results: string[] = [],
   canRead?: (target: string) => boolean
@@ -103,7 +92,7 @@ async function collectFiles(
     const stat = await fs.stat(dir);
     if (stat.isFile()) {
       const relativePath = path.relative(relativeRoot, dir) || path.basename(dir);
-      if (!isBinaryFile(path.extname(dir))
+      if ((options.includeBinary || !isBinaryFile(path.extname(dir)))
         && (!options.glob || matchesGlob(relativePath, options.glob))
         && (!options.type || matchesFileType(dir, options.type))) results.push(dir);
       return results;
@@ -120,7 +109,7 @@ async function collectFiles(
     if (entry.isDirectory()) {
       await collectFiles(fullPath, options, relativeRoot, results, canRead);
     } else if (entry.isFile()) {
-      if (isBinaryFile(path.extname(entry.name))) continue;
+      if (!options.includeBinary && isBinaryFile(path.extname(entry.name))) continue;
       const relPath = path.relative(relativeRoot, fullPath);
       if (options.glob && !matchesGlob(relPath, options.glob)) continue;
       if (options.type && !matchesFileType(fullPath, options.type)) continue;
@@ -149,6 +138,9 @@ async function nativeGrep(
     caseInsensitive?: boolean;
     multiline?: boolean;
     headLimit?: number;
+    contextBefore?: number;
+    contextAfter?: number;
+    context?: number;
     canRead?: (target: string) => boolean;
   }
 ): Promise<GrepMatch[]> {
@@ -186,6 +178,7 @@ async function nativeGrep(
     }
 
     const lines = content.split('\n');
+    const matchedLines = new Set<number>();
     if (options.multiline) {
       const lineStarts: number[] = [];
       let offset = 0;
@@ -194,26 +187,32 @@ async function nativeGrep(
         offset += line.length + 1;
       }
       let firstLine = 0;
-      let lastEmittedLine = -1;
       // matchAll advances past zero-length matches, including Unicode characters.
       for (const match of content.matchAll(regex)) {
         while (firstLine + 1 < lines.length && lineStarts[firstLine + 1] <= match.index) firstLine++;
         const end = match.index + Math.max(0, match[0].length - 1);
         for (let line = firstLine; line < lines.length && lineStarts[line] <= end; line++) {
-          if (line <= lastEmittedLine) continue;
-          results.push({ file, line: line + 1, content: lines[line] });
-          lastEmittedLine = line;
-          if (results.length >= limit) break;
+          matchedLines.add(line);
+          if (matchedLines.size >= limit) break;
         }
+        if (matchedLines.size >= limit) break;
+      }
+    } else {
+      for (let i = 0; i < lines.length; i++) {
+        if (regex.test(lines[i])) matchedLines.add(i);
+        if (matchedLines.size >= limit) break;
+      }
+    }
+    const before = options.contextBefore ?? options.context ?? 0;
+    const after = options.contextAfter ?? options.context ?? 0;
+    let lastEmittedLine = -1;
+    for (const line of matchedLines) {
+      for (let i = Math.max(0, line - before, lastEmittedLine + 1); i <= Math.min(lines.length - 1, line + after); i++) {
+        results.push({ file, line: i + 1, content: lines[i] });
+        lastEmittedLine = i;
         if (results.length >= limit) break;
       }
-      continue;
-    }
-    for (let i = 0; i < lines.length; i++) {
       if (results.length >= limit) break;
-      if (regex.test(lines[i])) {
-        results.push({ file, line: i + 1, content: lines[i] });
-      }
     }
   }
 
@@ -304,9 +303,9 @@ async function grepExecute(rawArgs: Record<string, unknown>, canRead?: (target: 
     caseInsensitive: args['-i'] ?? false,
     multiline: args.multiline ?? false,
     headLimit: effectiveLimit,
-    contextBefore: args['-B'],
-    contextAfter: args['-A'],
-    context: args['-C'],
+    contextBefore: args.output_mode === 'content' ? args['-B'] : undefined,
+    contextAfter: args.output_mode === 'content' ? args['-A'] : undefined,
+    context: args.output_mode === 'content' ? args['-C'] : undefined,
     canRead,
   };
 
@@ -357,9 +356,9 @@ async function grepExecute(rawArgs: Record<string, unknown>, canRead?: (target: 
 export const GrepTool: ToolDefinition = {
   name: 'grep',
   description:
-    'A powerful search tool built on ripgrep. Search specific text (in the pattern parameter) in a specific file or directory.\n\n' +
+    'Search specific text (in the pattern parameter) in a specific file or directory. Runtime searches check read permission for every file.\n\n' +
     'Usage:\n' +
-    '- Prefer grep for exact symbol/string searches. Whenever possible, use this instead of terminal grep/rg. This tool is faster and respects .gitignore.\n' +
+    '- Prefer grep for exact symbol/string searches. Runtime traversal skips hidden entries and node_modules, but does not apply .gitignore rules.\n' +
     '- Supports full regex syntax, e.g. "log.*Error", "function\\s+\\w+".\n' +
     '- Supports file type filtering, context lines.\n' +
     '- CRITICAL: directory MUST be an absolute path, relative paths are not accepted.\n' +
@@ -394,6 +393,7 @@ async function globExecute(rawArgs: Record<string, unknown>, canRead?: (target: 
   const files = await collectFiles(searchPath, {
     glob: args.pattern,
     maxFiles: 5000,
+    includeBinary: true,
   }, searchPath, [], canRead);
 
   // Sort by modification time (newest first)

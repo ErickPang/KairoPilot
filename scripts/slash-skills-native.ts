@@ -65,7 +65,7 @@ async function verifySlashSkillFlow(
     assert(await wait(`document.querySelectorAll('[data-skill-choice]').length===7`), 'slash: short-window filtering retains all matching skills');
     for (let index=0;index<6;index++) {
       await key('ArrowDown');
-      assert(await wait(`document.querySelector('[data-skill-choice="picker-demo-${index+1}"]').getAttribute('aria-selected')==='true'`), `slash: short-window Down selects skill ${index+2}`);
+      assert(await wait(`document.querySelector('[data-skill-choice="picker-demo-${index+1}"]')?.getAttribute('aria-selected')==='true'`), `slash: short-window Down selects skill ${index+2}`);
     }
     assert(await wait(`(()=>{const list=document.querySelector('.skill-completion-options');const active=list.querySelector('[aria-selected="true"]');const box=list.getBoundingClientRect(),row=active.getBoundingClientRect();return active.dataset.skillChoice==='picker-demo-6' && list.scrollTop>0 && row.top>=box.top-1 && row.bottom<=box.bottom+1;})()`), 'slash: last skill scrolls fully into view in a short window');
     fs.writeFileSync(path.join(output, 'skills-slash-short.png'), (await window.webContents.capturePage()).toPNG());
@@ -75,19 +75,19 @@ async function verifySlashSkillFlow(
   assert(await wait(layoutFits), 'slash: restoring window size recomputes the catalog viewport');
   await type('/picker-demo');
   await wait(`document.querySelectorAll('[data-skill-choice]').length===7`);
-  assert(await wait(`document.querySelector('[data-skill-choice="picker-demo-0"]').getAttribute('aria-selected')==='true'`), 'slash: filtering starts navigation at the first skill');
+  assert(await wait(`document.querySelector('[data-skill-choice="picker-demo-0"]')?.getAttribute('aria-selected')==='true'`), 'slash: filtering starts navigation at the first skill');
   for(let index=0;index<5;index++){
     await key('ArrowDown');
-    assert(await wait(`document.querySelector('[data-skill-choice="picker-demo-${index+1}"]').getAttribute('aria-selected')==='true'`), `slash: consecutive Down selects skill ${index+2}`);
+    assert(await wait(`document.querySelector('[data-skill-choice="picker-demo-${index+1}"]')?.getAttribute('aria-selected')==='true'`), `slash: consecutive Down selects skill ${index+2}`);
   }
   assert(await wait(`(()=>{const list=document.querySelector('.skill-completion-options');const active=list.querySelector('[aria-selected="true"]');const box=list.getBoundingClientRect(),row=active.getBoundingClientRect();return active.dataset.skillChoice==='picker-demo-5' && list.scrollTop>0 && row.top>=box.top && row.bottom<=box.bottom+1;})()`), 'slash: Down reveals the sixth skill within the menu');
   for(let index=0;index<6;index++){
     await key('ArrowUp');
-    await wait(`document.querySelector('[data-skill-choice="picker-demo-${(4-index+7)%7}"]').getAttribute('aria-selected')==='true'`);
+    await wait(`document.querySelector('[data-skill-choice="picker-demo-${(4-index+7)%7}"]')?.getAttribute('aria-selected')==='true'`);
   }
-  assert(await wait(`document.querySelector('[data-skill-choice="picker-demo-6"]').getAttribute('aria-selected')==='true'`), 'slash: Up wraps to the last skill');
+  assert(await wait(`document.querySelector('[data-skill-choice="picker-demo-6"]')?.getAttribute('aria-selected')==='true'`), 'slash: Up wraps to the last skill');
   await key('ArrowDown');
-  assert(await wait(`document.querySelector('.skill-completion-options').scrollTop===0 && document.querySelector('[data-skill-choice="picker-demo-0"]').getAttribute('aria-selected')==='true'`), 'slash: Down wraps back to the first skill and scrolls to the top');
+  assert(await wait(`document.querySelector('.skill-completion-options')?.scrollTop===0 && document.querySelector('[data-skill-choice="picker-demo-0"]')?.getAttribute('aria-selected')==='true'`), 'slash: Down wraps back to the first skill and scrolls to the top');
   const point = await js(`(()=>{const box=document.querySelector('.skill-completion-options').getBoundingClientRect();return {x:Math.round(box.left+box.width/2),y:Math.round(box.top+box.height/2)};})()`);
   window.webContents.sendInputEvent({type:'mouseWheel',...point,deltaY:-120,deltaX:0});
   assert(await wait(`document.querySelector('.skill-completion-options').scrollTop>0`), 'slash: mouse wheel scrolls the remaining skills');
@@ -201,7 +201,12 @@ export async function verifySlashSkills(...args: Parameters<typeof verifySlashSk
         const list=popup?.querySelector('.skill-completion-options');
         const rows=Array.from(list?.querySelectorAll('[role="option"]')||[]);
         return {viewport:{width:innerWidth,height:innerHeight,scale:devicePixelRatio},screen:{width:screen.width,height:screen.height},
-          query:document.querySelector('.input-textarea')?.value,popup:popup?.getBoundingClientRect().toJSON(),
+          query:document.querySelector('.input-textarea')?.value,
+          focus:document.activeElement?.className,
+          caret:document.querySelector('.input-textarea')?.selectionStart,
+          inputDisabled:document.querySelector('.input-textarea')?.disabled,
+          saveState:document.querySelector('.chat-interface')?.getAttribute('data-save-state'),
+          popup:popup?.getBoundingClientRect().toJSON(),
           anchor:popup?.parentElement.getBoundingClientRect().toJSON(),header:document.querySelector('[data-global-titlebar]')?.getBoundingClientRect().toJSON(),
           list:list?{clientHeight:list.clientHeight,scrollHeight:list.scrollHeight,scrollTop:list.scrollTop,maxHeight:getComputedStyle(list).maxHeight,available:getComputedStyle(list).getPropertyValue('--skill-menu-space'),busy:list.getAttribute('aria-busy')}:null,
           rows:rows.map(row=>({id:row.dataset.skillChoice,selected:row.getAttribute('aria-selected'),rect:row.getBoundingClientRect().toJSON()}))};

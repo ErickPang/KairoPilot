@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { AppNotice, FetchModelsResult, ModelConfig } from '../../types';
 import { IconCpu } from '../Icons';
 import { useTranslation } from '../../hooks/useTranslation';
@@ -18,6 +18,8 @@ export function OllamaManager({ editingModel, onClearNotice, onFetchModels, onRe
   const [pullProgress, setPullProgress] = useState<{status: string, completed?: number, total?: number} | null>(null);
   const [isPulling, setIsPulling] = useState(false);
   const [isStartingOllama, setIsStartingOllama] = useState(false);
+  const progressTimer = useRef<ReturnType<typeof setTimeout>>();
+  const pullVersion = useRef(0);
 
   const { t } = useTranslation();
 
@@ -43,17 +45,24 @@ export function OllamaManager({ editingModel, onClearNotice, onFetchModels, onRe
     const removeListener = window.kairo.on(KAIRO_EVENT.ollamaPullProgress, (data) => {
       setPullProgress(data);
     });
-    return () => removeListener();
+    return () => {
+      removeListener();
+      pullVersion.current += 1;
+      clearTimeout(progressTimer.current);
+    };
   }, []);
 
   const handlePullModel = async () => {
     if (!modelToPull || !editingModel) return;
+    const version = ++pullVersion.current;
+    clearTimeout(progressTimer.current);
     setIsPulling(true);
     setPullProgress({ status: 'Starting pull...' });
     
     try {
       const url = editingModel.baseUrl.replace('/v1', '');
       const res = await window.kairo.invoke(KAIRO_INVOKE.ollamaPull, { baseUrl: url, modelName: modelToPull });
+      if (version !== pullVersion.current) return;
       
       if (res.success) {
         setPullProgress({ status: 'Success! Model pulled.' });
@@ -63,12 +72,14 @@ export function OllamaManager({ editingModel, onClearNotice, onFetchModels, onRe
         setPullProgress({ status: `Error: ${res.error}` });
       }
     } catch (e) {
-      setPullProgress({ status: `Error: ${e instanceof Error ? e.message : 'Unknown error'}` });
+      if (version === pullVersion.current) setPullProgress({ status: `Error: ${e instanceof Error ? e.message : 'Unknown error'}` });
     } finally {
-      setIsPulling(false);
-      setTimeout(() => {
-        if (!isPulling) setPullProgress(null);
-      }, 5000);
+      if (version === pullVersion.current) {
+        setIsPulling(false);
+        progressTimer.current = setTimeout(() => {
+          if (version === pullVersion.current) setPullProgress(null);
+        }, 5000);
+      }
     }
   };
 

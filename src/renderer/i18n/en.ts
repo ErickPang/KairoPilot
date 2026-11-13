@@ -1,6 +1,18 @@
 export type TranslationKey = keyof typeof en;
 
 const en = {
+  'conversation.navigation': 'Conversation navigation',
+  'conversation.earlier': 'Load earlier conversation entries',
+  'conversation.retry': 'Navigation failed to load. Retry',
+  'conversation.jump': 'Jump to: {question}',
+  'conversation.attachment': 'Question with attachments or references',
+  'conversation.noAnswer': 'No text response in this round',
+  'conversation.failed': 'This round failed',
+  'conversation.cancelled': 'This round was stopped',
+
+  'common.saving': 'Saving…',
+  'config.providerAnthropicUnavailable': 'Anthropic (not supported yet)',
+  'config.providerAnthropicHelp': 'The native Anthropic API is not supported yet. For an OpenAI-compatible endpoint, select Custom Provider.',
   'approval.chooseScope': 'Choose permission scope',
   'approval.allowSession': 'Always allow in this chat',
   'approval.onceDescription': 'Allow only this pending operation',
@@ -960,7 +972,7 @@ const en = {
   'config.validation.provider': 'Please select a provider first.',
   'config.validation.apiKey': 'Please enter an API key first.',
   'config.validation.modelId': 'Please select or enter at least one model ID.',
-  'config.manualModelIdHelp': 'Unable to fetch model list. Please manually add model IDs.',
+  'config.manualModelIdHelp': 'You can add a model ID directly, including models missing from the fetched list.',
   'config.modelIdHelp': 'The specific model identifier. Click "Fetch Models" to load from provider.',
   'config.editAgent': 'Edit Agent',
   'config.newAgent': 'New Agent',
@@ -1128,6 +1140,25 @@ const en = {
   'workbench.filter.all': 'All',
   'workbench.archiveTask': 'Archive task',
   'workbench.restoreTask': 'Restore task',
+  'plugins.connections': 'MCP connections',
+  'plugins.mode.remote': 'Remote service',
+  'plugins.mode.trusted-local': 'Trusted local program (unrestricted)',
+  'plugins.mode.restricted-local': 'Restricted local program',
+  'plugins.status.connected': 'Connected, tools approved',
+  'plugins.status.disconnected': 'Disconnected',
+  'plugins.status.catalog_changed': 'Tool catalog requires review',
+  'plugins.status.unavailable': 'Unavailable in this release',
+  'plugins.connect': 'Connect / reconnect',
+  'plugins.disconnect': 'Disconnect',
+  'plugins.reviewTools': 'Review and authorize this tool catalog',
+  'plugins.connectionFailed': 'Connection failed. Check the selected task and connection policy.',
+  'plugins.connectionTask': 'Connections apply only to task: {title}',
+  'plugins.noConnectionTask': 'Select an active task first',
+  'plugins.sessionToken': 'Optional bearer token (memory only, cleared on disconnect or restart)',
+  'plugins.remoteBoundary': 'Remote service: its server-side actions are governed by the service account, not local directory rules.',
+  'plugins.localBoundary': 'Trusted local program: runs with your user permissions outside an OS sandbox. Task directory rules cannot constrain its internal operations.',
+  'plugins.restrictedUnavailable': 'Restricted local MCP is not implemented yet. This connection cannot start; there is no unrestricted fallback.',
+  'plugins.legacyBlocked': 'Legacy JavaScript plugin blocked. Convert it to a declarative package with MCP connections.',
 } as const;
 
 export default en;

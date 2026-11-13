@@ -2,7 +2,7 @@ import { app, protocol } from 'electron'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import fixPath from 'fix-path'
-import { bindAppLifecycle, bootstrapMainProcess } from './bootstrap/appBootstrap'
+import { bootstrapMainProcess } from './bootstrap/appBootstrap'
 
 app.name = 'KairoPilot'
 app.setName('KairoPilot')
@@ -45,5 +45,4 @@ const bootstrapContext = {
   devServerUrl: VITE_DEV_SERVER_URL
 }
 
-bindAppLifecycle(bootstrapContext)
 bootstrapMainProcess(bootstrapContext)

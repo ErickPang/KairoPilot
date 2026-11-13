@@ -1,4 +1,7 @@
 import Database from 'better-sqlite3';
+import {verifyModelConfiguration} from './model-config-native';
+import {verifyFileUi} from './files-ui-native';
+import {verifyPluginConnections} from './plugin-connections-native';
 import {initializeChatDatabase} from '../src/main/store/chatDb';
 import {verifyInlineApproval} from './layout-native';
 import {verifySessionApprovalRestart} from './session-approval-native';
@@ -12,13 +15,13 @@ import {verifyTaskWorkflow} from './task-workflow-native';
 import {verifyFreshStartup,quitWithExecutionCleanup,prepareAbruptExit,verifyAbruptRestart} from './execution-lifecycle-native';
 import {startApplicationConversation} from '../src/main/services/applicationExecutionLifecycle';
 import {getActiveSessionSummary} from '../src/main/store/taskPages';
-import {app,BrowserWindow} from 'electron';
+import {app,BrowserWindow,safeStorage} from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
 import {ensureAppPaths} from '../src/main/services/appRuntime';
 import {DEFAULT_CONFIG} from '../src/main/store/configDefaults';
-import {initializeKairoPilotConfig} from '../src/main/store/configRepository';
+import {initializeKairoPilotConfig,readKairoPilotConfig} from '../src/main/store/configRepository';
 import {getDb,createRun,getRunById,updateRun,getSessionById} from '../src/main/store/chat';
 import {createDefaultAgentPermissions,createDefaultPolicyConfig} from '../src/shared/contracts';
 import {setupHandlers} from '../src/main/bridge/ipc/setupHandlers';
@@ -34,7 +37,7 @@ if(!output||!process.env.KAIROPILOT_TEST_ROOT)throw new Error('Use isolated unif
 app.setName('KairoPilot');
 const paths=ensureAppPaths();
 const checks:string[]=[];
-const assert=(ok:unknown,label:string)=>{if(!ok)throw new Error(label);checks.push(label);};
+const assert=(ok:unknown,label:string)=>{if(!ok)throw new Error(label);checks.push(label);fs.writeFileSync(path.join(output,`report-progress-${stage}.json`),JSON.stringify({checkCount:checks.length,lastCheck:label}));};
 let receivedSlow=false;
 const fixture=http.createServer(async(request,response)=>{
  if(request.url?.startsWith('/search?')){fs.appendFileSync(path.join(output,'session-search-queries.jsonl'),JSON.stringify(new URL(request.url,'http://fixture').searchParams.get('q'))+'\n');response.writeHead(200,{'Content-Type':'application/json'});response.end(JSON.stringify({results:[{title:'Synthetic insurance policy',url:'https://example.invalid/policy',content:'Synthetic policy result for session approval verification.'}]}));return;}
@@ -75,7 +78,12 @@ async function run(){
  fs.writeFileSync(path.join(output,'fixture-port.txt'),String(port));
  if(stage==='1')seed(port);
  else {const configPath=path.join(paths.userDataPath,'kairopilot.json');const stored=JSON.parse(fs.readFileSync(configPath,'utf8'));stored.models.providers.fixture.baseUrl=`http://127.0.0.1:${port}/v1`;fs.writeFileSync(configPath,JSON.stringify(stored));}
- initializeKairoPilotConfig();const db=getDb();
+ await initializeKairoPilotConfig();const db=getDb();
+ assert(readKairoPilotConfig().models.providers.fixture.apiKey==='synthetic-only','async secure storage restores the configured fixture credential');
+ if(await safeStorage.isAsyncEncryptionAvailable()) {
+  const saved=JSON.parse(fs.readFileSync(path.join(paths.userDataPath,'kairopilot.json'),'utf8')).models.providers.fixture;
+  assert(saved.apiKey==='' && saved.apiKeyEncrypted?.startsWith('safe-storage:v1:'),'async secure storage keeps only ciphertext on disk');
+ }
  const previousSelection=getActiveSessionSummary(undefined)?.id;
  const freshConversation=startApplicationConversation();
  assert((db.prepare('SELECT version FROM workbench_schema').get() as {version:number}).version===7,'schema v7 is ready');
@@ -96,6 +104,9 @@ async function run(){
  const invoke=(channel:string,...args:unknown[])=>js(`window.kairo.invoke(${JSON.stringify(channel)},...${JSON.stringify(args)})`);
  const wait=(condition:string)=>js(`new Promise(resolve=>{const until=Date.now()+12000;const timer=setInterval(()=>{if(${condition}){clearInterval(timer);resolve(true);}else if(Date.now()>until){clearInterval(timer);resolve(false);}},25);})`);
  assert(await wait(`document.querySelector('.chat-input') || document.querySelector('textarea')`),'real React workbench mounts');
+ if(stage==='1')await verifyModelConfiguration(output,assert);
+ if(stage==='1')await verifyPluginConnections(output,assert);
+ if(stage==='1')await verifyFileUi(output,assert);
  await verifyFreshStartup(window,invoke,freshConversation.id,previousSelection,assert);
  if(stage==='3'){await verifyAbruptRestart(invoke,output,freshConversation.id,assert);return;}
  const before=(db.prepare('SELECT COUNT(*) AS count FROM sessions').get() as {count:number}).count;

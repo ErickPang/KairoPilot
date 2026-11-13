@@ -41,7 +41,6 @@ function App() {
     activeTab,
     actionConfirmation,
     agents,
-    availableModels,
     clearAppNotice,
     confirmationRequest,
     describeProvider,
@@ -407,7 +406,6 @@ function App() {
                   onDeleteModel={handleDeleteModel}
                   onDescribeProvider={describeProvider}
                   onFetchModels={fetchModels}
-                  availableModels={availableModels}
                   activeSection={activeConfigSection}
                 />
               </div>
